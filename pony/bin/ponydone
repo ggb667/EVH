@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -eu
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+voices_dir="$(cd "$script_dir/../assets/voices/doneWithTask" && pwd)"
+
+personality="${1:-${PERSONALITY:-}}"
+personality="$(printf '%s' "$personality" | tr '[:lower:]' '[:upper:]')"
+
+case "$personality" in
+  TIA|CELESTIA|PRINCESS|CELLY|SUNBUTT|PRINCESS_CELESTIA_SOL_INVICTUS) prefix="princess_celestia_" ;;
+  TWI|TWILIGHT|TWILIGHT_SPARKLE) prefix="twilight_sparkle_" ;;
+  DASH|DASHIE|RAINBOW|RD|RAINBOW_DASH) prefix="rainbow_dash_" ;;
+  PINKIE|PINKIE_PIE) prefix="pinkie_pie_" ;;
+  RARES|RARITY) prefix="rarity_" ;;
+  AJ|APPLEJACK) prefix="applejack_" ;;
+  SHY|FLUTTERS|FLUTTERSHY) prefix="fluttershy_" ;;
+  SPIKE) prefix="spike_" ;;
+  *) prefix="twilight_sparkle_" ;;
+esac
+
+if [ "$prefix" = "princess_celestia_" ] && ! find "$voices_dir" -maxdepth 1 -type f -iname "${prefix}*.wav" | read -r _; then
+  prefix="twilight_sparkle_"
+fi
+
+pony_debug() {
+  if [ "${PONYDEBUG:-0}" = "1" ]; then
+    printf 'ponydone: %s\n' "$*" >&2
+  fi
+}
+
+mapfile -d '' files < <(
+  find "$voices_dir" -maxdepth 1 -type f -iname "${prefix}*.wav" -print0 | sort -z
+)
+
+if [ "${#files[@]}" -eq 0 ]; then
+  pony_debug "no matching wav files for prefix ${prefix}; using double bell fallback"
+  printf '\a\a'
+  exit 0
+fi
+
+choice_index=$(( RANDOM % ${#files[@]} ))
+chosen_wav="${files[$choice_index]}"
+pony_debug "selected $chosen_wav"
+
+run_with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5s "$@"
+  else
+    "$@"
+  fi
+}
+
+play_local() {
+  if command -v ffplay >/dev/null 2>&1; then
+    pony_debug "trying ffplay"
+    run_with_timeout ffplay -nodisp -autoexit -loglevel error "$chosen_wav" >/dev/null 2>&1 && return 0
+  fi
+  if command -v aplay >/dev/null 2>&1; then
+    pony_debug "trying aplay"
+    run_with_timeout aplay -q "$chosen_wav" >/dev/null 2>&1 && return 0
+  fi
+  if command -v paplay >/dev/null 2>&1; then
+    pony_debug "trying paplay"
+    run_with_timeout paplay "$chosen_wav" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+play_wmplayer() {
+  local win_tmp_dir base win_copy win_path ps enc
+
+  command -v powershell.exe >/dev/null 2>&1 || return 1
+  win_tmp_dir="/mnt/c/Users/${USER}/AppData/Local/Temp"
+  [ -d "$win_tmp_dir" ] || return 1
+
+  base="ponydone-${prefix}$$-$RANDOM.wav"
+  win_copy="$win_tmp_dir/$base"
+  pony_debug "trying minimized wmplayer via $win_copy"
+  cp "$chosen_wav" "$win_copy" >/dev/null 2>&1 || return 1
+
+  win_path="C:\\Users\\${USER}\\AppData\\Local\\Temp\\$base"
+  ps=$(cat <<EOF2
+\$path = '$win_path'
+\$p = Start-Process -FilePath 'C:\Program Files (x86)\Windows Media Player\wmplayer.exe' -ArgumentList \$path -WindowStyle Minimized -PassThru
+Start-Sleep -Seconds 4
+if (-not \$p.HasExited) {
+  Stop-Process -Id \$p.Id -Force
+}
+Remove-Item \$path -ErrorAction SilentlyContinue
+Write-Output 'wmplayer_ok'
+EOF2
+)
+  enc=$(printf '%s' "$ps" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+
+  run_with_timeout powershell.exe -NoProfile -EncodedCommand "$enc" >/dev/null 2>&1 && return 0
+  rm -f "$win_copy" >/dev/null 2>&1 || true
+  return 1
+}
+
+play_fallback_beep() {
+  pony_debug "using double bell fallback"
+  printf '\a'
+  sleep 0.15
+  printf '\a'
+}
+
+play_wmplayer || play_local || play_fallback_beep

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "/home/ggb66/dev/EVH"
+printf '%s\n' "Project-local launcher set:"
+printf '%s\n' "- ./pony/bin/pony-team-twi"
+if [[ -x ./pony/bin/pony-aj ]]; then
+  printf '%s\n' "- ./pony/bin/pony-aj"
+fi
+printf '%s\n' ""
+printf '%s\n' "Warp users can use the generated project-specific launch configurations under:"
+printf '%s\n' "./pony/launch.configs"

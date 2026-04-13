@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/../scripts/pony-paths.sh"
+load_project_paths "$(cd "$script_dir/../.." && pwd)"
+runtime_root="$AGENIC_PROJECT_PONY_AGENTS_DIR"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  codex-restart <pony>
+
+Examples:
+  codex-restart pinkie
+  codex-restart APPLEJACK
+EOF
+}
+
+slugify() {
+  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g'
+}
+
+pony="${1:-}"
+[[ -n "$pony" ]] || {
+  usage >&2
+  exit 1
+}
+
+slug="$(slugify "$pony")"
+shell_pid_file="$runtime_root/${slug}.shell.pid"
+codex_pid_file="$runtime_root/${slug}.codex.pid"
+
+if [[ ! -f "$shell_pid_file" ]]; then
+  echo "No parked or active codex-pony shell found for '$pony'." >&2
+  exit 1
+fi
+
+shell_pid="$(<"$shell_pid_file")"
+if [[ -f "$codex_pid_file" ]]; then
+  codex_pid="$(<"$codex_pid_file")"
+  kill -INT "$codex_pid" 2>/dev/null || true
+fi
+
+kill -USR1 "$shell_pid"
+echo "Sent restart/wake signal to $pony (shell pid $shell_pid)."

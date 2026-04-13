@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "/home/ggb66/dev/EVH"
+exec "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh" "APPLEJACK"

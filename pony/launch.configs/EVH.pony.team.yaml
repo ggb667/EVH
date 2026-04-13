@@ -1,0 +1,57 @@
+# AGENIC_PONYSHOW: true
+# AGENIC_PONYSHOW_ROLE: baseline_config
+# Project-local pony root: /home/ggb66/dev/EVH/pony
+name: Evh Pony Team
+active_window_index: 0
+windows:
+  - active_tab_index: 0
+    tabs:
+      - title: TWI
+        color: magenta
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          is_focused: true
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh TWILIGHT_SPARKLE"
+
+      - title: AJ
+        color: yellow
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh APPLEJACK"
+
+      - title: Pinkie
+        color: red
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh PINKIE_PIE"
+
+      - title: FS
+        color: green
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh FLUTTERSHY"
+
+      - title: Rarity
+        color: white
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh RARITY"
+
+      - title: RD
+        color: cyan
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh RAINBOW_DASH"
+
+      - title: Spike
+        color: blue
+        layout:
+          cwd: /home/ggb66/dev/EVH
+          commands:
+            - exec: "/home/ggb66/dev/EVH/pony/scripts/launch-in-pony-shell.sh SPIKE"
