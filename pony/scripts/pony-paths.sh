@@ -117,6 +117,30 @@ workfile_name_for_slug() {
   esac
 }
 
+worker_branch_for_slug() {
+  local slug="${1:?missing worker slug}"
+  case "$slug" in
+    twi|celestia)
+      printf '%s\n' "$AGENIC_PROJECT_BRANCH"
+      ;;
+    *)
+      printf 'pony/%s/%s\n' "$slug" "$AGENIC_PROJECT_BRANCH"
+      ;;
+  esac
+}
+
+worker_worktree_for_slug() {
+  local slug="${1:?missing worker slug}"
+  case "$slug" in
+    twi|celestia)
+      printf '%s\n' "$AGENIC_PROJECT_ROOT"
+      ;;
+    *)
+      printf '%s\n' "$AGENIC_PROJECT_PONY_WORKTREES_DIR/$slug"
+      ;;
+  esac
+}
+
 worker_slug_for_label() {
   case "${1:-}" in
     Princess|Princess\ Celestia|Princess\ Celestia\ Sol\ Invictus) printf 'celestia\n' ;;
@@ -259,6 +283,26 @@ pony_twi_decisions_path() {
 
 pony_twi_event_stream_history_path() {
   pony_coordination_path "twi.event.stream.history.md"
+}
+
+resolve_worker_assignment_by_personality() {
+  local personality="${1:?missing personality}"
+  local registry_file
+  registry_file="$(pony_assignment_registry_path)"
+  [[ -f "$registry_file" ]] || return 0
+
+  python3 - "$registry_file" "$personality" <<'PY'
+import csv
+import sys
+from pathlib import Path
+
+registry_path, personality = sys.argv[1:]
+rows = list(csv.DictReader(Path(registry_path).open(encoding="utf-8"), delimiter="\t"))
+matches = [row for row in rows if row["personality"] == personality]
+if len(matches) == 1:
+    row = matches[0]
+    print("\t".join([row["workfile"], row["worktree"]]))
+PY
 }
 
 pony_twi_review_needed_path() {

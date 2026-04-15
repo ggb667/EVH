@@ -70,13 +70,13 @@ if valid_source_root "${AGENIC_PONY_SOURCE_ROOT:-}"; then
   exit 0
 fi
 
-if ensure_cached_source "$repo_url" "$ref" "$cache_root"; then
-  cd "$cache_root" && pwd
+if valid_source_root "$configured_root"; then
+  cd "$configured_root" && pwd
   exit 0
 fi
 
-if valid_source_root "$configured_root"; then
-  cd "$configured_root" && pwd
+if ensure_cached_source "$repo_url" "$ref" "$cache_root"; then
+  cd "$cache_root" && pwd
   exit 0
 fi
 
