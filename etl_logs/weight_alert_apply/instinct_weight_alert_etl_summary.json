@@ -1,0 +1,11 @@
+{
+  "total_logged_rows": 1575,
+  "status_counts": {
+    "applied": 1560,
+    "skipped_missing_account": 11,
+    "skipped_missing_patient": 3,
+    "unchanged": 1
+  },
+  "jsonl_path": "etl_logs/weight_alert_apply/instinct_weight_alert_etl.jsonl",
+  "csv_path": "etl_logs/weight_alert_apply/instinct_weight_alert_etl.csv"
+}
