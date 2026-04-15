@@ -54,3 +54,147 @@
 10:NEXT_STEP: waiting for a concrete task
 11:QUESTIONS_FOR_TWI: none
 12:DECISION_NEEDED: none
+## 2026-04-14 19:58:42
+- changed_file: aj.status.md
+- action: Twilight review needed
+2:BRANCH: pony/aj/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/aj
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:58:42
+- changed_file: pinkie.status.md
+- action: Twilight review needed
+2:BRANCH: pony/pinkie/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:58:42
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:58:42
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:58:42
+- changed_file: rd.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rd/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rd
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:58:43
+- changed_file: spike.status.md
+- action: Twilight review needed
+2:BRANCH: pony/spike/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/spike
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:59:02
+- changed_file: aj.status.md
+- action: Twilight review needed
+2:BRANCH: pony/aj/main
+3:WORKTREE: /home/ggb66/dev/EVH
+5:STATUS: HOLD
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:59:02
+- changed_file: aj.status.md
+- action: Twilight review needed
+2:BRANCH: pony/aj/main
+3:WORKTREE: /home/ggb66/dev/EVH
+5:STATUS: HOLD
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/aj but found /home/ggb66/dev/EVH
+10:NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/aj before launching Codex, then retry preflight
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:59:02
+- changed_file: rd.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rd/main
+3:WORKTREE: /home/ggb66/dev/EVH
+5:STATUS: HOLD
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/rd but found /home/ggb66/dev/EVH
+10:NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/rd before launching Codex, then retry preflight
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:59:03
+- changed_file: spike.status.md
+- action: Twilight review needed
+2:BRANCH: pony/spike/main
+3:WORKTREE: /home/ggb66/dev/EVH
+5:STATUS: HOLD
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/spike but found /home/ggb66/dev/EVH
+10:NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/spike before launching Codex, then retry preflight
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:59:04
+- changed_file: pinkie.status.md
+- action: Twilight review needed
+2:BRANCH: pony/pinkie/main
+3:WORKTREE: /home/ggb66/dev/EVH
+5:STATUS: HOLD
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/pinkie but found /home/ggb66/dev/EVH
+10:NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/pinkie before launching Codex, then retry preflight
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 19:59:04
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH
+5:STATUS: HOLD
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/rarity but found /home/ggb66/dev/EVH
+10:NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/rarity before launching Codex, then retry preflight
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none

@@ -208,6 +208,7 @@ __marimo__/
 
 # Project-local pony runtime artifacts
 pony/runtime/
+pony/worktrees/
 pony/agents/*.log
 pony/team.coordination/.*.last-review-hash
 pony/team.coordination/*.review-needed

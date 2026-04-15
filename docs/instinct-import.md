@@ -3,9 +3,9 @@
 ## What we are enforcing
 
 - **Alerts:** Instinct patient create/update accepts `alertIds` as an array.
-  We include one default alert ID for every patient import.
-- **Reminders:** We keep a small, configured list of reminder IDs and attach
-  them per patient in the import payload.
+  We discover the live account's alert IDs and apply the first one for the test flow.
+- **Reminders:** We discover the live account's reminder IDs and attach the discovered set
+  per patient in the import payload.
 
 ## Relevant Instinct endpoints
 
@@ -34,11 +34,9 @@ Use the smoke-test script to validate account access and IDs before creating any
 ```bash
 python scripts/instinct_test_account_check.py \
   --base-url "https://partner.instinctvet.com" \
-  --username "$INSTINCT_USERNAME" \
-  --password "$INSTINCT_PASSWORD" \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET" \
   --account-id "<test-account-uuid>" \
-  --default-alert-id 101 \
-  --default-reminder-ids 201,202 \
   --patient-name "bob TEST" \
   --patient-pms-id "FE261"
 ```
@@ -48,11 +46,9 @@ Then create a real test patient by adding `--create-patient`:
 ```bash
 python scripts/instinct_test_account_check.py \
   --base-url "https://partner.instinctvet.com" \
-  --username "$INSTINCT_USERNAME" \
-  --password "$INSTINCT_PASSWORD" \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET" \
   --account-id "<test-account-uuid>" \
-  --default-alert-id 101 \
-  --default-reminder-ids 201,202 \
   --patient-name "bob TEST" \
   --patient-pms-id "FE261" \
   --create-patient
@@ -69,13 +65,14 @@ For the owner/account context you provided:
 Use the **owner's Instinct account UUID** as `--account-id` (the script validates it with `GET /v1/accounts/{id}`).
 Authentication is required; provide either:
 
+- `--client-id` + `--client-secret` (fetches Bearer token via `POST https://partner.instinctvet.com/v1/auth/token`), or
 - `--username` + `--password` (Basic auth), or
 - `--api-key` (Bearer auth).
 
 The script:
 
 1. Calls `GET /v1/accounts/{id}` to verify the test account exists.
-2. Calls `GET /v1/alerts` and `GET /v1/reminders` to verify the configured IDs can be discovered.
+2. Calls `GET /v1/alerts` and `GET /v1/reminders` to discover account-specific IDs.
 3. Builds and prints the exact patient payload from `PatientPayloadBuilder`.
 4. Optionally calls `POST /v1/patients` when `--create-patient` is provided.
 

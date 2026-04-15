@@ -1,12 +1,12 @@
 AUDIENCE: EVERYONE
-BRANCH: main
+BRANCH: pony/rd/main
 WORKTREE: /home/ggb66/dev/EVH
-BRANCH_VERIFIED: yes
-STATUS: WAITING
+BRANCH_VERIFIED: no
+STATUS: HOLD
 PUSH_STATUS: clean_local_branch
 FILES_PLANNED: none
 FILES_TOUCHED: none
-BLOCKERS: none
-NEXT_STEP: waiting for a concrete task
+BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/rd but found /home/ggb66/dev/EVH
+NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/rd before launching Codex, then retry preflight
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none
