@@ -1,12 +1,12 @@
 AUDIENCE: EVERYONE
 BRANCH: pony/spike/main
-WORKTREE: /home/ggb66/dev/EVH
-BRANCH_VERIFIED: no
-STATUS: HOLD
+WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/spike
+BRANCH_VERIFIED: yes
+STATUS: WAITING
 PUSH_STATUS: clean_local_branch
 FILES_PLANNED: none
 FILES_TOUCHED: none
-BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/spike but found /home/ggb66/dev/EVH
-NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/spike before launching Codex, then retry preflight
+BLOCKERS: none
+NEXT_STEP: waiting for a concrete task
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none

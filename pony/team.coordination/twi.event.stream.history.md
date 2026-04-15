@@ -3,6 +3,11 @@
 ## Current State
 - pending_review_needed_content: none
 
+## 2026-04-14 20:01:12
+- changed_file: twi.status.md, twi.todo.md, aj.status.md, fs.status.md, pinkie.status.md, rarity.status.md, rd.status.md, spike.status.md
+- action: Dirty-worktree reconciliation completed
+- note: pending local changes were reconciled into commit c3f9c22; worker worktree paths were restored and the coordinator returned to normal waiting state
+
 ## 2026-04-14 19:16:30
 - changed_file: twi.status.md, twi.todo.md
 - action: Dirty-worktree preflight completed
@@ -196,5 +201,65 @@
 8:FILES_TOUCHED: none
 9:BLOCKERS: preflight: expected worktree /home/ggb66/dev/EVH/pony/worktrees/rarity but found /home/ggb66/dev/EVH
 10:NEXT_STEP: return to /home/ggb66/dev/EVH/pony/worktrees/rarity before launching Codex, then retry preflight
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 20:01:54
+- changed_file: aj.status.md
+- action: Twilight review needed
+2:BRANCH: pony/aj/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/aj
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 20:01:55
+- changed_file: pinkie.status.md
+- action: Twilight review needed
+2:BRANCH: pony/pinkie/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 20:01:55
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 20:01:55
+- changed_file: rd.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rd/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rd
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
+11:QUESTIONS_FOR_TWI: none
+12:DECISION_NEEDED: none
+## 2026-04-14 20:01:55
+- changed_file: spike.status.md
+- action: Twilight review needed
+2:BRANCH: pony/spike/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/spike
+5:STATUS: WAITING
+7:FILES_PLANNED: none
+8:FILES_TOUCHED: none
+9:BLOCKERS: none
+10:NEXT_STEP: waiting for a concrete task
 11:QUESTIONS_FOR_TWI: none
 12:DECISION_NEEDED: none
