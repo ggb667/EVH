@@ -22,4 +22,5 @@ Project-local reference copy:
   on the fly for the import payload).
 - `docs/instinct-import.md`: integration notes, endpoint checklist, and test-account commands.
 - `scripts/instinct_active_patients_audit.py`: preflight checker for `Active Patients.csv` to verify unique patient identifiers and required mapping fields before bulk import.
+- `scripts/evh_reminder_importer.py`: reminder spreadsheet parser plus live patient/reminder audit mode for validating owner/contact/reminder state before import execution.
 - `tests/test_instinct_import_payload_builder.py`: unit tests for payload merge/dedupe behavior.

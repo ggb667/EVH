@@ -43,12 +43,16 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, date
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
-from openpyxl import load_workbook
+try:
+    from openpyxl import load_workbook
+except ImportError:  # pragma: no cover - optional dependency for spreadsheet mode only
+    load_workbook = None
 
 
 LOGGER = logging.getLogger("evh_reminder_importer")
@@ -200,6 +204,83 @@ def normalize_text(value: Any) -> str:
     return text
 
 
+def _extract_collection(payload: Any, keys: tuple[str, ...]) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+
+    return []
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _extract_patient_id_from_reminder(reminder: Any) -> Optional[int]:
+    if not isinstance(reminder, dict):
+        return None
+
+    for key in ("patientId", "patient_id"):
+        patient_id = _coerce_int(reminder.get(key))
+        if patient_id is not None:
+            return patient_id
+
+    patient = reminder.get("patient")
+    if isinstance(patient, dict):
+        return _coerce_int(patient.get("id"))
+
+    return None
+
+
+def _extract_phone_no(communication_details: Iterable[Any]) -> Optional[str]:
+    for item in communication_details:
+        if not isinstance(item, dict):
+            continue
+
+        value = item.get("value") or item.get("number") or item.get("phoneNumber")
+        kind = (item.get("type") or item.get("kind") or "").lower()
+
+        if value and ("phone" in kind or "mobile" in kind or kind == ""):
+            return value
+
+    return None
+
+
+def _normalize_lookup_text(value: Any) -> str:
+    return normalize_text(value).casefold()
+
+
+def _normalize_phone_no(value: Any) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _account_display_name(account: Any) -> Optional[str]:
+    if not isinstance(account, dict):
+        return None
+
+    primary = account.get("primaryContact") or {}
+    if not isinstance(primary, dict):
+        return None
+
+    first = normalize_text(primary.get("nameFirst"))
+    middle = normalize_text(primary.get("nameMiddle"))
+    last = normalize_text(primary.get("nameLast"))
+    name_parts = [part for part in (first, middle, last) if part]
+    if name_parts:
+        return " ".join(name_parts)
+    return None
+
+
 
 def is_blank_row(values: Iterable[Any]) -> bool:
     return all(normalize_text(v) == "" for v in values)
@@ -247,6 +328,9 @@ def map_source_label(source_label: str) -> Optional[str]:
 
 
 def parse_grouped_spreadsheet(path: Path, worksheet_name: Optional[str] = None) -> list[ParsedPatientGroup]:
+    if load_workbook is None:
+        raise RuntimeError("Spreadsheet parsing requires openpyxl. Install it before reading .xlsx reminder files.")
+
     workbook = load_workbook(path, data_only=True)
     worksheet = workbook[worksheet_name] if worksheet_name else workbook.active
 
@@ -395,6 +479,8 @@ class InstinctApiAdapter:
         self.username = username
         self.password = password
         self.token: Optional[str] = None
+        self._reminder_counts_by_patient: Optional[dict[int, int]] = None
+        self._has_patient_scoped_reminders = False
 
     def authenticate(self) -> str:
         import requests
@@ -427,9 +513,47 @@ class InstinctApiAdapter:
         resp.raise_for_status()
         return resp.json()
 
-    def get_reminders_for_patient(self, patient_id: int):
-        data = self._get("/v1/reminders", {"patientId": patient_id})
-        return data.get("data", [])
+    def iter_reminders(self):
+        cursor = None
+
+        while True:
+            params = {"limit": 100}
+            if cursor:
+                params["pageCursor"] = cursor
+
+            data = self._get("/v1/reminders", params)
+            reminders = _extract_collection(data, ("reminders", "data", "items", "results"))
+            for reminder in reminders:
+                yield reminder
+
+            cursor = data.get("nextPageCursor") if isinstance(data, dict) else None
+            if not cursor:
+                break
+
+    def get_reminder_count_for_patient(self, patient_id: Any) -> Optional[int]:
+        patient_id_int = _coerce_int(patient_id)
+        if patient_id_int is None:
+            return None
+
+        if self._reminder_counts_by_patient is None:
+            counts: dict[int, int] = {}
+            has_patient_scoped_reminders = False
+
+            for reminder in self.iter_reminders():
+                reminder_patient_id = _extract_patient_id_from_reminder(reminder)
+                if reminder_patient_id is None:
+                    continue
+
+                has_patient_scoped_reminders = True
+                counts[reminder_patient_id] = counts.get(reminder_patient_id, 0) + 1
+
+            self._reminder_counts_by_patient = counts
+            self._has_patient_scoped_reminders = has_patient_scoped_reminders
+
+        if not self._has_patient_scoped_reminders:
+            return None
+
+        return self._reminder_counts_by_patient.get(patient_id_int, 0)
 
     def iter_patients(self):
         cursor = None
@@ -453,6 +577,129 @@ class InstinctApiAdapter:
             if not cursor:
                 break
 
+    def iter_accounts(self, params: Optional[dict[str, Any]] = None):
+        cursor = None
+
+        while True:
+            request_params: dict[str, Any] = {"limit": 100}
+            if params:
+                request_params.update(params)
+            if cursor:
+                request_params["pageCursor"] = cursor
+
+            data = self._get("/v1/accounts", request_params)
+            accounts = _extract_collection(data, ("accounts", "data", "items", "results"))
+            for account in accounts:
+                yield account
+
+            cursor = data.get("nextPageCursor") if isinstance(data, dict) else None
+            if not cursor:
+                break
+
+    def iter_patients_for_account(self, account_id: str):
+        cursor = None
+
+        while True:
+            params: dict[str, Any] = {"limit": 100, "accountId": account_id}
+            if cursor:
+                params["pageCursor"] = cursor
+
+            data = self._get("/v1/patients", params)
+            patients = _extract_collection(data, ("patients", "data", "items", "results"))
+            for patient in patients:
+                yield patient
+
+            cursor = data.get("nextPageCursor") if isinstance(data, dict) else None
+            if not cursor:
+                break
+
+    def _find_accounts_by_client_code(self, client_code: str) -> list[dict[str, Any]]:
+        matches: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for field_name in ("pimsCode", "pimsId"):
+            for account in self.iter_accounts({field_name: client_code}):
+                account_id = str(account.get("id") or "")
+                if account_id and account_id not in seen_ids:
+                    matches.append(account)
+                    seen_ids.add(account_id)
+
+        return matches
+
+    def _find_accounts_by_owner(self, owner_name: str, phone_no: str) -> list[dict[str, Any]]:
+        candidates = list(self.iter_accounts({"name": owner_name}))
+        owner_name_normalized = _normalize_lookup_text(owner_name)
+        phone_digits = _normalize_phone_no(phone_no)
+
+        exact_name_matches = [
+            account
+            for account in candidates
+            if _normalize_lookup_text(_account_display_name(account)) == owner_name_normalized
+        ]
+        narrowed = exact_name_matches or candidates
+
+        if not phone_digits:
+            return narrowed
+
+        phone_matches = []
+        for account in narrowed:
+            primary = account.get("primaryContact") or {}
+            account_phone = _normalize_phone_no(_extract_phone_no((primary.get("communicationDetails") or [])))
+            if account_phone and account_phone == phone_digits:
+                phone_matches.append(account)
+
+        return phone_matches or narrowed
+
+    def find_patient(self, source_patient: ParsedPatientGroup) -> dict[str, Any]:
+        accounts: list[dict[str, Any]] = []
+
+        if source_patient.client:
+            accounts = self._find_accounts_by_client_code(source_patient.client)
+
+        if not accounts and source_patient.client_name:
+            accounts = self._find_accounts_by_owner(source_patient.client_name, source_patient.phone_no)
+
+        if not accounts:
+            raise RuntimeError(
+                f"Could not find Instinct account for client={source_patient.client!r} owner={source_patient.client_name!r}"
+            )
+
+        if len(accounts) > 1:
+            account_ids = [account.get("id") for account in accounts]
+            raise RuntimeError(
+                f"Account lookup was ambiguous for client={source_patient.client!r} owner={source_patient.client_name!r}: {account_ids}"
+            )
+
+        account_id = accounts[0].get("id")
+        if not account_id:
+            raise RuntimeError(f"Matched account is missing id for client={source_patient.client!r}")
+
+        wanted_name = _normalize_lookup_text(source_patient.patient_name)
+        patient_matches = [
+            patient
+            for patient in self.iter_patients_for_account(str(account_id))
+            if _normalize_lookup_text(patient.get("name")) == wanted_name
+        ]
+
+        if not patient_matches:
+            raise RuntimeError(
+                f"Could not find patient name={source_patient.patient_name!r} in account_id={account_id!r}"
+            )
+
+        if len(patient_matches) > 1:
+            patient_ids = [patient.get("id") for patient in patient_matches]
+            raise RuntimeError(
+                f"Patient lookup was ambiguous for name={source_patient.patient_name!r} in account_id={account_id!r}: {patient_ids}"
+            )
+
+        patient_id = patient_matches[0].get("id")
+        if patient_id is None:
+            raise RuntimeError(
+                f"Matched patient is missing id for name={source_patient.patient_name!r} in account_id={account_id!r}"
+            )
+
+        return self._get(f"/v1/patients/{patient_id}")
+
     def summarize_patient(self, patient_record):
         account = patient_record.get("account") or {}
         primary = account.get("primaryContact") or {}
@@ -464,20 +711,8 @@ class InstinctApiAdapter:
         name_parts = [part for part in (first, middle, last) if part]
         client_name = " ".join(name_parts) if name_parts else None
 
-        phone_no = None
-        for item in primary.get("communicationDetails") or []:
-            if not isinstance(item, dict):
-                continue
-
-            value = item.get("value") or item.get("number") or item.get("phoneNumber")
-            kind = (item.get("type") or item.get("kind") or "").lower()
-
-            if value and ("phone" in kind or "mobile" in kind or kind == ""):
-                phone_no = value
-                break
-
-        reminders = self.get_reminders_for_patient(patient_record.get("id"))
-        reminder_count = len(reminders)
+        phone_no = _extract_phone_no(primary.get("communicationDetails") or [])
+        reminder_count = self.get_reminder_count_for_patient(patient_record.get("id"))
 
         return {
             "client_name": client_name,

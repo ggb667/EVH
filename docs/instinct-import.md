@@ -96,4 +96,10 @@ What this checks:
 - Reports duplicate ID values.
 - Reports missing core mapping fields (`patient`, owner contact, species, breed, sex).
 
+Reminder import audit:
+
+- `python scripts/evh_reminder_importer.py --audit-patients ...` fetches patient detail from `GET /v1/patients/{id}` so owner name and phone come from the embedded account record.
+- It pages the global `GET /v1/reminders` feed and derives patient reminder counts only when the reminder payload exposes a patient reference.
+- If the reminder payload does not identify the owning patient, the script emits `null` for `reminder_count` instead of a misleading `0`.
+
 If IDs are duplicated or missing, add a stable external patient ID column before bulk import.
