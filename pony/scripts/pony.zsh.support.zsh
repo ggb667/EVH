@@ -12,6 +12,7 @@ AGENIC_PROJECT_ROOT="$(pony_project_root)"
 AGENIC_PROJECT_PONY_DIR="$AGENIC_PROJECT_ROOT/pony"
 AGENIC_PROJECT_PONY_RUNTIME_DIR="$AGENIC_PROJECT_PONY_DIR/runtime"
 AGENIC_PROJECT_PONY_RUNTIME_DRAFT_PATH="$AGENIC_PROJECT_PONY_RUNTIME_DIR/user.draft"
+AGENIC_PROJECT_PONY_RUNTIME_INSTALL_NOTICE_PATH="$AGENIC_PROJECT_PONY_RUNTIME_DIR/install.notice"
 AGENIC_PROJECT_PONY_RUNTIME_PENDING_NOTICE_PATH="$AGENIC_PROJECT_PONY_RUNTIME_DIR/pending.notice"
 AGENIC_PROJECT_PONY_RUNTIME_PENDING_NOTICE_SEEN_PATH="$AGENIC_PROJECT_PONY_RUNTIME_DIR/pending.notice.seen"
 
@@ -65,6 +66,7 @@ if [[ -o interactive ]]; then
   autoload -Uz add-zsh-hook
 
   pony_runtime_sync_notice() {
+    ./pony/scripts/check-installation-state.sh >/dev/null 2>&1 || true
     ./pony/scripts/queue-runtime.sh init >/dev/null 2>&1 || return 0
     ./pony/scripts/queue-runtime.sh pending-notice >/dev/null 2>&1 || true
     if [[ -s "$AGENIC_PROJECT_PONY_RUNTIME_PENDING_NOTICE_PATH" ]] && ! cmp -s "$AGENIC_PROJECT_PONY_RUNTIME_PENDING_NOTICE_PATH" "$AGENIC_PROJECT_PONY_RUNTIME_PENDING_NOTICE_SEEN_PATH"; then
