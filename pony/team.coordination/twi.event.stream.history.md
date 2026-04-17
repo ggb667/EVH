@@ -3,6 +3,11 @@
 ## Current State
 - pending_review_needed_content: none
 
+## 2026-04-16 22:34:51
+- changed_file: twi.status.md, twi.todo.md, twi.event.stream.history.md
+- action: Dirty-worktree reconciliation completed
+- note: coordinator preflight drift was reconciled and stray untracked spreadsheet Active_Clients_Alerts.xlsx was moved out of the repo to /tmp/evh-preflight for safekeeping
+
 ## 2026-04-14 20:01:12
 - changed_file: twi.status.md, twi.todo.md, aj.status.md, fs.status.md, pinkie.status.md, rarity.status.md, rd.status.md, spike.status.md
 - action: Dirty-worktree reconciliation completed
