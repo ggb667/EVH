@@ -46,13 +46,12 @@ _agenic_pony_apply_identity
 
 if [[ -z "${AGENIC_PONY_AUTORAN:-}" ]]; then
   export AGENIC_PONY_AUTORAN=1
+  autoload -Uz add-zsh-hook
   _agenic_pony_launch_once() {
-    zle -D zle-line-init
-    BUFFER="./pony/scripts/start-session.sh ${(q)AGENIC_LAUNCH_PERSONALITY} ${(q)AGENIC_PROJECT_ROOT}"
-    CURSOR=${#BUFFER}
-    zle accept-line
+    add-zsh-hook -d precmd _agenic_pony_launch_once
+    ./pony/scripts/start-session.sh "${AGENIC_LAUNCH_PERSONALITY}" "${AGENIC_PROJECT_ROOT}"
   }
-  zle -N zle-line-init _agenic_pony_launch_once
+  add-zsh-hook precmd _agenic_pony_launch_once
 fi
 EOF
 
