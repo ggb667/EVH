@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.evh_reminder_importer import InstinctApiAdapter, ParsedPatientGroup
+from scripts.evh_reminder_importer import InstinctApiAdapter, ParsedPatientGroup, ReminderQuery
 
 
 def test_summarize_patient_derives_owner_phone_and_reminder_count(monkeypatch):
@@ -173,4 +173,62 @@ def test_find_patient_falls_back_to_owner_name_and_phone(monkeypatch):
         {"limit": 100, "pimsCode": "99999"},
         {"limit": 100, "pimsId": "99999"},
         {"limit": 100, "name": "Nathan Deschenes"},
+    ]
+
+
+def test_get_reminders_for_patient_filters_paginated_rows(monkeypatch):
+    adapter = InstinctApiAdapter("https://partner.instinctvet.com", "user", "pass")
+
+    def fake_iter_reminders(self, *, status=None, due_after=None, due_before=None):
+        assert status == "active"
+        assert due_after == "2026-01-01"
+        assert due_before == "2026-12-31"
+        yield {"id": "r1", "patientId": 16558, "deactivatedAt": None, "dueAt": "2026-04-15"}
+        yield {"id": "r2", "patientId": 16558, "deactivatedAt": "2026-04-16T00:00:00Z", "dueAt": "2026-05-01"}
+        yield {"id": "r3", "patientId": 99999, "deactivatedAt": None, "dueAt": "2026-06-01"}
+
+    monkeypatch.setattr(InstinctApiAdapter, "iter_reminders", fake_iter_reminders)
+
+    reminders = adapter.get_reminders_for_patient(
+        ReminderQuery(
+            patient_id=16558,
+            status="active",
+            due_after="2026-01-01",
+            due_before="2026-12-31",
+        )
+    )
+
+    assert reminders == [{"id": "r1", "patientId": 16558, "deactivatedAt": None, "dueAt": "2026-04-15"}]
+
+
+def test_iter_reminders_uses_metadata_after_cursor(monkeypatch):
+    adapter = InstinctApiAdapter("https://partner.instinctvet.com", "user", "pass")
+    calls: list[dict[str, object]] = []
+
+    responses = iter(
+        [
+            {
+                "data": [{"id": "r1"}, {"id": "r2"}],
+                "metadata": {"after": "cursor-1", "before": None, "limit": 2, "totalCount": 4},
+            },
+            {
+                "data": [{"id": "r3"}, {"id": "r4"}],
+                "metadata": {"after": None, "before": "cursor-1", "limit": 2, "totalCount": 4},
+            },
+        ]
+    )
+
+    def fake_get(path, params=None):
+        assert path == "/v1/reminders"
+        calls.append(dict(params or {}))
+        return next(responses)
+
+    monkeypatch.setattr(adapter, "_get", fake_get)
+
+    reminders = list(adapter.iter_reminders(limit=2))
+
+    assert reminders == [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}, {"id": "r4"}]
+    assert calls == [
+        {"limit": 2},
+        {"limit": 2, "after": "cursor-1"},
     ]

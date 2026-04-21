@@ -106,6 +106,14 @@ class PatientImportPlan:
     skipped_rows: list[SkippedRow] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ReminderQuery:
+    patient_id: int
+    status: Optional[str] = None
+    due_after: Optional[str] = None
+    due_before: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Mapping and exclusions
 # ---------------------------------------------------------------------------
@@ -240,6 +248,34 @@ def _extract_patient_id_from_reminder(reminder: Any) -> Optional[int]:
         return _coerce_int(patient.get("id"))
 
     return None
+
+
+def _reminder_matches_query(reminder: Any, query: ReminderQuery) -> bool:
+    if not isinstance(reminder, dict):
+        return False
+
+    if _extract_patient_id_from_reminder(reminder) != query.patient_id:
+        return False
+
+    if query.status:
+        deactivated_at = reminder.get("deactivatedAt")
+        sent_at = reminder.get("sentAt")
+        status_matches = {
+            "active": deactivated_at is None,
+            "inactive": deactivated_at is not None,
+            "sent": sent_at is not None,
+            "unsent": sent_at is None,
+        }
+        if not status_matches.get(query.status, False):
+            return False
+
+    due_at = reminder.get("dueAt")
+    if query.due_after and (not isinstance(due_at, str) or due_at < query.due_after):
+        return False
+    if query.due_before and (not isinstance(due_at, str) or due_at > query.due_before):
+        return False
+
+    return True
 
 
 def _extract_phone_no(communication_details: Iterable[Any]) -> Optional[str]:
@@ -513,22 +549,48 @@ class InstinctApiAdapter:
         resp.raise_for_status()
         return resp.json()
 
-    def iter_reminders(self):
-        cursor = None
+    def iter_reminders(
+        self,
+        *,
+        status: Optional[str] = None,
+        due_after: Optional[str] = None,
+        due_before: Optional[str] = None,
+        limit: int = 100,
+    ):
+        after = None
 
         while True:
-            params = {"limit": 100}
-            if cursor:
-                params["pageCursor"] = cursor
+            params = {"limit": limit}
+            if status:
+                params["status"] = status
+            if due_after:
+                params["dueAfter"] = due_after
+            if due_before:
+                params["dueBefore"] = due_before
+            if after:
+                params["after"] = after
 
             data = self._get("/v1/reminders", params)
             reminders = _extract_collection(data, ("reminders", "data", "items", "results"))
             for reminder in reminders:
                 yield reminder
 
-            cursor = data.get("nextPageCursor") if isinstance(data, dict) else None
-            if not cursor:
+            metadata = data.get("metadata") if isinstance(data, dict) else None
+            after = metadata.get("after") if isinstance(metadata, dict) else None
+            if not after:
                 break
+
+    def get_reminders_for_patient(self, query: ReminderQuery) -> list[dict[str, Any]]:
+        reminders = []
+        iter_status = query.status if query.status in {"active", "inactive"} else None
+        for reminder in self.iter_reminders(
+            status=iter_status,
+            due_after=query.due_after,
+            due_before=query.due_before,
+        ):
+            if _reminder_matches_query(reminder, query):
+                reminders.append(reminder)
+        return reminders
 
     def get_reminder_count_for_patient(self, patient_id: Any) -> Optional[int]:
         patient_id_int = _coerce_int(patient_id)
@@ -856,6 +918,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-patients", type=int, default=None, help="Limit processing to first N patient groups or audit rows")
     parser.add_argument("--execute", action="store_true", help="Execute import via Instinct API adapter")
     parser.add_argument("--audit-patients", action="store_true", help="Enumerate live patients and output client name, patient name, phone number, and current reminder count")
+    parser.add_argument("--patient-reminders", type=int, default=None, help="List reminder rows for a specific Instinct patient ID by pulling paginated /v1/reminders and filtering client-side")
+    parser.add_argument("--reminder-status", choices=("active", "inactive", "sent", "unsent"), default=None, help="Optional reminder status filter for --patient-reminders")
+    parser.add_argument("--due-after", type=str, default=None, help="Optional lower due-date bound for --patient-reminders in YYYY-MM-DD format")
+    parser.add_argument("--due-before", type=str, default=None, help="Optional upper due-date bound for --patient-reminders in YYYY-MM-DD format")
     parser.add_argument("--base-url", type=str, default=os.getenv("INSTINCT_API_BASE_URL", ""))
     parser.add_argument("--username", type=str, default=os.getenv("INSTINCT_API_USERNAME", ""))
     parser.add_argument("--password", type=str, default=os.getenv("INSTINCT_API_PASSWORD", ""))
@@ -873,7 +939,7 @@ def main() -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    if args.audit_patients:
+    if args.audit_patients or args.patient_reminders is not None:
         missing = [name for name, value in {
             "base_url": args.base_url,
             "username": args.username,
@@ -887,6 +953,26 @@ def main() -> int:
             username=args.username,
             password=args.password,
         )
+
+    if args.patient_reminders is not None:
+        adapter.token = adapter.authenticate()
+        reminders = adapter.get_reminders_for_patient(
+            ReminderQuery(
+                patient_id=args.patient_reminders,
+                status=args.reminder_status,
+                due_after=args.due_after,
+                due_before=args.due_before,
+            )
+        )
+
+        if args.export_json:
+            args.export_json.write_text(json.dumps(reminders, indent=2), encoding="utf-8")
+            LOGGER.info("Wrote reminder JSON to %s", args.export_json)
+
+        print(json.dumps(reminders, indent=2))
+        return 0
+
+    if args.audit_patients:
         audit_rows = audit_all_patients(adapter, limit=args.max_patients)
 
         if args.export_json:
