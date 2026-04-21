@@ -212,3 +212,6 @@ pony/worktrees/
 pony/agents/*.log
 pony/team.coordination/.*.last-review-hash
 pony/team.coordination/*.review-needed
+
+# Project-local pony runtime
+/pony/

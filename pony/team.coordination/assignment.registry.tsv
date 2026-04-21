@@ -1,8 +1,0 @@
-assignment_id	worker_label	personality	repo	branch	worktree	workfile	promptfile	scope
-aj	AJ	APPLEJACK	EVH	pony/aj/main	/home/ggb66/dev/EVH/pony/worktrees/aj	/home/ggb66/dev/EVH/pony/work/aj.md	/home/ggb66/dev/EVH/pony/launch.prompts/aj.txt	unassigned
-pinkie	Pinkie	PINKIE_PIE	EVH	pony/pinkie/main	/home/ggb66/dev/EVH/pony/worktrees/pinkie	/home/ggb66/dev/EVH/pony/work/pinkie.md	/home/ggb66/dev/EVH/pony/launch.prompts/pinkie.txt	unassigned
-fs	FS	FLUTTERSHY	EVH	pony/fs/main	/home/ggb66/dev/EVH/pony/worktrees/fs	/home/ggb66/dev/EVH/pony/work/fs.md	/home/ggb66/dev/EVH/pony/launch.prompts/fs.txt	unassigned
-rarity	Rarity	RARITY	EVH	pony/rarity/main	/home/ggb66/dev/EVH/pony/worktrees/rarity	/home/ggb66/dev/EVH/pony/work/rarity.md	/home/ggb66/dev/EVH/pony/launch.prompts/rarity.txt	unassigned
-rd	RD	RAINBOW_DASH	EVH	pony/rd/main	/home/ggb66/dev/EVH/pony/worktrees/rd	/home/ggb66/dev/EVH/pony/work/rd.md	/home/ggb66/dev/EVH/pony/launch.prompts/rd.txt	unassigned
-spike	Spike	SPIKE	EVH	pony/spike/main	/home/ggb66/dev/EVH/pony/worktrees/spike	/home/ggb66/dev/EVH/pony/work/spike.md	/home/ggb66/dev/EVH/pony/launch.prompts/spike.txt	unassigned
-twi	Twilight	TWILIGHT_SPARKLE	EVH	main	/home/ggb66/dev/EVH	/home/ggb66/dev/EVH/pony/work/coordinator-twi.md	/home/ggb66/dev/EVH/pony/launch.prompts/twi.txt	coordinate the team
