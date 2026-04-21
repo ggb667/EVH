@@ -41,6 +41,9 @@ If you only have a client ID and client secret, the script can fetch the token f
 
 - `POST https://partner.instinctvet.com/v1/auth/token`
 
+The partner flow that worked live in this repo was client credentials against the
+partner token endpoint, then Bearer auth on the API requests.
+
 Use:
 
 ```bash
@@ -67,6 +70,22 @@ Then use the returned `access_token` as:
 ```bash
 export INSTINCT_TOKEN="<access_token>"
 ```
+
+## Instinct reminders workflow
+
+For the live reminders workflow we verified:
+
+1. Fetch a Bearer token from `POST https://partner.instinctvet.com/v1/auth/token`.
+2. Walk reminders with `GET /v1/reminders`.
+3. Use the returned `metadata.after` cursor with
+   `GET /v1/reminders?limit=100&pageCursor=<after>&pageDirection=after`.
+4. Find a patient by `GET /v1/patients?pimsCode=<patient-code>` or by walking
+   the patient list and matching `name`.
+5. Count that patient’s reminders by filtering the reminder list on `patientId`.
+
+The full worked example is documented in:
+
+- `docs/instinct-reminders-handoff.md`
 
 ## Instinct import helpers
 

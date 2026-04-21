@@ -3,7 +3,9 @@
 Project: EVH
 Branch: main
 
-Status: blank
-Scope: unassigned
+Status: done
+Scope: Instinct reminders handoff docs
 Notes:
-- no assigned work yet
+- switched reminders discovery to pageDirection/pageCursor query params
+- confirmed live reminder count: 669
+- Ember Hetherman reminder count: 3

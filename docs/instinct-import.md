@@ -113,6 +113,10 @@ The script:
 3. Builds and prints the exact patient payload from `PatientPayloadBuilder`.
 4. Optionally calls `POST /v1/patients` when `--create-patient` is provided.
 
+If you need the shortest path from auth to reminder counting, see:
+
+- `docs/instinct-reminders-handoff.md`
+
 ## Weight + alert ETL
 
 For the current import pass, the live ETL only brings over:

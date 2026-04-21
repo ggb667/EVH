@@ -91,8 +91,24 @@ class InstinctClient:
     def fetch_alerts(self) -> tuple[int, dict | list | str | None]:
         return self._request("GET", "/v1/alerts")
 
-    def fetch_reminders(self) -> tuple[int, dict | list | str | None]:
-        return self._request("GET", "/v1/reminders")
+    def fetch_reminders(
+        self,
+        limit: int | None = None,
+        page_cursor: str | None = "",
+        page_direction: str | None = "after",
+    ) -> tuple[int, dict | list | str | None]:
+        query: list[tuple[str, str]] = []
+        if limit is not None:
+            query.append(("limit", str(limit)))
+        if page_cursor is not None:
+            query.append(("pageCursor", page_cursor))
+        if page_direction:
+            query.append(("pageDirection", page_direction))
+
+        path = "/v1/reminders"
+        if query:
+            path = f"{path}?{parse.urlencode(query)}"
+        return self._request("GET", path)
 
     def create_patient(self, payload: dict) -> tuple[int, dict | list | str | None]:
         return self._request("POST", "/v1/patients", payload)
@@ -274,6 +290,23 @@ def main() -> int:
         help="Only list accounts/alerts/reminders to look up IDs, then exit.",
     )
     parser.add_argument(
+        "--reminders-limit",
+        type=int,
+        default=10,
+        help="Limit used for GET /v1/reminders during discovery (default: 10).",
+    )
+    parser.add_argument(
+        "--reminders-page-cursor",
+        default="",
+        help="Optional pageCursor used for GET /v1/reminders during discovery.",
+    )
+    parser.add_argument(
+        "--reminders-page-direction",
+        choices=("after", "before"),
+        default="after",
+        help="pageDirection used for GET /v1/reminders during discovery (default: after).",
+    )
+    parser.add_argument(
         "--create-initial-visit",
         action="store_true",
         help="After patient create, attempt POST to create an initial visit for the patient.",
@@ -337,7 +370,14 @@ def main() -> int:
     lookup_calls = (
         ("Accounts", client.fetch_accounts),
         ("Alerts", client.fetch_alerts),
-        ("Reminders", client.fetch_reminders),
+        (
+            "Reminders",
+            lambda: client.fetch_reminders(
+                limit=args.reminders_limit,
+                page_cursor=args.reminders_page_cursor,
+                page_direction=args.reminders_page_direction,
+            ),
+        ),
     )
     for label, fn in lookup_calls:
         status, body = fn()
