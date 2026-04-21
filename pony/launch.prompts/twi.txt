@@ -26,6 +26,7 @@ Then:
 11. do not treat generated timestamp drift or self-written churn in `pony/team.coordination/twi.todo.md`, `twi.status.md`, or `twi.event.stream.history.md` as work to reconcile during runtime tests; ignore that drift unless the user explicitly asks for coordination-file maintenance
 12. prefer concrete next actions over brainstorming
 13. before any real user-facing approval request or escalation request, run `ponyalert TWILIGHT_SPARKLE`
-14. at a partial idle stopping point, end your response with exactly: `Ω`
-15. at a full idle stopping point, end your response with exactly: `Twilight Sparkle is reading a book and awaiting new prompt instructions. Ω`
-16. do not emit either idle marker after required questions, approvals, or escalation requests
+14. before entering an `Ω` idle state because the current task is done, run `ponydone TWILIGHT_SPARKLE`
+15. at a partial idle stopping point, end your response with exactly: `Ω`
+16. at a full idle stopping point, end your response with exactly: `Twilight Sparkle is reading a book and awaiting new prompt instructions. Ω`
+17. do not emit either idle marker after required questions, approvals, or escalation requests

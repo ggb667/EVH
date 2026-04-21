@@ -7,9 +7,12 @@ rootdir="${3:?missing rootdir}"
 promptfile="${4:?missing prompt file}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/launch-debug.sh"
 source "$script_dir/pony-paths.sh"
 load_project_paths "$(cd "$script_dir/../.." && pwd)"
 registry_file="$(pony_assignment_registry_path)"
+pony_launch_debug_init
+pony_launch_debug "enter-worker-from-prompt-file entry: personality=$personality workfile=$workfile rootdir=$rootdir promptfile=$promptfile registry_file=$registry_file"
 
 resolve_path() {
   local path="${1:-}"
@@ -88,6 +91,7 @@ if [[ -n "$worker_slug" ]]; then
   auto_switch_target="$(find_auto_switch_target "$worker_label")"
   if [[ -n "$auto_switch_target" ]]; then
     IFS=$'\t' read -r current_assignment_id alternate_assignment_id alternate_rootdir alternate_workfile alternate_promptfile <<<"$auto_switch_target"
+    pony_launch_debug "auto-switch: current=$current_assignment_id alternate=$alternate_assignment_id alternate_rootdir=$alternate_rootdir"
     echo "Launcher: ${current_assignment_id} is not PROCEED; switching to ${alternate_assignment_id}."
     exec "$0" "$personality" "$alternate_workfile" "$alternate_rootdir" "$alternate_promptfile"
   fi
@@ -99,6 +103,7 @@ if [[ ! -f "$promptfile" ]]; then
 fi
 
 prompt="$(<"$promptfile")"
+pony_launch_debug "exec enter-worker-and-codex: personality=$personality workfile=$workfile rootdir=$rootdir promptfile=$promptfile"
 
 exec "$(pony_script_path enter-worker-and-codex.sh)" \
   "$personality" \
