@@ -18,6 +18,12 @@ Token endpoint used by the local scripts:
 
 - `POST https://partner.instinctvet.com/v1/auth/token`
 
+Local credential note:
+
+- `../creds.txt` in the dev root contains an Instinct access block labeled for the partner API.
+- The token endpoint is documented as `client_credentials`, but the values currently stored there did not exchange successfully with the live partner endpoint when tested from this workspace.
+- If you use that file again, expect to verify the exact auth shape with the current Instinct tenant before assuming the saved values are usable.
+
 ## Environment and setup
 
 This repo currently uses the local virtualenv at `.venv`.
@@ -107,6 +113,8 @@ That means the reminders visible in the Instinct UI are not yet reproducible fro
   Bearer API key auth, username/password Basic auth, or OAuth
   `client_id`/`client_secret` token fetch; discovers account alert/reminder IDs
   on the fly for the import payload).
+- `scripts/instinct_sync_runner.py`: dry-run sync runner for Instinct account and appointment feeds with persisted watermarks and structured export output.
+- `docs/instinct-appointments-contract-notes.md`: captured appointment and appointment-type endpoint surface from the Instinct docs.
 - `docs/instinct-import.md`: integration notes, endpoint checklist, and test-account commands.
 - `scripts/instinct_active_patients_audit.py`: preflight checker for `Active Patients.csv` to verify unique patient identifiers and required mapping fields before bulk import.
 - `scripts/evh_reminder_importer.py`: reminder spreadsheet parser plus live patient/reminder audit mode for validating owner/contact/reminder state before import execution.
@@ -176,3 +184,26 @@ Note: `scripts/evh_reminder_importer.py` currently supports:
 - patient lookup by account/client and patient identity
 
 It does not yet implement the final reminder submission path end-to-end.
+
+## Instinct sync runner
+
+Use the sync runner to normalize Instinct account and appointment feeds, persist simple watermarks, and emit structured export records for downstream Weave mirroring:
+
+```bash
+.venv/bin/python scripts/instinct_sync_runner.py \
+  --base-url "https://partner.instinctvet.com" \
+  --token "$INSTINCT_TOKEN" \
+  --accounts \
+  --appointments \
+  --updated-since "2026-04-20T00:00:00Z" \
+  --state-file /tmp/evh-instinct-sync-state.json \
+  --export-json /tmp/evh-instinct-sync-export.json \
+  --fetch-types
+```
+
+Output includes:
+
+- normalized account and appointment payloads
+- `idempotency_key` for each exported record
+- `conflict_status` for downstream review logic
+- persisted feed watermarks when `--state-file` is provided
