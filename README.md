@@ -110,6 +110,7 @@ That means the reminders visible in the Instinct UI are not yet reproducible fro
 - `docs/instinct-import.md`: integration notes, endpoint checklist, and test-account commands.
 - `scripts/instinct_active_patients_audit.py`: preflight checker for `Active Patients.csv` to verify unique patient identifiers and required mapping fields before bulk import.
 - `scripts/evh_reminder_importer.py`: reminder spreadsheet parser plus live patient/reminder audit mode for validating owner/contact/reminder state before import execution.
+- `scripts/weave_contact_sync.py`: periodic Instinct-account exporter that emits incremental Weave bulk-import CSV batches, skips unchanged accounts by stable payload hash, and persists local watermark/export state.
 - `tests/test_instinct_import_payload_builder.py`: unit tests for payload merge/dedupe behavior.
 
 ## Invocation examples
@@ -167,6 +168,18 @@ Audit live patients plus reminder counts exposed by the Partner API:
   --password "$INSTINCT_CLIENT_SECRET" \
   --max-patients 25 \
   --export-json patients.json
+```
+
+Export incremental Weave contact-import CSV files from Instinct accounts:
+
+```bash
+.venv/bin/python scripts/weave_contact_sync.py \
+  --base-url "https://partner.instinctvet.com" \
+  --token "$INSTINCT_TOKEN" \
+  --clinic-id "evh-main" \
+  --state-file /tmp/evh-weave-contact-sync-state.json \
+  --export-dir /tmp/evh-weave-contact-csv \
+  --chunk-size 10000
 ```
 
 Note: `scripts/evh_reminder_importer.py` currently supports:
