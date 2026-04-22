@@ -91,6 +91,12 @@ The live run we verified returned:
 - `669` total reminders in the collection
 - `3` reminders for patient `Ember Hetherman` / `pimsCode 27117`
 
+What we tried and ruled out:
+
+- Patching the patient record was not the correct way to create visible reminder rows.
+- The live tenant did not expose a `patients/{id}/reminders` subresource in the probes we ran.
+- We do not yet have the final create/update route for patient reminder rows.
+
 ## 5. Repo helpers
 
 The local smoke-test helper now supports the same flow:
@@ -110,4 +116,3 @@ It uses:
 - `GET /v1/reminders`
 
 and prints the discovered rows from each list.
-

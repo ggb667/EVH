@@ -83,6 +83,12 @@ For the live reminders workflow we verified:
    the patient list and matching `name`.
 5. Count that patient’s reminders by filtering the reminder list on `patientId`.
 
+Current reminder-write status:
+
+- patient PATCH was not the correct write path for creating visible reminder rows
+- `GET /v1/reminders` is still the read/count source of truth
+- the tenant exposes patient-linked reminder rows, but the exact create/update route still needs one more lookup
+
 The full worked example is documented in:
 
 - `docs/instinct-reminders-handoff.md`

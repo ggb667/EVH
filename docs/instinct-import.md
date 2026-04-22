@@ -41,6 +41,13 @@ python scripts/instinct_test_account_check.py \
 
 This lists discovered account/alert/reminder IDs so you can pick the right values.
 
+Reminder workflow status from the live tenant:
+
+- `GET /v1/reminders` is the authoritative read path for patient-linked reminder rows.
+- We verified that Ember Hetherman’s reminders are counted from that feed by `patientId`.
+- We also verified that patching the patient record was not the right way to create visible reminder rows.
+- The exact reminder create/update route still needs one more lookup before we can do live writes safely.
+
 Use the smoke-test script to validate account access and IDs before creating any patient:
 
 ```bash
