@@ -33,6 +33,7 @@ import base64
 import json
 from dataclasses import dataclass
 from collections.abc import Sequence
+from pathlib import Path
 from urllib import error, parse, request
 
 try:
@@ -93,6 +94,27 @@ class InstinctClient:
         return self._request("POST", "/v1/patients", payload)
 
 
+@dataclass(frozen=True)
+class CapturedSamples:
+    account: dict | list | str | None
+    appointments: dict | list | str | None
+    appointment_types: dict | list | str | None
+    reminders: dict | list | str | None
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "account": self.account,
+                "appointments": self.appointments,
+                "appointment_types": self.appointment_types,
+                "reminders": self.reminders,
+            },
+            indent=2,
+            default=str,
+            sort_keys=True,
+        )
+
+
 def _parse_json_or_text(raw: str) -> dict | list | str | None:
     if not raw:
         return None
@@ -150,6 +172,14 @@ def _collect_reminder_label_ids(payload: dict | list | str | None) -> list[int]:
                 visit(value)
 
     visit(payload)
+
+    if not found and isinstance(payload, dict):
+        # Some tenant responses expose reminder labels as paged objects with metadata,
+        # so fall back to the generic collector if the dedicated label keys were absent.
+        for key in ("reminders", "data", "items", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                found.extend(_collect_ids(value))
 
     deduped: list[int] = []
     seen: set[int] = set()
@@ -282,6 +312,16 @@ def main() -> int:
         action="store_true",
         help="If set, performs POST /v1/patients with a generated test patient payload",
     )
+    parser.add_argument(
+        "--capture-samples",
+        action="store_true",
+        help="Write live sample JSON responses to --samples-out after a successful preflight",
+    )
+    parser.add_argument(
+        "--samples-out",
+        default="docs/instinct-live-samples.json",
+        help="Output path for captured sample JSON (default: docs/instinct-live-samples.json)",
+    )
     args = parser.parse_args()
 
     has_api_key = bool(args.api_key)
@@ -328,6 +368,17 @@ def main() -> int:
     alert_id, reminder_ids = _discover_account_defaults(client)
     print(f"Discovered alert ID: {alert_id}")
     print(f"Discovered reminder IDs: {', '.join(str(value) for value in reminder_ids)}")
+
+    if args.capture_samples:
+        samples = CapturedSamples(
+            account=account_body,
+            appointments=appointments_body,
+            appointment_types=appointment_types_body,
+            reminders=reminder_body,
+        )
+        samples_path = Path(args.samples_out)
+        samples_path.write_text(samples.to_json())
+        print(f"Captured live samples to {samples_path}")
 
     defaults = ImportDefaults(default_alert_id=alert_id, default_reminder_ids=reminder_ids)
     builder = PatientPayloadBuilder(defaults)
