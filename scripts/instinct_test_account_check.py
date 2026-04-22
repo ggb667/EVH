@@ -83,6 +83,12 @@ class InstinctClient:
     def fetch_reminders(self) -> tuple[int, dict | list | str | None]:
         return self._request("GET", "/v1/reminders")
 
+    def fetch_appointments(self) -> tuple[int, dict | list | str | None]:
+        return self._request("GET", "/v1/appointments", {"limit": 1, "pageDirection": "after"})
+
+    def fetch_appointment_types(self) -> tuple[int, dict | list | str | None]:
+        return self._request("GET", "/v1/appointment-types", {"limit": 1, "pageDirection": "after"})
+
     def create_patient(self, payload: dict) -> tuple[int, dict | list | str | None]:
         return self._request("POST", "/v1/patients", payload)
 
@@ -114,6 +120,34 @@ def _collect_ids(payload: dict | list | str | None) -> list[int]:
                 visit(value)
         elif isinstance(node, str) and node.strip().isdigit():
             found.append(int(node))
+
+    visit(payload)
+
+    deduped: list[int] = []
+    seen: set[int] = set()
+    for value in found:
+        if value not in seen:
+            deduped.append(value)
+            seen.add(value)
+    return deduped
+
+
+def _collect_reminder_label_ids(payload: dict | list | str | None) -> list[int]:
+    found: list[int] = []
+
+    def visit(node: object) -> None:
+        if isinstance(node, dict):
+            for key in ("reminderLabelId", "reminder_id", "reminderId"):
+                value = node.get(key)
+                if isinstance(value, int):
+                    found.append(value)
+                elif isinstance(value, str) and value.strip().isdigit():
+                    found.append(int(value))
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
 
     visit(payload)
 
@@ -210,7 +244,9 @@ def _discover_account_defaults(client: InstinctClient) -> tuple[int, tuple[int, 
         )
 
     alert_ids = _extract_fallback_collection(alert_body, ("alerts", "data", "items", "results"))
-    reminder_ids = _extract_fallback_collection(reminder_body, ("reminders", "data", "items", "results"))
+    reminder_ids = _collect_reminder_label_ids(reminder_body)
+    if not reminder_ids:
+        reminder_ids = _extract_fallback_collection(reminder_body, ("reminders", "data", "items", "results"))
 
     if not alert_ids:
         raise RuntimeError(f"No alert IDs discovered from /v1/alerts response: {json.dumps(alert_body, indent=2, default=str)}")
@@ -280,6 +316,8 @@ def main() -> int:
     print("== Preflight checks ==")
     for label, fn in (
         ("Account", lambda: client.fetch_account(args.account_id)),
+        ("Appointments", client.fetch_appointments),
+        ("Appointment Types", client.fetch_appointment_types),
     ):
         status, body = fn()
         print(f"{label}: HTTP {status}")
