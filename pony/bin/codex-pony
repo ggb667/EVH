@@ -1,5 +1,66 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source_root="$("/home/ggb66/dev/EVH/pony/scripts/resolve-system-root.sh" "/home/ggb66/dev/EVH")"
-export AGENIC_PONY_SOURCE_ROOT="$source_root"
-exec "$source_root/pony/bin/codex-pony" "$@"
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+agenic_root="$(cd "$script_dir/../.." && pwd)"
+source "$agenic_root/pony/scripts/pony-paths.sh"
+source "$agenic_root/pony/bin/codex-prompt-style.sh"
+current_script="$script_dir/$(basename "${BASH_SOURCE[0]}")"
+
+project_root="$(detect_project_root "${PWD}")"
+load_project_paths "$project_root"
+
+if [[ ! -f "$AGENIC_PROJECT_PONY_CONFIG_PATH" ]]; then
+  "$agenic_root/scripts/install-project.sh" "$project_root" >/dev/null
+  load_project_paths "$project_root"
+fi
+
+project_codex_pony="$project_root/pony/bin/codex-pony"
+if [[ "$project_root" != "$agenic_root" ]] && [[ "${AGENIC_PONY_REFRESH_REEXEC:-0}" != "1" ]] && [[ -x "$project_codex_pony" ]] && [[ "$current_script" != "$project_codex_pony" ]]; then
+  export AGENIC_PONY_REFRESH_REEXEC=1
+  exec "$project_codex_pony" "$@"
+fi
+
+if [[ -n "${WARP_LAUNCH_CONFIG_DIR:-}" || -d /mnt/c/Users/"$USER"/AppData/Roaming/warp/Warp/data/launch_configurations ]]; then
+  if [[ ! -f "$AGENIC_PROJECT_PONY_WINDOWS_WARP_MARKER" ]]; then
+    "$agenic_root/scripts/install-warp-launch-configs.sh" "$project_root" >/dev/null || true
+  fi
+fi
+
+preferred_repo_codex="/home/ggb66/dev/codex/codex-rs/target/debug/codex-tui"
+codex_bin="${CODEX_PONY_BIN:-}"
+if [[ -z "$codex_bin" ]]; then
+  if [[ -x "$preferred_repo_codex" ]]; then
+    codex_bin="$preferred_repo_codex"
+  elif command -v codex >/dev/null 2>&1; then
+    codex_bin="codex"
+  elif [[ -x /tmp/codex-pony-target/debug/codex-tui ]]; then
+    codex_bin="/tmp/codex-pony-target/debug/codex-tui"
+  fi
+fi
+
+if [[ -z "$codex_bin" ]]; then
+  echo "ERROR: codex is not available on PATH" >&2
+  exit 1
+fi
+
+if [[ -x "$AGENIC_PROJECT_PONY_SCRIPTS_DIR/queue-runtime.sh" ]]; then
+  "$AGENIC_PROJECT_PONY_SCRIPTS_DIR/queue-runtime.sh" init >/dev/null
+fi
+
+codex_args=()
+if glyph="$(codex_prompt_glyph_for_personality "${PERSONALITY:-}" 2>/dev/null)"; then
+  codex_args+=(-c "tui.prompt_glyph=\"$glyph\"")
+fi
+if background="$(codex_prompt_background_for_personality "${PERSONALITY:-}" 2>/dev/null)"; then
+  codex_args+=(-c "tui.prompt_background=\"$background\"")
+fi
+if [[ -n "${CODEX_PONY_PID_FILE:-}" ]]; then
+  printf '%s\n' "$$" >"$CODEX_PONY_PID_FILE"
+fi
+
+if [[ -n "${CODEX_PONY_IDLE_MONITOR_SCRIPT:-}" ]] && [[ -n "${TMUX_PANE:-}" ]] && [[ -n "${glyph:-}" ]]; then
+  "$CODEX_PONY_IDLE_MONITOR_SCRIPT" "$TMUX_PANE" "$$" "$glyph" "${CODEX_PONY_TMUX_SOCKET_PATH:-}" "${CODEX_PONY_IDLE_SENTINEL:-}" "${CODEX_PONY_PARTIAL_IDLE_SENTINEL:-Ω}" >/dev/null 2>&1 &
+fi
+
+exec "$codex_bin" "${codex_args[@]}" "$@"

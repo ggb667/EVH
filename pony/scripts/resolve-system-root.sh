@@ -2,8 +2,17 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$script_dir/launch-debug.sh" ]]; then
+  # Older or minimal installed test surfaces may copy only this resolver.
+  source "$script_dir/launch-debug.sh"
+else
+  pony_launch_debug_init() { :; }
+  pony_launch_debug() { :; }
+fi
 project_root="${1:-$(cd "$script_dir/../.." && pwd)}"
 config_path="$project_root/pony/pony.system.config.yaml"
+pony_launch_debug_init
+pony_launch_debug "resolve-system-root entry: script_dir=$script_dir project_root=$project_root config_path=$config_path env_source_root=${AGENIC_PONY_SOURCE_ROOT:-unset}"
 
 default_repo='https://github.com/ggb667/agenic-pony-system.git'
 default_ref='main'
@@ -64,27 +73,38 @@ configured_ref="$(config_value agenic_system_ref "$config_path")"
 repo_url="${configured_repo:-$default_repo}"
 ref="${configured_ref:-$default_ref}"
 cache_root="$(cache_root_for_repo "$repo_url" "$ref")"
-
-if valid_source_root "${AGENIC_PONY_SOURCE_ROOT:-}"; then
-  cd "$AGENIC_PONY_SOURCE_ROOT" && pwd
-  exit 0
-fi
-
-if ensure_cached_source "$repo_url" "$ref" "$cache_root"; then
-  cd "$cache_root" && pwd
-  exit 0
-fi
-
-if valid_source_root "$configured_root"; then
-  cd "$configured_root" && pwd
-  exit 0
-fi
-
 candidate_root="$(cd "$script_dir/../.." && pwd)"
-if valid_source_root "$candidate_root"; then
+
+if [[ "$project_root" == "$candidate_root" ]] && valid_source_root "$candidate_root"; then
+  pony_launch_debug "resolved from live source candidate root: $candidate_root"
   cd "$candidate_root" && pwd
   exit 0
 fi
 
+if valid_source_root "${AGENIC_PONY_SOURCE_ROOT:-}"; then
+  pony_launch_debug "resolved from env override: ${AGENIC_PONY_SOURCE_ROOT}"
+  cd "$AGENIC_PONY_SOURCE_ROOT" && pwd
+  exit 0
+fi
+
+if valid_source_root "$candidate_root"; then
+  pony_launch_debug "resolved from local candidate root: $candidate_root"
+  cd "$candidate_root" && pwd
+  exit 0
+fi
+
+if valid_source_root "$configured_root"; then
+  pony_launch_debug "resolved from configured root: $configured_root"
+  cd "$configured_root" && pwd
+  exit 0
+fi
+
+if ensure_cached_source "$repo_url" "$ref" "$cache_root"; then
+  pony_launch_debug "resolved from cache root: $cache_root"
+  cd "$cache_root" && pwd
+  exit 0
+fi
+
+pony_launch_debug "resolve failed"
 printf 'ERROR: unable to resolve agenic pony system source root\n' >&2
 exit 1
