@@ -103,3 +103,35 @@ Reminder import audit:
 - If the reminder payload does not identify the owning patient, the script emits `null` for `reminder_count` instead of a misleading `0`.
 
 If IDs are duplicated or missing, add a stable external patient ID column before bulk import.
+
+## Appointment contract notes
+
+The appointment endpoint surface has been captured in:
+
+- `docs/instinct-appointments-contract-notes.md`
+
+That note records the six endpoints you asked about and the one writable field the docs explicitly expose for `PATCH /v1/appointments/{appointment_id}`:
+
+- `isConfirmed`
+
+## Instinct sync runner
+
+For a broader Instinct feed dry-run that includes account and appointment normalization, use:
+
+```bash
+python scripts/instinct_sync_runner.py \
+  --base-url "https://partner.instinctvet.com" \
+  --token "$INSTINCT_TOKEN" \
+  --accounts \
+  --appointments \
+  --updated-since "2026-04-20T00:00:00Z" \
+  --state-file /tmp/evh-instinct-sync-state.json \
+  --export-json /tmp/evh-instinct-sync-export.json \
+  --fetch-types
+```
+
+This runner:
+
+- resumes from a JSON watermark file when provided
+- emits structured export records with idempotency keys
+- marks canceled appointments for review so downstream mirroring can choose the right action
