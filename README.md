@@ -54,6 +54,13 @@ Example from the live reminder investigation:
 
 That means `GET /v1/patients/25038` is wrong for Max. `25038` is the patient's external `pimsCode`, not the internal Instinct patient ID.
 
+Live smoke-test results:
+
+- `GET /v1/accounts/{id}` returns `200` with the partner token.
+- `GET /v1/appointments` returns `200` with the partner token.
+- `GET /v1/appointment-types` returns `200` with the partner token.
+- `GET /v1/reminders` must be read with cursor paging from `metadata.after` and `pageDirection=after` in the live tenant.
+
 ## Relevant API locations
 
 - `GET /v1/accounts/{id}`: fetch one Instinct account by internal UUID.
@@ -64,7 +71,9 @@ That means `GET /v1/patients/25038` is wrong for Max. `25038` is the patient's e
 - `GET /v1/patients?pimsCode=...`: resolve a patient from an external patient PMS/PIMS code.
 - `GET /v1/patients?accountId=...`: list patients for a resolved account.
 - `GET /v1/alerts`: discover live alert IDs.
-- `GET /v1/reminders`: discover live reminder rows and/or reminder-linked IDs exposed by the tenant.
+- `GET /v1/reminders`: discover live reminder rows and reminder-label IDs exposed by the tenant.
+- `GET /v1/appointments`: discover live appointments for the tenant.
+- `GET /v1/appointment-types`: discover live appointment type metadata.
 - `POST /v1/patients`: create a patient.
 - `PATCH /v1/patients/{id}`: update a patient.
 
