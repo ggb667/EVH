@@ -103,6 +103,9 @@ However, for the tested patient/account context above, the Partner API returned 
 
 That means the reminders visible in the Instinct UI are not yet reproducible from the current Partner API call pattern alone. Treat that as an unresolved API/product behavior question, not as a parsing bug in the EVH scripts.
 
+Spike's documentation status is part of this handoff too, so keep the workfile
+and coordination note current while this reminder trail stays active.
+
 ## Instinct import helpers
 
 - `scripts/instinct_import_payload_builder.py`: builds patient payloads with
