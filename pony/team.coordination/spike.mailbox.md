@@ -1,0 +1,67 @@
+# SPIKE MAILBOX
+
+## Pending Items
+- Pinkie documentation status update: Contacts work is currently blocked on Weave support case `901174` for export credentials/access.
+- Please document that the isolation refactor is now complete:
+  - branch namespace: `pony/pinkie/weave-contact-bootstrap`
+  - Pinkie-owned entry point: `scripts/contacts/weave_contact_sync.py`
+  - supporting package marker: `scripts/contacts/__init__.py`
+- Current operator state to capture:
+  - live Instinct export already exists
+  - do not import into Weave yet
+  - wait for Weave extract/bootstrap reconciliation first because overlap with legacy Avimark contacts is expected
+- Track the support dependency explicitly in docs/notes: Weave case `901174` submitted, awaiting response
+- Pinkie documentation update: the Weave Contacts work has progressed from design/dry-run into a live initial Instinct export.
+- New implementation behavior to document:
+  - `scripts/weave_contact_sync.py` now emits Weave bulk-import CSV files, not JSONL
+  - exports are incremental for ongoing runs via persisted payload hashes and watermark state
+  - files are chunked for Weave import limits
+- Live run results to capture:
+  - `11,968` Instinct accounts exported
+  - `2` marked inactive
+  - output files:
+    - `/tmp/evh-weave-contact-csv-20260422-161314/weave_contacts_001.csv`
+    - `/tmp/evh-weave-contact-csv-20260422-161314/weave_contacts_002.csv`
+  - state file:
+    - `/tmp/evh-weave-contact-sync-state.json`
+- Important limitation to document clearly: these CSVs should not be imported into Weave yet because Weave already contains legacy Avimark contacts and a bootstrap reconciliation/export from Weave is still required to avoid large duplicate overlap.
+- Current operational blocker to mention: waiting on Weave application credentials/export access; user has requested credentials from `e-services@dsn.com`.
+- Pinkie documentation handoff: Weave Contacts Phase 1 groundwork is now in place and should be documented.
+- New implementation files to cover: `scripts/weave_contact_sync.py` and the expanded account normalization/projection logic in `scripts/instinct_accounts.py`.
+- New tests to mention: `tests/test_weave_contact_sync.py` and the added normalization coverage in `tests/test_instinct_accounts.py`.
+- Current behavior: periodic Instinct account polling with overlap-window watermarking, `includeDeleted` handling, projection into a Weave-shaped contact payload, Weave CSV export batches, and local file-backed sync state.
+- Important limitation to document clearly: this is EVH-side Phase 1 only; production hookup is blocked on the real Weave contact contract, auth, external ID mapping, and any approved Weave-to-Instinct writeback scope.
+- Rarity documentation handoff: stockroom planning docs are now in place and should be incorporated into EVH operator-facing documentation.
+- Key planning direction: Instinct / Stockroom is the target inventory system of record; Inventory Ally is the transition system during cutover.
+- EVH stock areas currently identified: Treatment, Pharmacy, Reception, Lab, Kennel, Room 1-5, Autoclave, X-Ray / Dental.
+- Likely first-wave stockroom rollout locations: Treatment, Pharmacy, Reception, Lab, and Kennel.
+- New docs to cover:
+  - `docs/inventory-ally-stockroom-rollout-plan.md`
+  - `docs/inventory-ally-stockroom-exec-summary.md`
+  - `docs/inventory-ally-stockroom-ownership-matrix.md`
+  - `docs/inventory-ally-stockroom-discovery-checklist.md`
+- Important limitation to document clearly: workflow ownership is not fully finalized yet because the missing IA / Stockroom workflow detail still has to be gathered from system evidence rather than memory.
+- Suggested doc follow-up: summarize the current plan and include a short request list for IA / Instinct screenshots, exports, and workflow confirmation.
+- RD documentation handoff: Vetcove Home Delivery investigation is documented in `docs/vetcove-instinct-home-delivery-design.md`.
+- New implementation files to cover from the Vetcove side: `scripts/instinct_accounts.py` as the reusable Instinct identity adapter and the reminder importer refactor that now builds on it in `scripts/evh_reminder_importer.py`.
+- New tests to mention: `tests/test_instinct_accounts.py`.
+- Important Vetcove summary to document clearly: recommended operating model is Instinct as source of truth and Vetcove Home Delivery as the client storefront and order channel; remaining blocker is Vetcove confirmation of the Instinct-specific Rx sync, required fields and identifiers, and order or refill writeback contract.
+- Additional RD documentation note: record that the Vetcove track has been normalized to the pony isolation policy. Future implementation belongs on `pony/rd/*` branches, and any new Vetcove-specific scripts must go under `scripts/vetcove/`.
+- Current Vetcove status to preserve: no production integration code exists yet for Vetcove itself; the project currently has planning/design material plus reusable Instinct-side identity groundwork only.
+- New RD documentation handoff: live prescription payload notes now exist in `docs/instinct-prescription-payload-notes.md`.
+- Important field-level summary to preserve: `external-prescriptions` includes embedded product label/unit metadata, `quantityPerFill`, and `pharmacyNote`, while `dispensed-prescriptions` includes `accountId`, `productId`, `prescribedAt`, and `remainingFills`.
+- Important caveat to document clearly: the recommendation that `external-prescriptions` is the likely Vetcove-facing export feed is an EVH inference from live payloads, not something Vetcove or Instinct explicitly documented.
+- FS status update: added a shared Instinct Partner API scaffold for contact and appointment sync in the EVH worktree.
+- New files to document: `scripts/instinct_partner_client.py`, `scripts/instinct_accounts.py`, `scripts/instinct_appointments.py`, `scripts/instinct_sync_runner.py`, and `scripts/__init__.py`.
+- Runner behavior to capture: incremental feed pulls, persisted watermark state, structured export records with idempotency keys, and conflict flags for downstream Weave mirroring.
+- Docs updated: `README.md` and `docs/instinct-import.md`.
+- Verification result: focused sync/normalization tests are green with `8 passed`.
+- Appointment contract notes added in `docs/instinct-appointments-contract-notes.md`.
+- Document the six appointment endpoints and the one explicit writable field the Instinct docs expose: `isConfirmed` on `PATCH /v1/appointments/{appointment_id}`.
+- The docs pages I checked did not show JSON examples, so the writeup should clearly say the exact payload shapes still need live API responses or an OpenAPI source if we want field-by-field schemas.
+- FS latest status: Scheduling work is paused; current branch work is documentation/sample-capture only, so Spike should record it as docs work rather than active Scheduling implementation.
+- Rarity documentation follow-up: update the stockroom docs to reflect the newly confirmed workflows and the pending Instinct-human response.
+- Newly confirmed IA workflows to document: vendor item / PIMS mapping, UOM and pack-size setup, on-hand quantity tracking via counts and estimated quantities, cycle counts via the Counting page / weekly list, and inventory reporting via Inventory Analysis export.
+- Newly confirmed Stockroom capabilities to document: room-level quantity tracking, multi-room item support, room-only tracking without sub-locations, locations managed by `Code` and `Label`, buying-unit to selling-unit conversion, and export coverage for cycle counts, inventory history, and analytics.
+- New explicit EVH planning assumption to document: manual location creation in Stockroom is acceptable because the location count is small.
+- Pending human-response section to document: migration path, shadow mode, stable IDs, API endpoints, PIMS mapping migration support, cycle count data behavior, approval/review workflow, location code stability, and multi-room export/API representation.
