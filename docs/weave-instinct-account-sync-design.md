@@ -427,7 +427,7 @@ Near-term EVH work:
 Suggested local modules:
 
 - `scripts/instinct_accounts.py`
-- `scripts/weave_contact_sync.py`
+- `scripts/contacts/weave_contact_sync.py`
 - `scripts/instinct_appointments.py`
 - `scripts/weave_appointment_sync.py`
 - `tests/test_instinct_accounts.py`

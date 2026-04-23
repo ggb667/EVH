@@ -5,7 +5,7 @@ from pathlib import Path
 
 from scripts.instinct_accounts import normalize_account, project_account_to_weave_contact
 from scripts.instinct_partner_client import InstinctPartnerClient
-from scripts.weave_contact_sync import (
+from scripts.contacts.weave_contact_sync import (
     SyncState,
     WeaveCsvContactDestination,
     build_account_query,
@@ -98,7 +98,7 @@ def test_compute_updated_since_applies_overlap_window():
 
 def test_build_account_query_includes_deleted_filters():
     assert build_account_query("2026-04-21T10:05:00Z", 300) == {
-        "includeDeleted": True,
+        "includeDeleted": "true",
         "updatedSince": "2026-04-21T10:00:00Z",
         "deletedSince": "2026-04-21T10:00:00Z",
     }
@@ -178,7 +178,7 @@ def test_run_contact_sync_exports_only_changed_contacts_and_advances_watermark(m
 
     assert calls == [
         {
-            "includeDeleted": True,
+            "includeDeleted": "true",
             "updatedSince": "2026-04-21T10:00:00Z",
             "deletedSince": "2026-04-21T10:00:00Z",
         }
