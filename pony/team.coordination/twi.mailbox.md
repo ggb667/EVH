@@ -1,7 +1,8 @@
 # TWI MAILBOX
 
 ## Pending Items
-- RD routing question: the local worker is on `pony/rd/main`, but the current coordination snapshot expects `pony/rd/pony/rarity/stockroom-planning-docs-clean`. Please confirm whether RD should stay on `pony/rd/main` for Vetcove work or be reassigned to the stockroom-planning branch namespace.
+- Twilight branch update: coordinator work now lives in the EVH root worktree on dedicated branch `pony/twi/main`; workers stay on their own pony branch namespaces and should not be routed onto Twilight's branch.
+- Twilight coordination update: the EVH assignment registry has been reconciled to the actual worker worktree branches (`pony/aj/main`, `pony/pinkie/main`, `pony/fs/instinct-samples`, `pony/rarity/main`, `pony/rd/main`, `pony/spike/main`) so branch-mismatch preflight noise does not mask real blockers.
 - Pinkie blocker update: Weave support case `901174` has been submitted successfully to obtain Weave application credentials/export access.
 - Pinkie current state: code isolation is complete on `pony/pinkie/weave-contact-bootstrap`, the Contacts entry point now lives at `scripts/contacts/weave_contact_sync.py`, and the focused tests are still green after the move.
 - Pinkie remains blocked on the Weave-side bootstrap extract only. Live Instinct export artifacts are already ready:
