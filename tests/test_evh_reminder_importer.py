@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from scripts.evh_reminder_importer import InstinctApiAdapter, ParsedPatientGroup, ReminderQuery
+from scripts.evh_reminder_importer import (
+    InstinctApiAdapter,
+    ParsedPatientGroup,
+    PatientImportPlan,
+    ReminderCandidate,
+    ReminderQuery,
+    build_simulation_payload,
+    map_source_label,
+)
 
 
 def test_summarize_patient_derives_owner_phone_and_reminder_count(monkeypatch):
@@ -230,5 +238,96 @@ def test_iter_reminders_uses_metadata_after_cursor(monkeypatch):
     assert reminders == [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}, {"id": "r4"}]
     assert calls == [
         {"limit": 2},
-        {"limit": 2, "after": "cursor-1"},
+        {"limit": 2, "pageCursor": "cursor-1", "pageDirection": "after"},
     ]
+
+
+def test_map_source_label_normalizes_whitespace():
+    assert map_source_label("DA2PP + Leptospirosis 4 Annual ") == "DA2P + Leptospirosis 4"
+    assert map_source_label("  Dermatonin Implant 8.0mg  ") == "Dermatonin Implant"
+
+
+def test_find_reminder_label_normalizes_whitespace(monkeypatch):
+    adapter = InstinctApiAdapter("https://partner.instinctvet.com", "user", "pass")
+    labels = [
+        {"id": 1, "label": "DA2P + Leptospirosis 4 "},
+        {"id": 2, "label": "Dermatonin Implant"},
+    ]
+
+    monkeypatch.setattr(InstinctApiAdapter, "iter_reminder_labels", lambda self, limit=100: iter(labels))
+
+    assert adapter.find_reminder_label("DA2P + Leptospirosis 4") == {"id": 1, "label": "DA2P + Leptospirosis 4 "}
+    assert adapter.find_reminder_label("  dermatonin implant  ") == {"id": 2, "label": "Dermatonin Implant"}
+    assert adapter.resolve_reminder_label_id("da2p + leptospirosis 4 ") == 1
+    assert adapter.resolve_reminder_label_id("DERMATONIN IMPLANT") == 2
+
+
+def test_build_simulation_payload_uses_valid_reminders_only():
+    plan = PatientImportPlan(
+        patient=ParsedPatientGroup(
+            client="27117",
+            client_name="Kathleen Hetherman",
+            phone_no="(407) 617-8309",
+            patient_name="Ember Hetherman",
+            species="Canine",
+            breed="Rhodesian Ridgeback",
+            header_row_number=6,
+        ),
+        valid_reminders=[
+            ReminderCandidate(
+                source_code="A1",
+                source_label="DA2PP + Leptospirosis 4 Annual",
+                mapped_label="DA2P + Leptospirosis 4",
+                due_date="2026-11-01",
+                row_number=6,
+            )
+        ],
+    )
+
+    payload = build_simulation_payload(plan)
+
+    assert payload["patient"]["patient_name"] == "Ember Hetherman"
+    assert payload["reminders"] == [
+        {
+            "source_code": "A1",
+            "source_label": "DA2PP + Leptospirosis 4 Annual",
+            "mapped_label": "DA2P + Leptospirosis 4",
+            "due_date": "2026-11-01",
+            "row_number": 6,
+        }
+    ]
+
+
+def test_add_reminders_merges_existing_ids_and_patches_patient(monkeypatch):
+    adapter = InstinctApiAdapter("https://partner.instinctvet.com", "user", "pass")
+    patient_record = {"id": 20376, "reminderIds": [40, 51]}
+    reminders = [
+        ReminderCandidate(
+            source_code="A1",
+            source_label="DA2PP + Leptospirosis 4 Annual",
+            mapped_label="DA2P + Leptospirosis 4",
+            due_date="2026-11-01",
+            row_number=6,
+        ),
+        ReminderCandidate(
+            source_code="A2",
+            source_label="Dermatonin Implant 8.0mg",
+            mapped_label="Dermatonin Implant",
+            due_date="2026-12-26",
+            row_number=7,
+        ),
+    ]
+    patches: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(adapter, "resolve_reminder_label_id", lambda label_text: {"DA2P + Leptospirosis 4": 12, "Dermatonin Implant": 13}[label_text])
+
+    def fake_patch(path, payload):
+        patches.append((path, payload))
+        return {"ok": True, "path": path, "payload": payload}
+
+    monkeypatch.setattr(adapter, "_patch", fake_patch)
+
+    result = adapter.add_reminders(patient_record, reminders)
+
+    assert result == {"ok": True, "path": "/v1/patients/20376", "payload": {"reminderIds": [40, 51, 12, 13]}}
+    assert patches == [("/v1/patients/20376", {"reminderIds": [40, 51, 12, 13]})]

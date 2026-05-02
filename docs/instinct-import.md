@@ -76,6 +76,37 @@ The script:
 3. Builds and prints the exact patient payload from `PatientPayloadBuilder`.
 4. Optionally calls `POST /v1/patients` when `--create-patient` is provided.
 
+If Instinct wants a handoff file instead of a live import, use:
+
+- [scripts/instinct_reminder_handoff.csv](/home/ggb66/dev/EVH/scripts/instinct_reminder_handoff.csv)
+
+That CSV contains one row per importable reminder with:
+
+- Avimark client ID in `avimark_client`
+- patient identity
+- source reminder label
+- mapped Instinct reminder label
+- due date
+- Instinct lookup fields when they could be resolved automatically:
+  - `instinct_patient_id`
+  - `instinct_account_id`
+  - `resolution_status`
+  - `match_method`
+  - `match_confidence`
+
+Lookup order:
+
+1. Avimark client code, when it can be matched to an Instinct account.
+2. Owner name plus owner phone, as an account fallback.
+3. Patient name inside the matched account.
+
+Phone number is used only to resolve the owner account, not as a patient-level match key.
+
+Current export size:
+
+- `6,745` reminder rows
+- `6,746` CSV lines including the header
+
 Official reference source:
 
 - `docs/instinct-partner-fetch-account.md`

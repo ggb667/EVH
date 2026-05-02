@@ -344,6 +344,8 @@ def parse_due_date(value: Any) -> str:
 
 
 def map_source_label(source_label: str) -> Optional[str]:
+    source_label = normalize_text(source_label)
+
     if source_label in EXCLUDED_SOURCE_VALUES:
         return None
 
@@ -549,6 +551,18 @@ class InstinctApiAdapter:
         resp.raise_for_status()
         return resp.json()
 
+    def _patch(self, path: str, payload: dict[str, Any]):
+        import requests
+
+        resp = requests.patch(
+            f"{self.base_url}{path}",
+            headers={"Authorization": f"Bearer {self.token}"},
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def iter_reminders(
         self,
         *,
@@ -568,7 +582,8 @@ class InstinctApiAdapter:
             if due_before:
                 params["dueBefore"] = due_before
             if after:
-                params["after"] = after
+                params["pageCursor"] = after
+                params["pageDirection"] = "after"
 
             data = self._get("/v1/reminders", params)
             reminders = _extract_collection(data, ("reminders", "data", "items", "results"))
@@ -579,6 +594,38 @@ class InstinctApiAdapter:
             after = metadata.get("after") if isinstance(metadata, dict) else None
             if not after:
                 break
+
+    def iter_reminder_labels(self, *, limit: int = 100):
+        after = None
+
+        while True:
+            params: dict[str, Any] = {"limit": limit}
+            if after:
+                params["pageCursor"] = after
+                params["pageDirection"] = "after"
+
+            data = self._get("/v1/reminder-labels", params)
+            labels = _extract_collection(data, ("reminderLabels", "data", "items", "results"))
+            for label in labels:
+                yield label
+
+            metadata = data.get("metadata") if isinstance(data, dict) else None
+            after = metadata.get("after") if isinstance(metadata, dict) else None
+            if not after:
+                break
+
+    def find_reminder_label(self, label_text: str) -> Optional[dict[str, Any]]:
+        wanted = _normalize_lookup_text(label_text)
+        for label in self.iter_reminder_labels():
+            if _normalize_lookup_text(label.get("label")) == wanted:
+                return label
+        return None
+
+    def resolve_reminder_label_id(self, label_text: str) -> Optional[int]:
+        label = self.find_reminder_label(label_text)
+        if not label:
+            return None
+        return _coerce_int(label.get("id"))
 
     def get_reminders_for_patient(self, query: ReminderQuery) -> list[dict[str, Any]]:
         reminders = []
@@ -786,6 +833,26 @@ class InstinctApiAdapter:
             "pims_code": patient_record.get("pimsCode"),
         }
 
+    def add_reminders(self, patient_record: dict[str, Any], reminders: list[ReminderCandidate]):
+        patient_id = patient_record.get("id")
+        if patient_id is None:
+            raise RuntimeError("Matched patient is missing id")
+
+        reminder_ids: list[int] = []
+        for reminder_id in patient_record.get("reminderIds") or []:
+            coerced = _coerce_int(reminder_id)
+            if coerced is not None and coerced not in reminder_ids:
+                reminder_ids.append(coerced)
+
+        for reminder in reminders:
+            reminder_id = self.resolve_reminder_label_id(reminder.mapped_label)
+            if reminder_id is None:
+                raise RuntimeError(f"Could not resolve reminder label id for {reminder.mapped_label!r}")
+            if reminder_id not in reminder_ids:
+                reminder_ids.append(reminder_id)
+
+        return self._patch(f"/v1/patients/{patient_id}", {"reminderIds": reminder_ids})
+
 # ---------------------------------------------------------------------------
 # Audit helpers
 # ---------------------------------------------------------------------------
@@ -820,6 +887,14 @@ def plan_to_dict(plan: PatientImportPlan) -> dict[str, Any]:
         },
         "valid_reminders": [dataclasses.asdict(r) for r in plan.valid_reminders],
         "skipped_rows": [dataclasses.asdict(r) for r in plan.skipped_rows],
+    }
+
+
+def build_simulation_payload(plan: PatientImportPlan) -> dict[str, Any]:
+    payload = plan_to_dict(plan)
+    return {
+        "patient": payload["patient"],
+        "reminders": payload["valid_reminders"],
     }
 
 

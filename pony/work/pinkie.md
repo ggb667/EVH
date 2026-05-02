@@ -5,6 +5,7 @@ Branch: pony/pinkie/weave-contact-bootstrap
 
 Status: in_progress
 Scope: Weave Contacts
+Permissions granted: none recorded
 Notes:
 - primary area: Weave contacts workflows and related EVH integration work
 - owned script directory: `scripts/contacts/`
@@ -13,3 +14,5 @@ Notes:
 - isolation update complete: Contacts entry point now lives at `scripts/contacts/weave_contact_sync.py` on a `pony/pinkie/*` branch
 - current blocker: waiting on Weave support case `901174` for application credentials/export access so the existing Weave contact list can be pulled for bootstrap reconciliation
 - immediate task: persist the live Instinct export artifacts into the branch so shutdown does not depend on `/tmp`
+- coordination mismatch: the launcher expected branch `pony/pinkie/pony/rarity/stockroom-planning-docs-clean`, but the local worktree is on `pony/pinkie/main`
+- routing question for Twilight: confirm whether Pinkie should switch branches to the expected stockroom-planning-docs-clean line or whether the launcher/assignment registry should be corrected for the Weave Contacts track

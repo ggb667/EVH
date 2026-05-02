@@ -1,6 +1,7 @@
 # TWI MAILBOX
 
 ## Pending Items
+- RD routing question: the local worker is on `pony/rd/main`, but the current coordination snapshot expects `pony/rd/pony/rarity/stockroom-planning-docs-clean`. Please confirm whether RD should stay on `pony/rd/main` for Vetcove work or be reassigned to the stockroom-planning branch namespace.
 - Pinkie blocker update: Weave support case `901174` has been submitted successfully to obtain Weave application credentials/export access.
 - Pinkie current state: code isolation is complete on `pony/pinkie/weave-contact-bootstrap`, the Contacts entry point now lives at `scripts/contacts/weave_contact_sync.py`, and the focused tests are still green after the move.
 - Pinkie remains blocked on the Weave-side bootstrap extract only. Live Instinct export artifacts are already ready:
@@ -37,7 +38,8 @@
 - RD current state summary: this track is still in discovery and coordination mode, not active vendor-bound implementation. We have a design note, a reusable Instinct identity adapter, and a recommended operating model, but no Vetcove adapter or order/prescription sync code should be started until the vendor confirms the Instinct-specific Home Delivery contract.
 - RD payload update: live Instinct prescription payloads have now been captured and documented in `docs/instinct-prescription-payload-notes.md` for all four endpoints: list/fetch `external-prescriptions` and list/fetch `dispensed-prescriptions`.
 - RD current conclusion after payload capture: `external-prescriptions` looks like the better Vetcove-facing export candidate because it includes embedded product label/unit metadata, instructions, `quantityPerFill`, and `pharmacyNote`; `dispensed-prescriptions` looks more useful for account linkage and reconciliation because it includes `accountId`, `productId`, `prescribedAt`, and `remainingFills`. This is an inference from live payloads, not a vendor-confirmed contract.
-- RD next concrete step: compare the documented Instinct fields against Vetcove's onboarding/import template, then begin the first RD-owned export slice under `scripts/vetcove/`.
+- RD next concrete step: compare the documented Instinct fields against Vetcove's onboarding/import template, then decide whether `external-prescriptions` alone is enough or whether `dispensed-prescriptions` also needs to be carried into the custom export workflow.
+- Spike note: the remaining RD documentation work is the field-mapping note against the Vetcove onboarding/import template; keep that doc gap visible in the coordination trail before any `scripts/vetcove/` implementation starts.
 - FS status update: built a shared Instinct Partner API scaffold in the EVH worktree for the Weave/Instinct appointment and contact sync work.
 - New files added: `scripts/instinct_partner_client.py`, `scripts/instinct_accounts.py`, `scripts/instinct_appointments.py`, and `scripts/instinct_sync_runner.py`.
 - Runner behavior: dry-run account and appointment feed normalization, persisted JSON watermark state, structured export JSON, idempotency keys, and basic conflict marking for canceled appointments.

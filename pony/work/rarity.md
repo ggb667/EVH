@@ -5,6 +5,7 @@ Branch: pony/rarity/main
 
 Status: assigned
 Scope: Stockroom
+Permissions granted: none recorded
 Notes:
 - primary area: stockroom workflows and related EVH integration work
 - owned script directory: `scripts/stockroom/`
