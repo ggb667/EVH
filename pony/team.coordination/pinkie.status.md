@@ -1,6 +1,7 @@
 AUDIENCE: EVERYONE
 BRANCH: pony/pinkie/main
 WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
+WORKFILE: [pony/work/pinkie.md](../work/pinkie.md)
 BRANCH_VERIFIED: yes
 STATUS: HOLD
 PUSH_STATUS: local_changes_not_pushed
@@ -11,3 +12,4 @@ BLOCKERS: waiting on Weave support case 901174 for application credentials or ex
 NEXT_STEP: once Weave access arrives, export the existing Weave contact list, reconcile it against the persisted Instinct export, and decide what is safe to import
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none
+LAUNCH_CHECK: preflight reported no immediate active coding slice; local Pinkie state was verified and remains assigned to Weave Contacts

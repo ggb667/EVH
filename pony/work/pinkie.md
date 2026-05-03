@@ -14,3 +14,4 @@ Notes:
 - isolation update complete: Contacts entry point now lives at `scripts/contacts/weave_contact_sync.py` on a `pony/pinkie/*` branch
 - current blocker: waiting on Weave support case `901174` for application credentials/export access so the existing Weave contact list can be pulled for bootstrap reconciliation
 - immediate task: persist the live Instinct export artifacts into the branch so shutdown does not depend on `/tmp`
+- launch check: user requested a Codex launch despite the preflight saying there is no immediate active coding slice; local state still shows the Weave Contacts slice as the active Pinkie assignment
