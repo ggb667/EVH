@@ -8,6 +8,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from urllib import error, parse, request
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -16,6 +17,7 @@ import requests
 
 
 DEFAULT_BASE_URL = "https://evh.api.instinctvet.com/"
+DEFAULT_AUTH_URL = "https://partner.instinctvet.com/v1/auth/token"
 DEFAULT_ORIGIN = "https://app.instinctvet.cloud"
 DEFAULT_REFERER = "https://app.instinctvet.cloud/"
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +31,44 @@ class ReminderRow:
     remind_on: str
     notes: str
     location_id: str = "1"
+
+
+def fetch_partner_token(auth_url: str, client_id: str, client_secret: str) -> str:
+    body = parse.urlencode(
+        {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+    ).encode("utf-8")
+    req = request.Request(
+        url=auth_url,
+        method="POST",
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+
+    try:
+        with request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            parsed = json.loads(raw) if raw else {}
+            if resp.status >= 400:
+                raise RuntimeError(f"Token request failed with HTTP {resp.status}: {parsed}")
+    except error.HTTPError as exc:
+        raw = exc.read().decode("utf-8")
+        parsed = json.loads(raw) if raw else {}
+        raise RuntimeError(f"Token request failed with HTTP {exc.code}: {parsed}") from exc
+
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Token response was not JSON.")
+
+    token = parsed.get("access_token") or parsed.get("token") or parsed.get("jwt") or parsed.get("id_token")
+    if not isinstance(token, str) or not token.strip():
+        raise RuntimeError(f"Token response missing access token field: {parsed}")
+    return token
 
 
 def load_rows(csv_path: Path) -> list[ReminderRow]:
@@ -115,6 +155,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--csv", type=Path, default=ROOT / "scripts" / "instinct_reminder_handoff.csv")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--token", default=os.getenv("INSTINCT_BEARER_TOKEN", ""))
+    parser.add_argument("--client-id", default=os.getenv("INSTINCT_CLIENT_ID", ""))
+    parser.add_argument("--client-secret", default=os.getenv("INSTINCT_CLIENT_SECRET", ""))
+    parser.add_argument("--auth-url", default=DEFAULT_AUTH_URL)
     parser.add_argument("--delay", type=float, default=1.0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
@@ -125,8 +168,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_arg_parser().parse_args()
 
-    if not args.dry_run and not args.token:
-        raise SystemExit("Missing bearer token. Pass --token or set INSTINCT_BEARER_TOKEN.")
+    token = args.token.strip()
+    if not args.dry_run and not token:
+        if args.client_id and args.client_secret:
+            token = fetch_partner_token(args.auth_url, args.client_id, args.client_secret)
+        else:
+            raise SystemExit(
+                "Missing bearer token. Pass --token or set INSTINCT_BEARER_TOKEN, "
+                "or pass --client-id and --client-secret to fetch one."
+            )
 
     rows = load_rows(args.csv)
     if args.offset:
@@ -136,7 +186,7 @@ def main() -> int:
 
     results: list[dict[str, Any]] = []
     for index, row in enumerate(rows, start=1):
-        result = post_reminder(args.base_url, args.token, row, dry_run=args.dry_run)
+        result = post_reminder(args.base_url, token, row, dry_run=args.dry_run)
         result["source_row_number"] = row.source_row_number
         result["patient_id"] = row.patient_id
         result["reminder_label_id"] = row.reminder_label_id

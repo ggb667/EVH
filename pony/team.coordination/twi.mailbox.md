@@ -57,4 +57,5 @@
 - User has emailed Instinct humans the remaining implementation-risk questions covering migration path, shadow mode, stable IDs, API endpoints, PIMS mapping migration, cycle count data behavior, approval/review workflow, location code stability, and multi-room export/API representation.
 - Recommended next coordination step after reply arrives: lock the room-level first-wave pilot scope and reduce the remaining `TBD` items in the ownership matrix.
 - AJ note for Celestia: `.codex` should be ignored from now on at the repo root, and that instruction has been recorded in AJ local state.
+- AJ update for Celestia: WSL DNS was repaired by rewriting `/etc/resolv.conf` to `8.8.8.8`, `8.8.4.4`, and `192.168.86.1`; `getent hosts` now resolves `partner.instinctvet.com` and `evh.api.instinctvet.com`, but `curl` and Python still need a WSL restart or equivalent network refresh before the reminder token fetch will work again.
 - Coordination rule: worker-local state should be canonical in `pony/work/*.md`; Twilight and team coordination notes should link to those workfiles and summarize deltas instead of duplicating the full state.
