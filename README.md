@@ -34,6 +34,16 @@ Run tests with:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest --basetemp=/tmp/evh-pytest tests
 ```
 
+## Coordination
+
+For multi-worker EVH execution, use the repo-local coordination files in
+`scripts/coordination/`.
+
+- `scripts/coordination/TASK_BOARD.md`: live assignment and status board
+- `scripts/coordination/TASK_TEMPLATE.md`: new-task template
+- `scripts/coordination/HANDOFF_TEMPLATE.md`: required worker closeout format
+- `scripts/coordination/COORDINATOR_CHECKLIST.md`: coordinator review checklist
+
 ## Identifier rules
 
 Instinct uses multiple IDs for related records. Do not treat them as interchangeable.

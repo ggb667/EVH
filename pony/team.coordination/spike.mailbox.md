@@ -1,6 +1,8 @@
 # SPIKE MAILBOX
 
 ## Pending Items
+- AJ note: HAR captured the Instinct reminder write path. The browser uses `AddPatientReminder` with `patientId`, `reminderLabelId`, `notes`, `remindOn`, `locationId`, `isActive`, and `lastAdministeredOn`. Please record this interaction and note that the save request is a GraphQL mutation to `https://evh.api.instinctvet.com/`.
+- AJ note: we likely have enough to draft curl requests for missing reminders, but we still need the full per-row reminder mapping and any duplicate/ordering rules before treating the batch as safe to generate automatically.
 - Pinkie documentation status update: Contacts work is currently blocked on Weave support case `901174` for export credentials/access.
 - Please document that the isolation refactor is now complete:
   - branch namespace: `pony/pinkie/weave-contact-bootstrap`

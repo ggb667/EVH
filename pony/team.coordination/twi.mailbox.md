@@ -1,6 +1,9 @@
 # TWI MAILBOX
 
 ## Pending Items
+- AJ resend in EVH: the Instinct bearer token used for reminder submission is session-bound and likely short-lived; the reminder batch runner works, but it should be treated as needing a fresh token if the browser session expires mid-run.
+- AJ note: Instinct search is not working reliably; `Kindra Abner` could not be found directly, but `Abner` was found and then `Jack` was found under that account.
+- AJ note: first reminder check for `Abner, Kindra` / `Jack` found no reminders set, so the interaction is a no-op verification and not an applied reminder update.
 - Twilight branch update: coordinator work now lives in the EVH root worktree on dedicated branch `pony/twi/main`; workers stay on their own pony branch namespaces and should not be routed onto Twilight's branch.
 - Twilight coordination update: the EVH assignment registry has been reconciled to the actual worker worktree branches (`pony/aj/main`, `pony/pinkie/main`, `pony/fs/instinct-samples`, `pony/rarity/main`, `pony/rd/main`, `pony/spike/main`) so branch-mismatch preflight noise does not mask real blockers.
 - Pinkie blocker update: Weave support case `901174` has been submitted successfully to obtain Weave application credentials/export access.

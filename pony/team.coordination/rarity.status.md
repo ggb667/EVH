@@ -9,7 +9,7 @@ APPROVALS: none recorded
 FILES_PLANNED: none
 FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
 BLOCKERS: waiting on the Instinct-human response to the migration path, shadow mode, stable ID, API coverage, and cycle-count behavior questions
-CURRENT_STOP: no new input arrived this run; remain paused on the same Instinct-human blocker
-NEXT_STEP: when the Instinct response arrives, refine the room-level first-wave pilot and reduce the remaining `TBD` items in the ownership matrix
+CURRENT_STOP: stockroom-format CSV located in the worktree; no transformation requested yet
+NEXT_STEP: when the user specifies the desired CSV operation, inspect or transform `Stockroom · Instinct Stockroom.csv`
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none
