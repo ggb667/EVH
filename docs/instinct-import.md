@@ -69,6 +69,43 @@ Authentication is required; provide either:
 - `--username` + `--password` (Basic auth), or
 - `--api-key` (Bearer auth).
 
+If DNS is flaky in a live shell but the Instinct hosts still answer, you can
+often rescue the auth and API calls with explicit `curl --resolve` mappings.
+The pattern that worked here was:
+
+```bash
+token=$(curl -sS --max-time 20 \
+  --resolve partner.instinctvet.com:443:13.219.195.160 \
+  https://partner.instinctvet.com/v1/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'client_id=$INSTINCT_CLIENT_ID' \
+  --data-urlencode 'client_secret=$INSTINCT_CLIENT_SECRET' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl -sS --max-time 30 \
+  --resolve evh.api.instinctvet.com:443:32.195.76.53 \
+  https://evh.api.instinctvet.com/ \
+  -H "authorization: Bearer $token" \
+  -H 'content-type: application/json' \
+  --data '{"operationName":"...","variables":{...},"query":"..."}'
+```
+
+Short helper version:
+
+```bash
+instinct_token() {
+  curl -sS --max-time 20 \
+    --resolve partner.instinctvet.com:443:13.219.195.160 \
+    https://partner.instinctvet.com/v1/auth/token \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "grant_type=client_credentials" \
+    --data-urlencode "client_id=$INSTINCT_CLIENT_ID" \
+    --data-urlencode "client_secret=$INSTINCT_CLIENT_SECRET" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+}
+```
+
 The script:
 
 1. Calls `GET /v1/accounts/{id}` to verify the test account exists.

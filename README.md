@@ -18,6 +18,43 @@ Token endpoint used by the local scripts:
 
 - `POST https://partner.instinctvet.com/v1/auth/token`
 
+If DNS is flaky but the Instinct hosts are still reachable, the live calls can
+often be rescued with explicit `curl --resolve` mappings. The pattern that
+worked in this repo was:
+
+```bash
+token=$(curl -sS --max-time 20 \
+  --resolve partner.instinctvet.com:443:13.219.195.160 \
+  https://partner.instinctvet.com/v1/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'client_id=$INSTINCT_CLIENT_ID' \
+  --data-urlencode 'client_secret=$INSTINCT_CLIENT_SECRET' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl -sS --max-time 30 \
+  --resolve evh.api.instinctvet.com:443:32.195.76.53 \
+  https://evh.api.instinctvet.com/ \
+  -H "authorization: Bearer $token" \
+  -H 'content-type: application/json' \
+  --data '{"operationName":"...","variables":{...},"query":"..."}'
+```
+
+For repeated use, this shell helper keeps the pattern in one place:
+
+```bash
+instinct_token() {
+  curl -sS --max-time 20 \
+    --resolve partner.instinctvet.com:443:13.219.195.160 \
+    https://partner.instinctvet.com/v1/auth/token \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "grant_type=client_credentials" \
+    --data-urlencode "client_id=$INSTINCT_CLIENT_ID" \
+    --data-urlencode "client_secret=$INSTINCT_CLIENT_SECRET" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
+}
+```
+
 ## Environment and setup
 
 This repo currently uses the local virtualenv at `.venv`.
