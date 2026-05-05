@@ -91,6 +91,10 @@ curl -sS --max-time 30 \
   --data '{"operationName":"...","variables":{...},"query":"..."}'
 ```
 
+Use this only when the hostname lookup is the failure point and you already
+know a good IP. If the service itself is down, the edge host has changed, or
+TLS/certificate expectations differ, `--resolve` is not the right fix.
+
 Short helper version:
 
 ```bash

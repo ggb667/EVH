@@ -40,6 +40,10 @@ curl -sS --max-time 30 \
   --data '{"operationName":"...","variables":{...},"query":"..."}'
 ```
 
+Use this only when the host name is the problem and you already have a known
+good IP. If the service is down, the certificate no longer matches, or the app
+requires a different edge host, `--resolve` is the wrong tool.
+
 For repeated use, this shell helper keeps the pattern in one place:
 
 ```bash
