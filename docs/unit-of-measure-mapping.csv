@@ -1,0 +1,58 @@
+inventory_ally,normalized_value,source_group
+Ampoule,ampoule,Inventory Ally
+Applicator,applicator,Inventory Ally
+Blister,blister,Inventory Ally
+Bucket,bucket,Inventory Ally
+Caplet,caplet,Inventory Ally
+Cassette,cassette,Inventory Ally
+Catheter,catheter,Inventory Ally
+Chew,chew,Inventory Ally
+Count,count,Inventory Ally
+Cover,cover,Inventory Ally
+Envelope,envelope,Inventory Ally
+Gloves,gloves,Inventory Ally
+Jar,jar,Inventory Ally
+Mask,mask,Inventory Ally
+Needle,needle,Inventory Ally
+Pouch,pouch,Inventory Ally
+Roll,roll,Inventory Ally
+Rx Vial,rx vial,Inventory Ally
+Sachet,sachet,Inventory Ally
+Sleeve,sleeve,Inventory Ally
+Slide,slide,Inventory Ally
+Stick,stick,Inventory Ally
+Strip,strip,Inventory Ally
+Supplement,sup,Inventory Ally
+Suture,suture,Inventory Ally
+Syringe,syringe,Inventory Ally
+Tray,tray,Inventory Ally
+Wipe,wipe,Inventory Ally
+Yard,yd,Inventory Ally
+source_group,source_unit,target_unit
+STOCKROOM,9 Point Score,/9
+EMR,Bag,bag
+EMR,Bottle,btl
+EMR,Box,box
+EMR,Capsule,cap
+EMR,Dose,dose
+EMR,Drop,drop
+EMR,Each,ea
+EMR,Microgram per Kilogram per Hour,mcg/kg/hr
+EMR,Microgram per Kilogram per Minute,mcg/kg/min
+EMR,Milliequivalent per Kilogram per Hour,mEq/kg/hr
+EMR,Milliequivalent per Liter,mEq/L
+EMR,Milligram per Kilogram per Hour,mg/kg/hr
+EMR,Milligram per Kilogram per Minute,mg/kg/min
+EMR,Milliliter,mL
+EMR,Milliliter per Hour,mL/hr
+EMR,Milliliter per Kilogram per Hour,mL/kg/hr
+EMR,Milliliter per Liter,mL/L
+EMR,Millimole per Kilogram per Hour,mmol/kg/hr
+EMR,Millimole per Liter,mmol/L
+EMR,Packet,pkt
+EMR,patch,PATCH
+EMR,Percent,%
+EMR,Tablet,tab
+EMR,Tube,tube
+EMR,Unit per Kilogram per Hour,Unit/kg/hr
+EMR,Vial,vial

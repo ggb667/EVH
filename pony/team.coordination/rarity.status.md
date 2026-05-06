@@ -6,6 +6,7 @@ BRANCH_VERIFIED: yes
 STATUS: ASSIGNED
 PUSH_STATUS: clean_local_branch
 APPROVALS: none recorded
+NOTES: user instruction recorded - when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 FILES_PLANNED: none
 FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
 BLOCKERS: waiting on the Instinct-human response to the migration path, shadow mode, stable ID, API coverage, and cycle-count behavior questions

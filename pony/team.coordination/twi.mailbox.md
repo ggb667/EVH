@@ -60,3 +60,4 @@
 - AJ note for Celestia: `.codex` should be ignored from now on at the repo root, and that instruction has been recorded in AJ local state.
 - AJ update for Celestia: WSL DNS was repaired by rewriting `/etc/resolv.conf` to `8.8.8.8`, `8.8.4.4`, and `192.168.86.1`; `getent hosts` now resolves `partner.instinctvet.com` and `evh.api.instinctvet.com`, but `curl` and Python still need a WSL restart or equivalent network refresh before the reminder token fetch will work again.
 - Coordination rule: worker-local state should be canonical in `pony/work/*.md`; Twilight and team coordination notes should link to those workfiles and summarize deltas instead of duplicating the full state.
+- Rarity instruction: when a worker is handed page-by-page data, save it into a real file immediately instead of creating a stub, summary placeholder, or partial reconstruction.

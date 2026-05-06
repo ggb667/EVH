@@ -6,6 +6,7 @@ Branch: pony/rarity/main
 Status: assigned
 Scope: Stockroom
 Permissions granted: none recorded
+- user instruction recorded: when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 Notes:
 - primary area: stockroom workflows and related EVH integration work
 - owned script directory: `scripts/stockroom/`
