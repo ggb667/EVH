@@ -12,8 +12,8 @@ Notes:
 - owned script directory: `scripts/stockroom/`
 - branch policy: work only on Rarity-owned branches in the `pony/rarity/*` namespace; do not do Stockroom implementation work on shared root branches
 - keep the workfile current with the active Stockroom subtask before starting implementation
-- current stop point: waiting on the Instinct-human response before refining the room-level first-wave pilot
-- active subtask: stockroom planning is active; waiting on Instinct-human response to the emailed migration/path, shadow mode, stable IDs, API coverage, and cycle-count behavior questions before refining the room-level first-wave pilot and reducing the remaining TBD items
+- current stop point: refreshed the supplier mapping reference and kept the base stockroom CSV as the active checked-in input
+- active subtask: stockroom CSV support is active; supplier mapping data is ready for the next requested transform
 - routing note: user guidance says Rarity should stay on `pony/rarity/main` for Stockroom, so no branch move is needed unless Twilight updates the assignment registry
-- current input: stockroom-format CSV was located in the worktree as `Stockroom · Instinct Stockroom.csv`
-- next step: inspect or transform the stockroom CSV once the desired operation is specified
+- current input: `docs/Stockroom · Instinct Stockroom.csv`, plus refreshed supplier reference docs at `docs/manufacturer-supplier-mapping.csv` and `docs/manufacturer-supplier-mapping.md`
+- next step: wait for the user to specify whether to inspect or transform the stockroom CSV using the refreshed supplier mapping reference

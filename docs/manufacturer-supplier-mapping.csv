@@ -1,20 +1,109 @@
 category,code,name,phone
-manufacturer,BAY,Bayer,800-633-3796
-manufacturer,BI,Boehringer Ingelheim,866-638-2226
-manufacturer,ELANCO,Elanco,800-428-4441
-manufacturer,HIL,Hill's Pet Nutrition Inc.,800-354-4557
-manufacturer,MERCK,Merck Animal Health,800-224-5318
-manufacturer,MRK,Merial,888-637-4251
-manufacturer,NORDIC,Nordic Naturals,800-662-2544
-manufacturer,NAH,Novartis Animal Health US,800-332-2761
-manufacturer,NMX,Nutrimax Laboratories,800-925-5187
-manufacturer,ROYCAN,Royal Canin USA Inc.,800-592-6687
-manufacturer,SCH,Schering,800-521-5767
-manufacturer,SOL,Solvay Animal Health,
-manufacturer,UPJ,Upjohn,
-manufacturer,VETRI,Vetri-Science Labs,800-882-9993
-manufacturer,PZR,Zoetis/Pfizer Inc,888-963-8471
-manufacturer,ZOMEDICA,Zomedica,734-369-2555
+supplier,ABA,Abaxis,51-675-6500
+supplier,ADMED,Advantage Medical,407-333-3555
+supplier,0117,Airgas USA LLC,770-590-6038 Act.# 1292380 Ext 6038
+supplier,IAW,Airwick,800-523-6070
+supplier,ALLI,Allivet,877-500-9944
+supplier,AAHA,American Animal Hospital,800-883-6301
+supplier,ADL,Animal Dermatology Lab,800-521-252
+supplier,IAL,Antech Labs,800-872-1001
+supplier,APS,APS Pharmacy,888-547-2654
+supplier,BAYP,Bay Pharmacy,352-357-4341
+supplier,BAY,Bayer,800-633-3796
+supplier,BAYSE,Bayse Janitor Supply,352-357-3303
+supplier,BM,Bio Medical Services,800-444-2370
+supplier,BIOPRO,BioPro Research,1877URINEOFF
+supplier,BI,Boehringer Ingelheim,866-638-2226
+supplier,BAH,Butler Schein,888-691-2724
+supplier,CAMP,Campbell Pet Company,800-228-6364
+supplier,CBDVP,CBD Vet Products,863-513-4987
+supplier,CHOMP,Chompers Lawn Care,352-516-4445
+supplier,COV,Covetrus,877-999-2838
+supplier,CVS,CVS Pharmacy,352-343-1502
+supplier,CSI,Cypress Supply Inc,407-332-0556
+supplier,DIATECH,Diatech Inc,1-800-222-185
+supplier,DBT,Digicare Biomedical Tech,561-689-0408
+supplier,BUZBY,Dr Buzbys Toe Grips,843-476-4598
+supplier,DRXIE,Dr Xies Jing Tang,800-891-1986
+supplier,DD,Dublin Dog Co,1866-707-1231
+supplier,ELANCO,Elanco,800-428-4441
+supplier,ELLEVET,ElleVet Sciences,844-673-7287
+supplier,ECO,Eustis City,352-589-4333
+supplier,FEDEX,FedEx,407-617-4459
+supplier,FOR,Fort Dodge,800-685-5656
+supplier,FCL,Franks Compounding Lab,800-622-451
+supplier,GARMON,Garmon Corporation,
+supplier,IGRA,Grainger,800-323-0620
+supplier,GREEN,Greenbrier Faithful,407-886-2620
+supplier,GC,Groomers Choice,888-364-6242
+supplier,HFSI,Harmony Fastening Systems,1-800-748-384
+supplier,HSI,Henry Schein,800-472-4346
+supplier,HESKA,Heska Corp,800-464-3752
+supplier,IHCC,Highland Capital Corp,877-527-4422
+supplier,HIL,Hill's Pet Nutrition Inc.,800-354-4557
+supplier,HON,Honeckman Dr Adam,321-279-3683
+supplier,IMED,I-MED Pharma,514-685-8118
+supplier,IDEACOM,IdeaCom,888-433-2266
+supplier,IDX,IDEXX Laboratories,800-548-6733
+supplier,IVS,Institute Veterinary Spec,352-331-4233
+supplier,INTER,Intervet,800-441-8272
+supplier,JWS,John Wiley Sons,877-762-2974
+supplier,PARKS,Kevin Parks Lawn,352-551-8612
+supplier,KVP,KVP Kong,888-411-7387
+supplier,LP,Lake Pharmacy,352-357-5485
+supplier,MED,Medcare Products,1 800 433 - 4
+supplier,MEDARTS,Medical Arts Press,800-328-217
+supplier,M4V,Meds4Vets,866-633-4838
+supplier,MERCK,Merck Animal Health,800-224-5318
+supplier,MRK,Merial,888-637-4251
+supplier,MERRITT,Merritt Animal Clinic,352-589-1589
+supplier,MER,Merritt Vet Supplies,800-845-0411
+supplier,MSU,Michigan State University,517-353-1683
+supplier,MILA,Mila International,859-957-1722
+supplier,MIL,Miles Inc,800-333-1231
+supplier,MUC,Minnesota Urolith Center,612-625-4221
+supplier,MMM,Mohawk Medical Mall,800-962-5660
+supplier,MWI,MWI Veterinary Supply,800-824-3703
+supplier,NATBANDT,National Band Tag,859-261-2035
+supplier,NCS,National Clinical Supply,800-453-6452
+supplier,NORDIC,Nordic Naturals,800-662-2544
+supplier,NAH,Novartis Animal Health US,800-332-2761
+supplier,NMX,Nutrimax Laboratories,800-925-5187
+supplier,OFFDEP,Office Depot,1-888-godepot
+supplier,OPS,Office Product Solutions,813-630-4920
+supplier,OLYMPIC,Olympic Veterinary Corp,206-722-3777
+supplier,OSTER,Oster Professional,
+supplier,PAH,Palmetto Animal Health,352-735-2006
+supplier,PARAMED,Para Medical Labels,15306265741
+supplier,PARMES,Parks Medical Sales,702-736-6317
+supplier,PATT,Patterson Office Supply,800-637-1140
+supplier,WEB,Patterson Vet Webster,800-225-7911
+supplier,PATL,Patterson Veterinary Supply,800-225-7911
+supplier,PFD,Phillips Pet Food,800-451-2817
+supplier,PIT,Pitman Moore,800-525-9480
+supplier,PSIV,PSI Veterinary Group,727-504-4481
+supplier,PSI,Purchasing Services,888-275-652
+supplier,PURINA,Purina,800-738-5335
+supplier,PUR,Purina Pet Care MWI,
+supplier,PUTNEY,Putney,207-553-4419
+supplier,QUACONN,Quality Connections,904-759-3282
+supplier,QUILL,Quill Medical Arts,800-789-1186
+supplier,RDC,Radiation Detection,800-250-3314
+supplier,IRP,Roadrunner Pharmacy,877-518-4589
+supplier,ROM,Romine Reprographics,407-464-1700
+supplier,ROYCAN,Royal Canin USA Inc.,800-592-6687
+supplier,RYANPS,Ryans Pet Supplies,1-800-525-738
+supplier,SCH,Schering,800-521-5767
+supplier,SEAN,Seans Lawns,321-436-2734
+supplier,SHOPLET,Shoplet,212-619-3353
+supplier,SILBPA,Silvernagel Burroughs,352-729-6752
+supplier,ISP,Smart Practice,800-522-0800
+supplier,SBN,SmithKline Beecham,800-733-5500
+supplier,SOL,Solvay Animal Health,
+supplier,SONIQ,Soniquence,516-660-6728
+supplier,SAS,Southern Anesthesia,800-624-5926
+supplier,SPP,Specialty Pet Products,866-540-7457
+supplier,SPC,Spectrum Chemicals,310-516-8000
 supplier,ISPI,Spectrum Instruments,800-444-5644
 supplier,SRGINC,Sports Resource Group,914-747-8572
 supplier,STOKHC,Stokes Healthcare,800-754-5222
@@ -27,10 +116,15 @@ supplier,TESTSUP1,Test Supplier 1,555-555-5555
 supplier,THUND,Thunderworks,866-892-2078
 supplier,TMI,Trudell Medical,1-200-465-329
 supplier,UT,U Tenn Endocrinology,865-974-5638
+supplier,UPJ,Upjohn,
 supplier,VACRX,VacRx,800-922-1456
 supplier,VANLUE,Van Lue Veterinary,407-408-1110
 supplier,VARL,Veterinary Allergy Referal,1-800-982-827
 supplier,VEC,Veterinary Emergency Clinic,407-740-5500
 supplier,VHI,Veterinary Heart Institute,888-844-1019
+supplier,VETRI,Vetri-Science Labs,800-882-9993
 supplier,IVETRI,Vetrimark,800-773-5504
 supplier,WALMART,Wal Mart Pharmacy,
+supplier,IWWP,Wedgewood Pharmacy,800-331-8272
+supplier,PZR,Zoetis/Pfizer Inc,888-963-8471
+supplier,ZOMEDICA,Zomedica,734-369-2555
