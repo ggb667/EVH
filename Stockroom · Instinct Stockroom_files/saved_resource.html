@@ -1,0 +1,39 @@
+
+<!-- saved from url=(0011)about:blank -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><script type="text/javascript" charset="utf-8" src="https://js.intercomcdn.com/frame-modern.5bd0dcec.js" integrity="sha384-Y+SktT2hbSkwLAQjychvuHk6jL0jPdimLT+KK0aHMQGFpSFVB0eTN8IwLZn9cNe1" crossorigin="anonymous"></script><script type="text/javascript" charset="utf-8" src="https://js.intercomcdn.com/vendor-modern.00ca12c4.js" integrity="sha384-KMW68lFUlRFO+w5NN8UaESui+fKcmJwhUU7rVkH6zjU+C+UAWuwIa1F+Od8HqfH5" crossorigin="anonymous"></script></head>
+      <body>
+      
+    </body><style class="stylus">/* ==UserStyle==
+@name           chatgpt.com
+@namespace      github.com/openstyles/stylus
+@version        1.0.0
+@description    A new userstyle
+@author         Me
+==/UserStyle== */
+/* Expand the main thread width (the 40rem/48rem CSS var limiter) */
+:root {
+    --thread-content-max-width: 100vw !important;
+}
+
+/* In case the var is set on a container rather than :root */
+[class*="thread-content-max-width"],
+[class*="max-w-(--thread-content-max-width)"],
+.agent-turn {
+    --thread-content-max-width: 100vw !important;
+    max-width: 100vw !important;
+    width: 100% !important;
+}
+
+/* Remove centering that keeps a narrow column */
+.mx-auto {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
+/* Remove prose limiter (the 65ch rule) */
+.prose,
+.markdown.prose,
+[class*="prose"] {
+    max-width: none !important;
+    width: 100% !important;
+}</style></html>
