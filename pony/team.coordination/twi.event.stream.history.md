@@ -3,6 +3,11 @@
 ## Current State
 - pending_review_needed_content: none
 
+## 2026-05-10 16:45:00
+- changed_file: pony/team.coordination/pinkie.status.md, pony/team.coordination/rarity.status.md, pony/team.coordination/twi.event.stream.history.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md, pony/work/pinkie.md, pony/work/rarity.md
+- action: Dirty-worktree reconciliation completed
+- note: Twilight shelved the disposable local browser/npm residue into `stash@{0}` (`twilight-preflight local browser/npm residue`), preserved the real Pinkie/Rarity/Twilight coordinator-state updates in a deliberate checkpoint, and returned the EVH root worktree on `pony/twi/main` to normal waiting coordination with no pending worker questions
+
 ## 2026-05-07 17:18:00
 - changed_file: pony/team.coordination/twi.status.md, pony/team.coordination/twi.event.stream.history.md
 - action: Dirty-worktree reconciliation completed
@@ -1375,3 +1380,51 @@
 14:NEXT_STEP: wait for the user to specify whether the stockroom CSV should be transformed using the refreshed supplier mapping reference
 15:QUESTIONS_FOR_TWI: none
 16:DECISION_NEEDED: none
+## 2026-05-07 23:04:30
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+11:FILES_PLANNED: none
+12:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+13:BLOCKERS: none
+15:NEXT_STEP: produce the new combined CSV and report the matched, nonmatched, text-only, and number-only counts
+16:QUESTIONS_FOR_TWI: none
+17:DECISION_NEEDED: none
+## 2026-05-07 23:14:02
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+11:FILES_PLANNED: none
+12:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+13:BLOCKERS: none
+15:NEXT_STEP: wait for the user to review the generated fuzzy match list
+16:QUESTIONS_FOR_TWI: none
+17:DECISION_NEEDED: none
+## 2026-05-08 23:21:08
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+12:FILES_PLANNED: none
+13:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+14:BLOCKERS: none
+16:NEXT_STEP: apply the confirmed transport path to the remaining stockroom supplier updates
+17:QUESTIONS_FOR_TWI: none
+18:DECISION_NEEDED: none
+## 2026-05-09 02:42:11
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:NEXT_STEP: capture full product UUID mapping from `load_global_product` traffic, then bulk-replay `update_global_product` with supplier-only changes
+19:QUESTIONS_FOR_TWI: none
+20:DECISION_NEEDED: none

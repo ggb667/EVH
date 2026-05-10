@@ -57,6 +57,52 @@
 - EVH planning assumption is now explicit: first rollout is room-only, with manual location creation in Stockroom because the location count is small.
 - User has emailed Instinct humans the remaining implementation-risk questions covering migration path, shadow mode, stable IDs, API endpoints, PIMS mapping migration, cycle count data behavior, approval/review workflow, location code stability, and multi-room export/API representation.
 - Recommended next coordination step after reply arrives: lock the room-level first-wave pilot scope and reduce the remaining `TBD` items in the ownership matrix.
+- Rarity wire-capture update: the working interception point is `view.pushHookEvent` on the `product-catalog` LiveView root, not `window.liveSocket.pushHookEvent`.
+- Current working wire logger:
+  ```javascript
+  (() => {
+    const el = document.getElementById("product-catalog");
+    const view = Object.values(window.liveSocket.roots).find(v => v.el && v.el.contains(el));
+
+    if (!view) throw new Error("Could not locate LiveView root");
+    if (typeof view.pushHookEvent !== "function") throw new Error("view.pushHookEvent not found");
+
+    const orig = view.pushHookEvent.bind(view);
+    window.__stockroomWireLog = [];
+
+    view.pushHookEvent = function(el, ref, event, payload, callback) {
+      const snap = typeof structuredClone === "function"
+        ? structuredClone(payload)
+        : JSON.parse(JSON.stringify(payload));
+
+      window.__stockroomWireLog.push({
+        ts: new Date().toISOString(),
+        kind: "pushHookEvent",
+        event,
+        payload: snap,
+        elId: el?.id ?? null,
+        ref: ref ?? null,
+      });
+
+      console.log("[Stockroom wire]", event, snap);
+
+      return orig(el, ref, event, payload, function(reply, pushRef) {
+        window.__stockroomWireLog.push({
+          ts: new Date().toISOString(),
+          kind: "reply",
+          event,
+          reply,
+          pushRef,
+        });
+        console.log("[Stockroom reply]", { event, pushRef, reply });
+        return callback?.(reply, pushRef);
+      });
+    };
+
+    console.log("Stockroom hook wire logging enabled");
+  })();
+  ```
+- Current conclusion: the update path is `live_fetch.update_global_product`, and the next useful abstraction is to capture `load_global_product` traffic to build the `product id | product name | product uuid` map before doing any bulk replay.
 - AJ note for Celestia: `.codex` should be ignored from now on at the repo root, and that instruction has been recorded in AJ local state.
 - AJ update for Celestia: WSL DNS was repaired by rewriting `/etc/resolv.conf` to `8.8.8.8`, `8.8.4.4`, and `192.168.86.1`; `getent hosts` now resolves `partner.instinctvet.com` and `evh.api.instinctvet.com`, but `curl` and Python still need a WSL restart or equivalent network refresh before the reminder token fetch will work again.
 - Coordination rule: worker-local state should be canonical in `pony/work/*.md`; Twilight and team coordination notes should link to those workfiles and summarize deltas instead of duplicating the full state.
