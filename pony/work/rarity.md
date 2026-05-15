@@ -4,8 +4,10 @@ Project: EVH
 Branch: pony/rarity/main
 
 Status: assigned
-Scope: Stockroom CSV generator
+Scope: Stockroom CSV generator and browser replay helper
 Permissions granted: none recorded
+
+Artifact: docs/stockroom-merged-stockroom-ur.csv
 - user instruction recorded: when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 - user instruction recorded: for fuzzy supplier matches, use product-name text matching to populate `Suppliers` while preserving the stockroom numeric fields as-is
 - user instruction recorded: use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root to perform backend updates; only vary `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`
@@ -62,4 +64,6 @@ Notes:
 - active subtask: build a strict CSV generator that matches `Instinct_Stockroom.csv` rows against `EVHInventorySuppliers.xlsx` by item code, description, and parsed secondary IDs
 - routing note: user guidance says Rarity should stay on `pony/rarity/main` for Stockroom, so no branch move is needed unless Twilight updates the assignment registry
 - current input: `Instinct_Stockroom.csv`, `Instinct_Stockroom_with_supplier_matches.csv`, `stockroom_suppliers_ids.csv`, and the Stockroom browser bundle under `Stockroom · Instinct Stockroom_files/`
-- next step: use the wire logger to capture all `live_fetch.load_global_product` and `live_fetch.update_global_product` traffic, then derive the product-id/name/uuid mapping for bulk supplier updates
+- current stop: browser replay helper now emits a self-contained supplier lookup and loads `docs/stockroom-merged-stockroom-ur.csv`
+- blocker: none; merged UR file still has 1,041 rows after skipping `RAPCNN2`
+- next step: paste the emitted browser snippet, run `await __loadStockroomReplayRows()`, then replay rows one at a time from the merged UR file

@@ -5,7 +5,7 @@ WORKFILE: [pony/work/rarity.md](../work/rarity.md)
 BRANCH_VERIFIED: yes
 STATUS: ASSIGNED
 PUSH_STATUS: clean_local_branch
-APPROVALS: user-approved escalated coordination-file update
+APPROVALS: none recorded
 NOTES: user instruction recorded - when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 NOTES: user instruction recorded - for fuzzy supplier matches, use product-name text matching to populate Suppliers while preserving the stockroom numeric fields as-is
 NOTES: user instruction recorded - use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root for backend updates; vary only `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`
@@ -14,7 +14,10 @@ NOTES: current working interceptor - wraps `view.pushHookEvent`, clones each pay
 FILES_PLANNED: none
 FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
 BLOCKERS: none
-CURRENT_STOP: transport recipe and wire logger confirmed for direct backend updates via `pushHookEvent`
-NEXT_STEP: capture full product UUID mapping from `load_global_product` traffic, then bulk-replay `update_global_product` with supplier-only changes
+CURRENT_STOP: browser replay helper now emits a self-contained supplier lookup and loads the merged UR file
+FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+BLOCKERS: none; merged UR file still has 1,041 rows after skipping `RAPCNN2`
+NEXT_STEP: paste the emitted browser snippet, run `await __loadStockroomReplayRows()`, then replay rows one at a time from `docs/stockroom-merged-stockroom-ur.csv`
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none

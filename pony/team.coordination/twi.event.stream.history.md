@@ -1428,3 +1428,130 @@
 18:NEXT_STEP: capture full product UUID mapping from `load_global_product` traffic, then bulk-replay `update_global_product` with supplier-only changes
 19:QUESTIONS_FOR_TWI: none
 20:DECISION_NEEDED: none
+## 2026-05-10 16:37:10
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:BLOCKERS: no saved `load_global_product` wire capture or product UUID map exists in the workspace yet; need a live Stockroom browser session or an existing capture artifact
+19:NEXT_STEP: capture full product UUID mapping from `load_global_product` traffic, then bulk-replay `update_global_product` with supplier-only changes
+20:QUESTIONS_FOR_TWI: none
+21:DECISION_NEEDED: none
+## 2026-05-10 16:37:15
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/instinct-samples
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: HOLD
+8:FILES_PLANNED: none
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: preflight: expected branch pony/fs/main in /home/ggb66/dev/EVH/pony/worktrees/fs but found pony/fs/instinct-samples
+11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs, report the branch mismatch to Twilight or the user, and do not start Scheduling implementation until the routing decision is explicit
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-05-10 16:47:29
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-product-uuid-map.md
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/stockroom-product-uuid-map.md
+20:BLOCKERS: none for the current HAR-backed mapping; additional products would require more capture data
+21:NEXT_STEP: use `docs/stockroom-product-uuid-map.md` as the seed map and expand it if more lookup traffic becomes available
+22:QUESTIONS_FOR_TWI: none
+23:DECISION_NEEDED: none
+## 2026-05-10 16:57:25
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-load-catalog.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/stockroom-load-catalog.csv
+20:BLOCKERS: none for the current catalog export; the CSV currently carries `code`, `id`, and `label` for 509 products
+21:NEXT_STEP: extend the extractor if supplier IDs, unit IDs, or EMR product IDs need to be added to the CSV
+22:QUESTIONS_FOR_TWI: none
+23:DECISION_NEEDED: none
+## 2026-05-10 17:02:32
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-load-catalog.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/stockroom-load-catalog.csv
+20:BLOCKERS: none for the current catalog export; the CSV now carries manufacturer fields plus `code`, `id`, and `label` for 509 products
+21:NEXT_STEP: extend the extractor if supplier IDs, unit IDs, or EMR product IDs need to be normalized further for replay
+22:QUESTIONS_FOR_TWI: none
+23:DECISION_NEEDED: none
+## 2026-05-10 17:27:11
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-catalog-recovered.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/recover_catalog_rows.py, docs/stockroom-catalog-recovered.csv
+20:BLOCKERS: none for the current recovery export; all three sentinel rows now resolve and the CSV carries recovered fields for 3,096 rows
+21:NEXT_STEP: use `docs/stockroom-catalog-recovered.csv` for replay or normalize any remaining supplier/manufacturer subfields further if needed
+22:QUESTIONS_FOR_TWI: none
+23:DECISION_NEEDED: none
+## 2026-05-10 18:01:07
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+20:BLOCKERS: none; merged UR file now has 1,041 rows after skipping `RAPCNN2`
+21:NEXT_STEP: replay from `docs/stockroom-merged-stockroom-ur.csv` or extend the merger if another source row needs correction
+22:QUESTIONS_FOR_TWI: none
+23:DECISION_NEEDED: none
+## 2026-05-10 18:13:46
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+20:BLOCKERS: none; merged UR file still has 1,041 rows after skipping `RAPCNN2`
+21:NEXT_STEP: paste the emitted browser snippet, run `await __loadStockroomReplayRows()`, then replay rows one at a time from `docs/stockroom-merged-stockroom-ur.csv`
+22:QUESTIONS_FOR_TWI: none
+23:DECISION_NEEDED: none
+## 2026-05-13 21:09:12
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/instinct-samples
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: HOLD
+8:FILES_PLANNED: none
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: preflight: expected branch pony/fs/main in /home/ggb66/dev/EVH/pony/worktrees/fs but found pony/fs/instinct-samples
+11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs, resolve the branch mismatch, and request Twilight review if correction is not obvious
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
