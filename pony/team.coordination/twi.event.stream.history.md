@@ -3,6 +3,11 @@
 ## Current State
 - pending_review_needed_content: none
 
+## 2026-05-15 11:20:00
+- changed_file: pony/team.coordination/assignment.registry.tsv, pony/team.coordination/fs.status.md, pony/team.coordination/twi.status.md, pony/team.coordination/twi.event.stream.history.md
+- action: Dirty-worktree reconciliation completed and coordinator state resumed
+- note: Twilight committed the pending EVH coordinator and Stockroom artifacts as `c5922d3`, restored a clean root worktree on `pony/twi/main`, reconciled Fluttershy's canonical branch to the live `pony/fs/instinct-samples` worktree, and returned the coordinator to normal waiting posture with no pending worker questions
+
 ## 2026-05-10 16:45:00
 - changed_file: pony/team.coordination/pinkie.status.md, pony/team.coordination/rarity.status.md, pony/team.coordination/twi.event.stream.history.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md, pony/work/pinkie.md, pony/work/rarity.md
 - action: Dirty-worktree reconciliation completed
@@ -1553,5 +1558,17 @@
 9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
 10:BLOCKERS: preflight: expected branch pony/fs/main in /home/ggb66/dev/EVH/pony/worktrees/fs but found pony/fs/instinct-samples
 11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs, resolve the branch mismatch, and request Twilight review if correction is not obvious
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-05-15 11:10:26
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/instinct-samples
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: HOLD
+8:FILES_PLANNED: none
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: no active Scheduling implementation slice is in flight; local FS worktree still has worker-local changes (`D docs/instinct-appointments-contract-notes.md`, `?? .codex`) that should be handled there before new implementation starts
+11:NEXT_STEP: stay on `pony/fs/instinct-samples`, keep Scheduling implementation paused, and handle the local FS worktree changes deliberately before taking a new concrete task
 12:QUESTIONS_FOR_TWI: none
 13:DECISION_NEEDED: none
