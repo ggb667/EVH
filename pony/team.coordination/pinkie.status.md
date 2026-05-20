@@ -16,4 +16,6 @@ LAUNCH_CHECK: preflight reported no immediate active coding slice; local Pinkie 
 LAUNCH_VERIFICATION: local state rechecked on 2026-05-07 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_08: local state rechecked on 2026-05-08 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_10: local state rechecked on 2026-05-10 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
+LAUNCH_VERIFICATION_2026_05_15: local state rechecked on 2026-05-15 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
+LAUNCH_VERIFICATION_2026_05_19: local state rechecked on 2026-05-19 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LIVE_POSTURE: holding for direct follow-up input

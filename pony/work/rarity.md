@@ -64,6 +64,6 @@ Notes:
 - active subtask: build a strict CSV generator that matches `Instinct_Stockroom.csv` rows against `EVHInventorySuppliers.xlsx` by item code, description, and parsed secondary IDs
 - routing note: user guidance says Rarity should stay on `pony/rarity/main` for Stockroom, so no branch move is needed unless Twilight updates the assignment registry
 - current input: `Instinct_Stockroom.csv`, `Instinct_Stockroom_with_supplier_matches.csv`, `stockroom_suppliers_ids.csv`, and the Stockroom browser bundle under `Stockroom · Instinct Stockroom_files/`
-- current stop: browser replay helper now emits a self-contained supplier lookup and loads `docs/stockroom-merged-stockroom-ur.csv`
-- blocker: none; merged UR file still has 1,041 rows after skipping `RAPCNN2`
-- next step: paste the emitted browser snippet, run `await __loadStockroomReplayRows()`, then replay rows one at a time from the merged UR file
+- current stop: merged Stockroom row emitter is in place and verified; generated `/tmp/rarity-stockroom-merged.csv` with 1,041 rows and both targeted tests passed in the venv
+- blocker: none
+- next step: continue the browser replay helper flow from `docs/stockroom-merged-stockroom-ur.csv` if more row-level replay work is needed

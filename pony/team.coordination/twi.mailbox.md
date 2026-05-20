@@ -1,6 +1,29 @@
 # TWI MAILBOX
 
 ## Pending Items
+- Twilight shutdown handoff: the ad hoc Instinct token launcher bug is fixed. `../creds_and_token.zsh` now exports `TOKEN` correctly, URL-encodes the partner auth params, fails cleanly on auth errors, and can launch the CSV flow without the earlier shell breakage.
+- Twilight Vetcove export update: a dedicated patient exporter now exists at `scripts/export_vetcove_patients.py`, using shared pagination from `scripts/instinct_partner_client.py` rather than the one-off `createCSV.py` path.
+- Live Vetcove export result:
+  - output file: `/home/ggb66/dev/EVH/vetcove_patients.csv`
+  - `27,102` total patients scanned
+  - `19,563` living rows exported
+  - `7,539` non-living rows skipped
+- Current Vetcove mapping decisions:
+  - `Division` is fixed to `Eustis Veterinary Hospital` on every row.
+  - missing location pieces are backfilled conservatively: use real city when present, set missing state to `FL`, infer zip from the most common known zip for that city, and only default to `Eustis / FL / 32726` when city is missing too.
+- Current Vetcove import-readiness audit on the generated CSV:
+  - `Last Visit` missing on `19,083` rows
+  - `Animal Weight (lb)` missing on `19,145` rows
+  - `Date of Birth` missing on `1,824` rows
+  - `Physical Address Street 1` missing on `44` rows
+  - both email/mobile missing on `200` rows
+  - city/state/zip gaps have been reduced to `0`
+- Appointment API result to preserve:
+  - list and fetch are supported via `GET /v1/appointments` and `GET /v1/appointments/{id}`
+  - cancel is supported via `POST /v1/appointments/{appointment_id}/cancellation`
+  - documented writable `PATCH` field is still only `isConfirmed`
+  - rescheduling is not yet documented or proven
+- Recommended morning next step: split `vetcove_patients.csv` into an import-ready subset and a rejects file for rows blocked by missing Vetcove-required fields, unless the user wants to relax the import assumptions further.
 - AJ resend in EVH: the Instinct bearer token used for reminder submission is session-bound and likely short-lived; the reminder batch runner works, but it should be treated as needing a fresh token if the browser session expires mid-run.
 - AJ note: Instinct search is not working reliably; `Kindra Abner` could not be found directly, but `Abner` was found and then `Jack` was found under that account.
 - AJ note: first reminder check for `Abner, Kindra` / `Jack` found no reminders set, so the interaction is a no-op verification and not an applied reminder update.

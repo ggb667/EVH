@@ -17,7 +17,8 @@ BLOCKERS: none
 CURRENT_STOP: browser replay helper now emits a self-contained supplier lookup and loads the merged UR file
 FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
 FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
-BLOCKERS: none; merged UR file still has 1,041 rows after skipping `RAPCNN2`
-NEXT_STEP: paste the emitted browser snippet, run `await __loadStockroomReplayRows()`, then replay rows one at a time from `docs/stockroom-merged-stockroom-ur.csv`
+BLOCKERS: none
+NEXT_STEP: continue the browser replay helper flow from `docs/stockroom-merged-stockroom-ur.csv` if more row-level replay work is needed
+NOTES: emitter verified in the venv; `/tmp/rarity-stockroom-merged.csv` was generated with 1,041 rows and the targeted Stockroom tests passed
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none

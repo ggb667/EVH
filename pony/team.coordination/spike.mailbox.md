@@ -1,6 +1,25 @@
 # SPIKE MAILBOX
 
 ## Pending Items
+- Twilight handoff for tomorrow morning: EVH now has a live Vetcove-format patient export path in `scripts/export_vetcove_patients.py` built on the shared Instinct pagination client in `scripts/instinct_partner_client.py`.
+- Live result to preserve: `/home/ggb66/dev/EVH/vetcove_patients.csv` was generated successfully from the tenant with `19,563` living-patient rows (`27,102` total patients scanned, `7,539` non-living skipped).
+- Mapping decisions now explicit:
+  - `Division` is hard-coded as `Eustis Veterinary Hospital` on every row.
+  - missing city/state/zip are backfilled conservatively: keep real city when present, fill missing state as `FL`, infer missing zip from the most common zip already seen for that city, and fall back to `Eustis / FL / 32726` only when city is missing too.
+- Current Vetcove import-readiness gaps to document clearly:
+  - `Last Visit` still missing on `19,083` rows because many patients do not have a usable past appointment in the Partner feed.
+  - `Animal Weight (lb)` missing on `19,145` rows.
+  - `Date of Birth` missing on `1,824` rows.
+  - `Physical Address Street 1` still missing on `44` rows.
+  - both email/mobile missing on `200` rows.
+- New verification to record:
+  - `.venv/bin/python -m pytest -q tests/test_instinct_partner_client.py tests/test_vetcove_patient_export.py`
+  - result: `6 passed`
+- Appointment contract reminder to document:
+  - `GET /v1/appointments` works for listing.
+  - `GET /v1/appointments/{id}` works for fetch.
+  - `POST /v1/appointments/{appointment_id}/cancellation` is the documented cancel route.
+  - `PATCH /v1/appointments/{appointment_id}` only has documented proof for `isConfirmed`; rescheduling is not yet documented or proven.
 - AJ note: HAR captured the Instinct reminder write path. The browser uses `AddPatientReminder` with `patientId`, `reminderLabelId`, `notes`, `remindOn`, `locationId`, `isActive`, and `lastAdministeredOn`. Please record this interaction and note that the save request is a GraphQL mutation to `https://evh.api.instinctvet.com/`.
 - AJ note: we likely have enough to draft curl requests for missing reminders, but we still need the full per-row reminder mapping and any duplicate/ordering rules before treating the batch as safe to generate automatically.
 - AJ note: explicit `curl --resolve` on the Instinct auth host plus a live bearer token was enough to make the reminder API path work when the normal resolver path was flaky. Keep that in mind for future API integrations that look blocked by DNS.

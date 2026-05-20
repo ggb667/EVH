@@ -3,6 +3,11 @@
 ## Current State
 - pending_review_needed_content: none
 
+## 2026-05-20 15:10:00
+- changed_file: pony/team.coordination/pinkie.status.md, pony/team.coordination/rarity.status.md, pony/team.coordination/spike.mailbox.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md, pony/team.coordination/twi.event.stream.history.md, pony/work/pinkie.md, pony/work/rarity.md, scripts/instinct_partner_client.py, scripts/export_vetcove_patients.py, tests/test_vetcove_patient_export.py
+- action: Dirty-worktree reconciliation completed
+- note: Twilight preserved the intentional Vetcove export and coordination updates in a deliberate local checkpoint commit, confirmed that the root `app.instinctvet.cloud.har` capture only held page-presence websocket traffic plus sensitive auth tokens rather than a reusable appointment-create fixture, and moved the untracked root scratch artifacts out of `/home/ggb66/dev/EVH` so normal coordination can resume from a clean root worktree
+
 ## 2026-05-15 11:20:00
 - changed_file: pony/team.coordination/assignment.registry.tsv, pony/team.coordination/fs.status.md, pony/team.coordination/twi.status.md, pony/team.coordination/twi.event.stream.history.md
 - action: Dirty-worktree reconciliation completed and coordinator state resumed
@@ -1570,5 +1575,32 @@
 9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
 10:BLOCKERS: no active Scheduling implementation slice is in flight; local FS worktree still has worker-local changes (`D docs/instinct-appointments-contract-notes.md`, `?? .codex`) that should be handled there before new implementation starts
 11:NEXT_STEP: stay on `pony/fs/instinct-samples`, keep Scheduling implementation paused, and handle the local FS worktree changes deliberately before taking a new concrete task
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-05-15 11:24:06
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+20:BLOCKERS: none
+21:NEXT_STEP: continue the browser replay helper flow from `docs/stockroom-merged-stockroom-ur.csv` if more row-level replay work is needed
+23:QUESTIONS_FOR_TWI: none
+24:DECISION_NEEDED: none
+## 2026-05-19 16:52:42
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/instinct-samples
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: HOLD
+8:FILES_PLANNED: none
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: preflight: expected branch pony/fs/main in /home/ggb66/dev/EVH/pony/worktrees/fs but found pony/fs/instinct-samples
+11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs, resolve the branch mismatch, and request Twilight review if correction is not obvious
 12:QUESTIONS_FOR_TWI: none
 13:DECISION_NEEDED: none

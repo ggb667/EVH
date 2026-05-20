@@ -62,6 +62,22 @@ class InstinctPartnerClient:
                 break
             after = page.next_cursor
 
+    def iter_patients(self, params: Optional[dict[str, Any]] = None, *, limit: int = 100):
+        after = None
+        while True:
+            query = {"limit": limit}
+            if params:
+                query.update(params)
+            if after:
+                query["pageCursor"] = after
+                query["pageDirection"] = "after"
+            page = self._page("/v1/patients", query, ("patients", "data", "items", "results"))
+            for item in page.items:
+                yield item
+            if not page.next_cursor:
+                break
+            after = page.next_cursor
+
     def iter_appointments(self, params: Optional[dict[str, Any]] = None, *, limit: int = 100):
         after = None
         while True:
