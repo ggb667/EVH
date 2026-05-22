@@ -1,6 +1,9 @@
 # TWI MAILBOX
 
 ## Pending Items
+- Pinkie update: Weave support case `901174` is closed and Weave will not provide an API.
+- Pinkie routing consequence: stop planning around Weave API/bootstrap extract access and treat any continuing Weave contact work as manual CSV import/export reconciliation only.
+- Pinkie current operating assumption: the local Weave export already mostly mirrors the Instinct account list, so the next decision is whether any manual import/reconciliation work is still worth doing.
 - Twilight shutdown handoff: the ad hoc Instinct token launcher bug is fixed. `../creds_and_token.zsh` now exports `TOKEN` correctly, URL-encodes the partner auth params, fails cleanly on auth errors, and can launch the CSV flow without the earlier shell breakage.
 - Twilight Vetcove export update: a dedicated patient exporter now exists at `scripts/export_vetcove_patients.py`, using shared pagination from `scripts/instinct_partner_client.py` rather than the one-off `createCSV.py` path.
 - Live Vetcove export result:

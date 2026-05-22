@@ -1,6 +1,47 @@
 # SPIKE MAILBOX
 
 ## Pending Items
+- Pinkie documentation update: Weave support case `901174` is closed and Weave will not provide an API.
+- Documentation consequence: remove any wording that implies pending Weave API access or a future bootstrap extract from Weave support; document the track as manual CSV import/export reconciliation only.
+- Handoff from FS for Handshake app team: we now have live Instinct appointment lifecycle evidence from three HAR captures in `/home/ggb66/dev/EVH/`.
+  - Create call: `createCalendarAppointment`
+    - created appointment id: `1066`
+    - payload fields: `locationId=1`, `appointmentTypeId=35`, `confirmed=false`, `date=2026-05-20`, `startTime=21:00:00`, `durationInMinutes=30`, `notes=None`, `patientId=67`, `providerId=199`, `reason=Attacked by Carnivorous Plant`, `serviceId=36`, `failOnConflict=true`, `acknowledgedConflictingIds=[]`, `acknowledgedReservationIds=[]`
+  - Reschedule call: `reviseCalendarAppointment`
+    - same appointment id: `1066`
+    - updated fields: `startTime=22:15:00`, `durationInMinutes=45`
+    - retained fields: same location, provider, appointment type, patient, service, reason, notes, and confirmed flag
+  - Cancel call: `setCalendarAppointmentStatus`
+    - same appointment id: `1066`
+    - final status: `CANCELLED`
+    - the response revision history shows prior edits before cancel: `21:00:00 -> 22:00:00`, then `22:00:00 -> 22:15:00` plus `duration_in_minutes 30 -> 45`, then the status change to cancelled
+  - Supporting list/fetch operations were present in the reschedule capture and are enough to build lookup-driven UI mapping:
+    - `GetServiceList`
+    - `appointmentTypes`
+    - `listActiveUsers`
+    - `listActiveProviders`
+    - `listActiveStaff`
+    - `getLocationsWithReminderConfigurations`
+    - `getLocationByInstinctId`
+    - `getPatientById`
+    - `getPatientLastVisit`
+    - `listRoutingClients`
+    - `getCalendarAppointments`
+    - `calendarEntries`
+  - Important practical note: the UI can likely be built as a Handshake scheduling page that lets users click an open slot, choose doctor vs `Tech`, fill a small form, and then save only if the slot is open and the duration does not overlap another appointment.
+  - Important integration caveat: the real difficulty is not the form, it is the mapping and validation layer. We still need rules for translating Weave-side data into Instinct IDs for `patientId`, `providerId`, `locationId`, `appointmentTypeId`, and `serviceId`, plus the lookup for the existing appointment when rescheduling or canceling.
+  - Useful implementation assumption: `Tech` appointments are a first-class appointment type (`Technician Appointments (Tech)`).
+  - Suggested product scope for Handshake app team:
+    - day/week schedule view with open slots
+    - click-to-create from an open slot
+    - simple form with provider/type/service dropdowns
+    - validation for conflict/overlap/slot length
+    - submit to Instinct using the same lifecycle endpoints already proven by HAR
+  - Rough effort estimate from FS:
+    - MVP: 2 to 5 days
+    - solid version with mapping/validation/retries: 1 to 2 weeks
+    - production-hardening: 2+ weeks
+  - No production implementation has been started in EVH for this scheduler yet; this is handoff/design input only.
 - Twilight handoff for tomorrow morning: EVH now has a live Vetcove-format patient export path in `scripts/export_vetcove_patients.py` built on the shared Instinct pagination client in `scripts/instinct_partner_client.py`.
 - Live result to preserve: `/home/ggb66/dev/EVH/vetcove_patients.csv` was generated successfully from the tenant with `19,563` living-patient rows (`27,102` total patients scanned, `7,539` non-living skipped).
 - Mapping decisions now explicit:

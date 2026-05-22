@@ -3,6 +3,16 @@
 ## Current State
 - pending_review_needed_content: none
 
+## 2026-05-22 10:32:00
+- changed_file: pony/team.coordination/pinkie.status.md, pony/team.coordination/spike.mailbox.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md, pony/team.coordination/twi.event.stream.history.md, pony/work/pinkie.md
+- action: Dirty-worktree reconciliation completed
+- note: Twilight preserved the intentional Weave-support-closure coordination updates in a deliberate local checkpoint commit, moved the untracked root HAR captures out of `/home/ggb66/dev/EVH` for safekeeping, restored a clean coordinator worktree on `pony/twi/main`, and resumed normal coordination with no pending worker questions
+
+## 2026-05-20 15:18:00
+- changed_file: pony/team.coordination/pinkie.status.md, pony/work/pinkie.md, pony/team.coordination/spike.status.md, pony/team.coordination/twi.status.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md, pony/team.coordination/twi.event.stream.history.md
+- action: Weave support closure recorded
+- note: Twilight recorded that Weave support case `901174` is closed and no API will be provided, updated Pinkie's canonical blocker and next-step away from API/bootstrap-extract assumptions, and routed documentation/state toward a manual CSV import/export reconciliation posture instead
+
 ## 2026-05-20 15:10:00
 - changed_file: pony/team.coordination/pinkie.status.md, pony/team.coordination/rarity.status.md, pony/team.coordination/spike.mailbox.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md, pony/team.coordination/twi.event.stream.history.md, pony/work/pinkie.md, pony/work/rarity.md, scripts/instinct_partner_client.py, scripts/export_vetcove_patients.py, tests/test_vetcove_patient_export.py
 - action: Dirty-worktree reconciliation completed
@@ -1604,3 +1614,15 @@
 11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs, resolve the branch mismatch, and request Twilight review if correction is not obvious
 12:QUESTIONS_FOR_TWI: none
 13:DECISION_NEEDED: none
+## 2026-05-20 22:14:13
+- changed_file: pinkie.status.md
+- action: Twilight review needed
+2:BRANCH: pony/pinkie/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
+6:STATUS: HOLD
+9:FILES_PLANNED: scripts/contacts/weave_contact_sync.py, scripts/contacts/__init__.py, tests/test_weave_contact_sync.py, docs/weave-instinct-account-sync-design.md, README.md, pony/work/pinkie.md
+10:FILES_TOUCHED: scripts/contacts/weave_contact_sync.py, scripts/contacts/__init__.py, tests/test_weave_contact_sync.py, docs/weave-instinct-account-sync-design.md, README.md, pony/work/pinkie.md, pony/team.coordination/pinkie.status.md
+11:BLOCKERS: Weave support case 901174 is closed and Weave will not provide an API; any ongoing sync must use non-API import/export workflows only
+12:NEXT_STEP: stop planning around API/bootstrap extract access, treat the local Weave export as the available comparison baseline, and define the manual CSV import or reconciliation path if more Weave contact work is needed
+13:QUESTIONS_FOR_TWI: none
+14:DECISION_NEEDED: none

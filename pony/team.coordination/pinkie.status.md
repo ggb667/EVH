@@ -8,8 +8,8 @@ PUSH_STATUS: local_changes_not_pushed
 APPROVALS: none recorded
 FILES_PLANNED: scripts/contacts/weave_contact_sync.py, scripts/contacts/__init__.py, tests/test_weave_contact_sync.py, docs/weave-instinct-account-sync-design.md, README.md, pony/work/pinkie.md
 FILES_TOUCHED: scripts/contacts/weave_contact_sync.py, scripts/contacts/__init__.py, tests/test_weave_contact_sync.py, docs/weave-instinct-account-sync-design.md, README.md, pony/work/pinkie.md, pony/team.coordination/pinkie.status.md
-BLOCKERS: waiting on Weave support case 901174 for application credentials or export access so the existing Weave contact list can be pulled for bootstrap reconciliation
-NEXT_STEP: once Weave access arrives, export the existing Weave contact list, reconcile it against the persisted Instinct export, and decide what is safe to import
+BLOCKERS: Weave support case 901174 is closed and Weave will not provide an API; any ongoing sync must use non-API import/export workflows only
+NEXT_STEP: stop planning around API/bootstrap extract access, treat the local Weave export as the available comparison baseline, and define the manual CSV import or reconciliation path if more Weave contact work is needed
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none
 LAUNCH_CHECK: preflight reported no immediate active coding slice; local Pinkie state was verified and remains assigned to Weave Contacts
@@ -19,3 +19,5 @@ LAUNCH_VERIFICATION_2026_05_10: local state rechecked on 2026-05-10 and still po
 LAUNCH_VERIFICATION_2026_05_15: local state rechecked on 2026-05-15 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_19: local state rechecked on 2026-05-19 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LIVE_POSTURE: holding for direct follow-up input
+SYNC_NOTE: Weave and Instinct are already synched; the local Weave export mostly mirrors the Instinct account list with only minor extra rows
+SUPPORT_NOTE: Weave support case 901174 is closed and Weave will not provide an API
