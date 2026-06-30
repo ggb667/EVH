@@ -1626,3 +1626,122 @@
 12:NEXT_STEP: stop planning around API/bootstrap extract access, treat the local Weave export as the available comparison baseline, and define the manual CSV import or reconciliation path if more Weave contact work is needed
 13:QUESTIONS_FOR_TWI: none
 14:DECISION_NEEDED: none
+## 2026-06-30 10:58:47
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+14:FILES_PLANNED: none
+15:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+16:BLOCKERS: none
+18:FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+19:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+20:BLOCKERS: none
+21:NEXT_STEP: load the emitted browser helper in the Stockroom page and replay rows with `__loadStockroomReplayRows()` / `__updateStockroomReplayByPimsId()` if more row-level capture work is needed
+24:QUESTIONS_FOR_TWI: none
+25:DECISION_NEEDED: none
+## 2026-06-30 11:42:41
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: HOLD
+8:FILES_PLANNED: none
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: local changes remain in the worktree (`docs/instinct-appointments-contract-notes.md` deleted, `.codex` untracked, and several HAR files untracked); branch is now corrected to pony/fs/main
+11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs and wait for the next concrete Scheduling task
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-06-30 11:42:50
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: HOLD
+8:FILES_PLANNED: none
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: local changes remain in the worktree (`docs/instinct-appointments-contract-notes.md` deleted, `.codex` untracked, and several HAR files untracked); branch is now corrected to pony/fs/main and the branch is behind origin/main by 1 commit
+11:NEXT_STEP: stay on /home/ggb66/dev/EVH/pony/worktrees/fs and wait for the next concrete Scheduling task
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-06-30 11:59:28
+- changed_file: aj.status.md
+- action: Twilight review needed
+2:BRANCH: pony/aj/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/aj
+5:STATUS: ASSIGNED
+8:FILES_PLANNED: RAG database schema/storage model, pony/work/aj.md, pony/team.coordination/aj.status.md
+9:FILES_TOUCHED: pony/work/aj.md, pony/team.coordination/aj.status.md
+10:BLOCKERS: none
+11:NEXT_STEP: design the Postgres/pgvector schema, storage model, and ingestion status fields for the EVH RAG MVP
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+23:BLOCKERS: duplicate avoidance remains a guardrail, but the per-row reminder mapping appears complete and `lastAdministeredOn` / `locationId` do not look required for the batch
+## 2026-06-30 11:59:28
+- changed_file: rd.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rd/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rd
+5:STATUS: ASSIGNED
+8:FILES_PLANNED: PMS/Instinct PDF access notes, pony/work/rd.md, pony/team.coordination/rd.status.md
+9:FILES_TOUCHED: pony/work/rd.md, pony/team.coordination/rd.status.md
+10:BLOCKERS: none
+11:NEXT_STEP: obtain PMS/Instinct PDF files or stable PDF references for initial RAG ingestion work
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-06-30 11:59:28
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+9:FILES_PLANNED: medication/treatment dictionary seed lists, pony/work/rarity.md, pony/team.coordination/rarity.status.md
+10:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md
+11:BLOCKERS: none
+12:NEXT_STEP: build medication and treatment canonical lists, aliases, and importable dictionary rows
+19:FILES_PLANNED: none
+20:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+21:BLOCKERS: none
+23:FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+24:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+25:BLOCKERS: none
+26:NEXT_STEP: load the emitted browser helper in the Stockroom page and replay rows with `__loadStockroomReplayRows()` / `__updateStockroomReplayByPimsId()` if more row-level capture work is needed
+29:QUESTIONS_FOR_TWI: none
+30:DECISION_NEEDED: none
+## 2026-06-30 11:59:28
+- changed_file: fs.status.md
+- action: Twilight review needed
+2:BRANCH: pony/fs/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/fs
+5:STATUS: ASSIGNED
+8:FILES_PLANNED: vet term taxonomy, document-type clues, template terminology, pony/work/fs.md, pony/team.coordination/fs.status.md
+9:FILES_TOUCHED: pony/work/fs.md, pony/team.coordination/fs.status.md
+10:BLOCKERS: none
+11:NEXT_STEP: define vet-specific document type clues, source clues, treatment context terms, and template terminology
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-06-30 11:59:28
+- changed_file: spike.status.md
+- action: Twilight review needed
+2:BRANCH: pony/spike/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/spike
+5:STATUS: ASSIGNED
+8:FILES_PLANNED: RAG architecture docs, worker contracts, MVP milestones, pony/work/spike.md, pony/team.coordination/spike.status.md
+9:FILES_TOUCHED: pony/work/spike.md, pony/team.coordination/spike.status.md
+10:BLOCKERS: none
+11:NEXT_STEP: document the RAG architecture, worker contracts, and MVP milestones
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-06-30 11:59:28
+- changed_file: pinkie.status.md
+- action: Twilight review needed
+2:BRANCH: pony/pinkie/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
+6:STATUS: HOLD
+9:FILES_PLANNED: none
+10:FILES_TOUCHED: pony/team.coordination/pinkie.status.md
+11:BLOCKERS: no RAG assignment in the current split
+12:NEXT_STEP: remain idle unless the user or Twilight assigns a new RAG task
+13:QUESTIONS_FOR_TWI: none
+14:DECISION_NEEDED: none

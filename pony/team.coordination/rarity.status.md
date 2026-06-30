@@ -6,6 +6,11 @@ BRANCH_VERIFIED: yes
 STATUS: ASSIGNED
 PUSH_STATUS: clean_local_branch
 APPROVALS: none recorded
+FILES_PLANNED: medication/treatment dictionary seed lists, pony/work/rarity.md, pony/team.coordination/rarity.status.md
+FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md
+BLOCKERS: none
+NEXT_STEP: build medication and treatment canonical lists, aliases, and importable dictionary rows
+NOTES: 2026-06-30 RAG pivot assignment - Rarity owns Meds & Treatments
 NOTES: user instruction recorded - when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 NOTES: user instruction recorded - for fuzzy supplier matches, use product-name text matching to populate Suppliers while preserving the stockroom numeric fields as-is
 NOTES: user instruction recorded - use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root for backend updates; vary only `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`
@@ -18,7 +23,8 @@ CURRENT_STOP: browser replay helper now emits a self-contained supplier lookup a
 FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
 FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
 BLOCKERS: none
-NEXT_STEP: continue the browser replay helper flow from `docs/stockroom-merged-stockroom-ur.csv` if more row-level replay work is needed
+NEXT_STEP: load the emitted browser helper in the Stockroom page and replay rows with `__loadStockroomReplayRows()` / `__updateStockroomReplayByPimsId()` if more row-level capture work is needed
 NOTES: emitter verified in the venv; `/tmp/rarity-stockroom-merged.csv` was generated with 1,041 rows and the targeted Stockroom tests passed
+NOTES: browser replay snippet generator now matches the merged UR schema and the targeted replay test passes in the venv
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none

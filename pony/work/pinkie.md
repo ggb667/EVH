@@ -20,6 +20,8 @@ Notes:
 - launch verification: local state rechecked on 2026-05-10 and still shows the Weave Contacts slice as the active Pinkie assignment, with no new blocker beyond the existing Weave access wait
 - launch verification: local state rechecked on 2026-05-15 and still shows the Weave Contacts slice as the active Pinkie assignment, with no new blocker beyond the existing Weave access wait
 - launch verification: local state rechecked on 2026-05-19 and still shows the Weave Contacts slice as the active Pinkie assignment, with no new blocker beyond the existing Weave access wait
+- launch verification: local state rechecked on 2026-05-22 and still shows the Weave Contacts slice as the active Pinkie assignment, with branch `pony/pinkie/main` behind `origin/main` by 4 commits and an untracked `.codex` file present in the worktree
 - live posture: holding on the Weave Contacts slice and ready for direct follow-up input from Twilight or the user
 - sync note: Weave and Instinct are already synchronized; treat the local Weave export as a mostly matching mirror of the Instinct account list rather than a bootstrap-only gap
 - support note: Weave support case `901174` is closed and Weave will not provide an API
+- launch verification on 2026-06-30: local Pinkie state rechecked and still points at the Weave Contacts slice with no new blocker beyond the closed Weave API path; remain ready for direct follow-up input

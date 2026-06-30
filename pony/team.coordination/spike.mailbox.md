@@ -1,6 +1,65 @@
 # SPIKE MAILBOX
 
 ## Pending Items
+- Twilight RAG handoff, 2026-06-30: EVH is pivoting to a RAG system over legacy PMS PDFs.
+- Spike's new assignment: document the RAG architecture, worker contracts, and MVP milestones. Do not continue treating Reminders, Weave Contacts, Weave Scheduling, Stockroom, or Vetcove as the active cross-track documentation priorities unless Twilight/user explicitly reopens those tracks.
+- First serious milestone: for one selected client/pet, show a timeline of reconstructed document summaries, each linking to the correct page in the large PMS PDF.
+- Overall product shape:
+  - Ingest large PMS PDFs or stable PDF references.
+  - Extract text page by page.
+  - Store page text, page links, document boundaries, summaries, detected terms, embeddings, and status/confidence fields in Postgres.
+  - Reconstruct sub-documents from merged legacy PDFs.
+  - Show a scoped client/pet timeline and source links.
+  - Use guided templates instead of free-form questions for MVP.
+- Tooling decisions:
+  - Database: AWS RDS PostgreSQL with pgvector and Postgres full-text search.
+  - Python package manager: uv.
+  - PDF extraction: start with PyMuPDF.
+  - OCR: add Tesseract or AWS Textract only for scanned/image-only pages.
+  - Search: combine keyword/full-text search with vector search; do not rely on vector search alone.
+  - AI: embeddings plus LLM summaries/classification, likely OpenAI or Bedrock.
+  - LangGraph: not required for MVP ingestion; use durable DB ingestion states first, and consider LangGraph later for uncertain summarization/classification/Q&A flows.
+- Worker assignments for RAG:
+  - RD: PDFs. Obtain PMS/Instinct PDF files or stable PDF references for initial ingestion. The user will personally work from RD's tree for now.
+  - AJ: DB. Design Postgres/pgvector schema, storage model, and ingestion status fields.
+  - Rarity: Meds & Treatments. Build medication/treatment canonical lists, aliases, and importable dictionary rows.
+  - FS: Vet Terms. Define veterinary document type clues, source clues, treatment context terms, and template terminology.
+  - Spike: Docs. Document the system architecture, worker contracts, and MVP milestones.
+  - Twilight: Coordination unchanged.
+  - Pinkie: Idle for this split.
+- Suggested build order:
+  - MVP 1 Page Index: PMS document reference, PDF page extraction, Postgres page storage, page links, basic client/pet/name search.
+  - MVP 2 Medication/Treatment Detection: load dictionaries, detect terms on pages, show mentions with citations.
+  - MVP 3 Document Grouping: infer start/end pages, classify type, detect dates, create groups.
+  - MVP 4 Summaries: short document summaries, timeline, hyperlinks to source pages.
+  - MVP 5 Guided Template Answers: canned workflows only, with citations and context categories.
+  - MVP 6 Admin Correction: fix grouping, dates, document types, summaries, and false term matches.
+- Data model concepts Spike should document:
+  - `pms_document`: client_id, pet_id, PMS IDs/attachment IDs, filename, page_count, PMS reference/access URL, import_status.
+  - `pdf_page`: document_id, page_number, extracted_text, extraction_method, text_quality, source page link.
+  - `medication_dictionary`: canonical_name, aliases, category, active/inactive.
+  - `treatment_dictionary`: canonical_name, aliases, category, active/inactive.
+  - `detected_term`: page_id, term_type, canonical_name, matched_text, confidence, location/snippet.
+  - `document_group`: source_pdf_id, start_page, end_page, probable_date, probable_type, probable_source, confidence.
+  - `document_summary`: document_group_id, client_id, pet_id, summary, key_medications, key_treatments, key_findings, start_page, end_page, source_link, confidence.
+- Guided template concepts:
+  - summarize history
+  - list medications
+  - list treatments
+  - list diagnostics
+  - list vaccines
+  - list follow-ups
+  - show source pages
+- Safety/context policy to document:
+  - For medications, distinguish current/home medication, prescribed at visit, administered in clinic, historical mention, and unclear mention.
+  - For treatments, distinguish performed, recommended, declined, planned, historical mention, and unclear.
+  - Deterministic term detection answers "what terms are present"; model summaries answer "what those mentions mean in context."
+- UI/API target:
+  - Client/pet picker.
+  - Timeline: Date, Type, Summary, Source.
+  - Source page links into the original PDF.
+  - Guided template buttons instead of an open free-form question box for MVP.
+- Runtime note: new assignment/status files take effect on next worker preflight/Codex launch. Visible tab titles require relaunching the pony terminal/session layout. Already-running agents need restart or explicit assignment update.
 - Pinkie documentation update: Weave support case `901174` is closed and Weave will not provide an API.
 - Documentation consequence: remove any wording that implies pending Weave API access or a future bootstrap extract from Weave support; document the track as manual CSV import/export reconciliation only.
 - Handoff from FS for Handshake app team: we now have live Instinct appointment lifecycle evidence from three HAR captures in `/home/ggb66/dev/EVH/`.

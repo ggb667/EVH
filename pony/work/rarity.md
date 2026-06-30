@@ -4,10 +4,11 @@ Project: EVH
 Branch: pony/rarity/main
 
 Status: assigned
-Scope: Stockroom CSV generator and browser replay helper
+Scope: Meds & Treatments
 Permissions granted: none recorded
 
 Artifact: docs/stockroom-merged-stockroom-ur.csv
+- current RAG assignment: build medication and treatment canonical lists, aliases, and importable dictionary rows
 - user instruction recorded: when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 - user instruction recorded: for fuzzy supplier matches, use product-name text matching to populate `Suppliers` while preserving the stockroom numeric fields as-is
 - user instruction recorded: use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root to perform backend updates; only vary `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`
@@ -65,5 +66,6 @@ Notes:
 - routing note: user guidance says Rarity should stay on `pony/rarity/main` for Stockroom, so no branch move is needed unless Twilight updates the assignment registry
 - current input: `Instinct_Stockroom.csv`, `Instinct_Stockroom_with_supplier_matches.csv`, `stockroom_suppliers_ids.csv`, and the Stockroom browser bundle under `Stockroom · Instinct Stockroom_files/`
 - current stop: merged Stockroom row emitter is in place and verified; generated `/tmp/rarity-stockroom-merged.csv` with 1,041 rows and both targeted tests passed in the venv
+- current stop: browser replay snippet generator now consumes the merged UR columns (`Buying Unit ID`, `Selling Unit ID`, `Supplier Payload`, `EMR Product IDs`) instead of the stale placeholder schema, and the targeted replay/emitter tests pass in the venv
 - blocker: none
-- next step: continue the browser replay helper flow from `docs/stockroom-merged-stockroom-ur.csv` if more row-level replay work is needed
+- next step: load the emitted helper in the browser and use `__loadStockroomReplayRows()` / `__updateStockroomReplayByPimsId()` for row-level replay if more capture work is needed
