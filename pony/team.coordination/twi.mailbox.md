@@ -9,6 +9,7 @@
 - None requiring Twilight action.
 
 ## Current Coordination Facts
+- User has told Celestia about the shared launcher write-scope issue where worker sessions can edit their worktree but not the EVH root `pony/team.coordination/*` and `pony/work/*` files. Treat the fix as Celestia-owned shared runtime work unless the user explicitly assigns Twilight to patch it locally.
 - Weave support case `901174` is closed; Weave will not provide an API.
 - Treat future Weave contact work as manual CSV import/export reconciliation only.
 - Vetcove patient export tooling exists at `scripts/export_vetcove_patients.py`; current generated CSV had 19,563 living patient rows and zero city/state/zip gaps after conservative backfill.

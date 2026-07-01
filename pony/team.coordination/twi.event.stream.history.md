@@ -37,3 +37,12 @@
 - next_step: the startup compaction was verified as intentional and preserved in a deliberate local checkpoint; resume normal coordination from `pony/twi/main`
 - questions_for_twi: none
 - decision_needed: none
+
+## 2026-07-01 13:49:36 EDT
+- changed_file: twi.mailbox.md, twi.event.stream.history.md
+- action: Shared launcher write-scope issue routed to Celestia
+- status: WAITING
+- blockers: none
+- next_step: treat the worker sandbox/root-coordination write issue as Celestia-owned shared runtime work unless the user explicitly assigns Twilight a local patch
+- questions_for_twi: none
+- decision_needed: none
