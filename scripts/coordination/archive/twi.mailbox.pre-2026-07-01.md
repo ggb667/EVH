@@ -1,0 +1,135 @@
+# TWI MAILBOX
+
+## Pending Items
+- Pinkie update: Weave support case `901174` is closed and Weave will not provide an API.
+- Pinkie routing consequence: stop planning around Weave API/bootstrap extract access and treat any continuing Weave contact work as manual CSV import/export reconciliation only.
+- Pinkie current operating assumption: the local Weave export already mostly mirrors the Instinct account list, so the next decision is whether any manual import/reconciliation work is still worth doing.
+- Twilight shutdown handoff: the ad hoc Instinct token launcher bug is fixed. `../creds_and_token.zsh` now exports `TOKEN` correctly, URL-encodes the partner auth params, fails cleanly on auth errors, and can launch the CSV flow without the earlier shell breakage.
+- Twilight Vetcove export update: a dedicated patient exporter now exists at `scripts/export_vetcove_patients.py`, using shared pagination from `scripts/instinct_partner_client.py` rather than the one-off `createCSV.py` path.
+- Live Vetcove export result:
+  - output file: `/home/ggb66/dev/EVH/vetcove_patients.csv`
+  - `27,102` total patients scanned
+  - `19,563` living rows exported
+  - `7,539` non-living rows skipped
+- Current Vetcove mapping decisions:
+  - `Division` is fixed to `Eustis Veterinary Hospital` on every row.
+  - missing location pieces are backfilled conservatively: use real city when present, set missing state to `FL`, infer zip from the most common known zip for that city, and only default to `Eustis / FL / 32726` when city is missing too.
+- Current Vetcove import-readiness audit on the generated CSV:
+  - `Last Visit` missing on `19,083` rows
+  - `Animal Weight (lb)` missing on `19,145` rows
+  - `Date of Birth` missing on `1,824` rows
+  - `Physical Address Street 1` missing on `44` rows
+  - both email/mobile missing on `200` rows
+  - city/state/zip gaps have been reduced to `0`
+- Appointment API result to preserve:
+  - list and fetch are supported via `GET /v1/appointments` and `GET /v1/appointments/{id}`
+  - cancel is supported via `POST /v1/appointments/{appointment_id}/cancellation`
+  - documented writable `PATCH` field is still only `isConfirmed`
+  - rescheduling is not yet documented or proven
+- Recommended morning next step: split `vetcove_patients.csv` into an import-ready subset and a rejects file for rows blocked by missing Vetcove-required fields, unless the user wants to relax the import assumptions further.
+- AJ resend in EVH: the Instinct bearer token used for reminder submission is session-bound and likely short-lived; the reminder batch runner works, but it should be treated as needing a fresh token if the browser session expires mid-run.
+- AJ note: Instinct search is not working reliably; `Kindra Abner` could not be found directly, but `Abner` was found and then `Jack` was found under that account.
+- AJ note: first reminder check for `Abner, Kindra` / `Jack` found no reminders set, so the interaction is a no-op verification and not an applied reminder update.
+- AJ note: we now have proof that some Instinct API calls can be salvaged with explicit `curl --resolve` plus a live bearer token when normal DNS is flaky; keep that pattern in mind for future API work.
+- Twilight branch update: coordinator work now lives in the EVH root worktree on dedicated branch `pony/twi/main`; workers stay on their own pony branch namespaces and should not be routed onto Twilight's branch.
+- Twilight coordination update: the EVH assignment registry has been reconciled to the actual worker worktree branches (`pony/aj/main`, `pony/pinkie/main`, `pony/fs/instinct-samples`, `pony/rarity/main`, `pony/rd/main`, `pony/spike/main`) so branch-mismatch preflight noise does not mask real blockers.
+- Pinkie blocker update: Weave support case `901174` has been submitted successfully to obtain Weave application credentials/export access.
+- Pinkie current state: code isolation is complete on `pony/pinkie/weave-contact-bootstrap`, the Contacts entry point now lives at `scripts/contacts/weave_contact_sync.py`, and the focused tests are still green after the move.
+- Pinkie remains blocked on the Weave-side bootstrap extract only. Live Instinct export artifacts are already ready:
+  - `/tmp/evh-weave-contact-csv-20260422-161314/weave_contacts_001.csv`
+  - `/tmp/evh-weave-contact-csv-20260422-161314/weave_contacts_002.csv`
+  - `/tmp/evh-weave-contact-sync-state.json`
+- Next step after case `901174`: export existing Weave contacts, reconcile against the Instinct export, and only then decide what is safe to import into Weave.
+- Pinkie live-run update: `scripts/weave_contact_sync.py` is now exporting Weave-ready CSV batches instead of JSONL, with hash-based skip logic and file chunking for periodic incremental runs.
+- Pinkie executed the initial live Instinct export using the stored Instinct client credentials and produced a full bootstrap batch from the EVH tenant: `11,968` accounts scanned/exported, `2` inactive, watermark `2026-04-22T18:37:06.103726Z`.
+- Output artifacts from the live run:
+  - `/tmp/evh-weave-contact-csv-20260422-161314/weave_contacts_001.csv`
+  - `/tmp/evh-weave-contact-csv-20260422-161314/weave_contacts_002.csv`
+  - `/tmp/evh-weave-contact-sync-state.json`
+- Current conclusion: Weave bulk import is viable for ongoing Instinct -> Weave sync, but first production import should not happen yet because Weave already contains legacy Avimark contacts and overlap is expected.
+- New immediate blocker: need Weave application credentials or export access to pull the existing Weave contact list for one-time bootstrap reconciliation. User emailed `e-services@dsn.com` requesting the Weave credentials.
+- Recommended next step once access arrives: export existing Weave contacts, match them against the Instinct export using legacy ID/name/phone/email heuristics, split into matched/unmatched/ambiguous sets, then decide what is safe to import.
+- Pinkie status update: implemented EVH-side Phase 1 Weave Contacts groundwork in `scripts/weave_contact_sync.py` and expanded `scripts/instinct_accounts.py` to normalize/project Instinct accounts into a Weave-shaped contact payload with payload hashing and inactive handling.
+- Tests passed for the new slice: `tests/test_weave_contact_sync.py`, `tests/test_instinct_accounts.py`, and `tests/test_instinct_partner_client.py` via `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest --basetemp=/tmp/evh-pytest tests/test_instinct_accounts.py tests/test_weave_contact_sync.py tests/test_instinct_partner_client.py`.
+- Remaining blockers are all on the production integration boundary: actual Weave contact API or proto, auth details, idempotent external ID field, and confirmation of any allowed Weave-to-Instinct communication writeback fields plus endpoint support.
+- Design has been updated to make Instinct the system of record in `docs/weave-instinct-account-sync-design.md`; next useful coordination step is to route the Weave contract decision so Pinkie can replace the JSONL destination adapter with the real one.
+- Rarity stockroom planning update: user confirmed Instinct / Stockroom is the intended inventory system of record for EVH.
+- EVH stock areas identified so far for stockroom planning: Treatment, Pharmacy, Reception, Lab, Kennel, Room 1-5, Autoclave, X-Ray / Dental.
+- Current first-wave assumption for Stockroom rollout: Treatment, Pharmacy, Reception, Lab, and Kennel.
+- New planning docs added for the stockroom track:
+  - `docs/inventory-ally-stockroom-rollout-plan.md`
+  - `docs/inventory-ally-stockroom-exec-summary.md`
+  - `docs/inventory-ally-stockroom-ownership-matrix.md`
+  - `docs/inventory-ally-stockroom-discovery-checklist.md`
+- Current blocker on the stockroom track: exact IA and Stockroom workflow coverage is still discovery-driven and needs screenshots, exports, or admin walkthrough detail before workflow ownership can be finalized.
+- Recommended coordination next step: route discovery using the checklist and then refine the ownership matrix and pilot cutover plan.
+- RD status update: investigated Vetcove Home Delivery alignment with Instinct, added `docs/vetcove-instinct-home-delivery-design.md`, and extracted reusable Instinct account and patient lookup logic into `scripts/instinct_accounts.py` with passing tests. Current conclusion is Instinct should remain source of truth for patient, client, and prescription state while Vetcove handles storefront, ordering, and fulfillment, but implementation is blocked on Vetcove confirming the Instinct-specific Home Delivery contract and event model.
+- RD next step after vendor confirmation: define normalized mapping records for account, patient, prescription, and order state, then build a dry-run Instinct-to-Vetcove payload exporter using `scripts/instinct_accounts.py` as the identity base.
+- RD coordination update: RD workfile and status are now aligned to the worker-isolation rule. Future Vetcove implementation should happen only on `pony/rd/*` branches and any new Vetcove-specific scripts should live under `scripts/vetcove/`, not shared root `scripts/`.
+- RD current state summary: this track is still in discovery and coordination mode, not active vendor-bound implementation. We have a design note, a reusable Instinct identity adapter, and a recommended operating model, but no Vetcove adapter or order/prescription sync code should be started until the vendor confirms the Instinct-specific Home Delivery contract.
+- RD payload update: live Instinct prescription payloads have now been captured and documented in `docs/instinct-prescription-payload-notes.md` for all four endpoints: list/fetch `external-prescriptions` and list/fetch `dispensed-prescriptions`.
+- RD current conclusion after payload capture: `external-prescriptions` looks like the better Vetcove-facing export candidate because it includes embedded product label/unit metadata, instructions, `quantityPerFill`, and `pharmacyNote`; `dispensed-prescriptions` looks more useful for account linkage and reconciliation because it includes `accountId`, `productId`, `prescribedAt`, and `remainingFills`. This is an inference from live payloads, not a vendor-confirmed contract.
+- RD next concrete step: compare the documented Instinct fields against Vetcove's onboarding/import template, then decide whether `external-prescriptions` alone is enough or whether `dispensed-prescriptions` also needs to be carried into the custom export workflow.
+- Spike note: the remaining RD documentation work is the field-mapping note against the Vetcove onboarding/import template; keep that doc gap visible in the coordination trail before any `scripts/vetcove/` implementation starts.
+- FS status update: built a shared Instinct Partner API scaffold in the EVH worktree for the Weave/Instinct appointment and contact sync work.
+- New files added: `scripts/instinct_partner_client.py`, `scripts/instinct_accounts.py`, `scripts/instinct_appointments.py`, and `scripts/instinct_sync_runner.py`.
+- Runner behavior: dry-run account and appointment feed normalization, persisted JSON watermark state, structured export JSON, idempotency keys, and basic conflict marking for canceled appointments.
+- Docs updated: `README.md` and `docs/instinct-import.md` now point at the runner.
+- Verification: `8 passed` for the focused sync and normalization tests.
+- Spike note: keep Spike's own documentation status current in the coordination trail, not just the subject matter being documented. The documentation work includes the status of the docs work itself.
+- FS latest status: the active Scheduling subtask is paused; current branch work is documentation-only Instinct sample capture and should not be treated as active Scheduling implementation.
+- Rarity stockroom follow-up: IA evidence now confirms active vendor item / PIMS mapping, UOM and pack-size setup, on-hand quantity tracking via counts and estimated quantities, cycle counts via the Counting page / weekly list, and inventory reporting via Inventory Analysis export.
+- Stockroom evidence now confirms room-level quantity tracking, multi-room item support, room-only tracking without sub-locations, admin-managed locations with `Code` and `Label`, buying-unit to selling-unit conversion, and count/history/analytics exports.
+- EVH planning assumption is now explicit: first rollout is room-only, with manual location creation in Stockroom because the location count is small.
+- User has emailed Instinct humans the remaining implementation-risk questions covering migration path, shadow mode, stable IDs, API endpoints, PIMS mapping migration, cycle count data behavior, approval/review workflow, location code stability, and multi-room export/API representation.
+- Recommended next coordination step after reply arrives: lock the room-level first-wave pilot scope and reduce the remaining `TBD` items in the ownership matrix.
+- Rarity wire-capture update: the working interception point is `view.pushHookEvent` on the `product-catalog` LiveView root, not `window.liveSocket.pushHookEvent`.
+- Current working wire logger:
+  ```javascript
+  (() => {
+    const el = document.getElementById("product-catalog");
+    const view = Object.values(window.liveSocket.roots).find(v => v.el && v.el.contains(el));
+
+    if (!view) throw new Error("Could not locate LiveView root");
+    if (typeof view.pushHookEvent !== "function") throw new Error("view.pushHookEvent not found");
+
+    const orig = view.pushHookEvent.bind(view);
+    window.__stockroomWireLog = [];
+
+    view.pushHookEvent = function(el, ref, event, payload, callback) {
+      const snap = typeof structuredClone === "function"
+        ? structuredClone(payload)
+        : JSON.parse(JSON.stringify(payload));
+
+      window.__stockroomWireLog.push({
+        ts: new Date().toISOString(),
+        kind: "pushHookEvent",
+        event,
+        payload: snap,
+        elId: el?.id ?? null,
+        ref: ref ?? null,
+      });
+
+      console.log("[Stockroom wire]", event, snap);
+
+      return orig(el, ref, event, payload, function(reply, pushRef) {
+        window.__stockroomWireLog.push({
+          ts: new Date().toISOString(),
+          kind: "reply",
+          event,
+          reply,
+          pushRef,
+        });
+        console.log("[Stockroom reply]", { event, pushRef, reply });
+        return callback?.(reply, pushRef);
+      });
+    };
+
+    console.log("Stockroom hook wire logging enabled");
+  })();
+  ```
+- Current conclusion: the update path is `live_fetch.update_global_product`, and the next useful abstraction is to capture `load_global_product` traffic to build the `product id | product name | product uuid` map before doing any bulk replay.
+- AJ note for Celestia: `.codex` should be ignored from now on at the repo root, and that instruction has been recorded in AJ local state.
+- AJ update for Celestia: WSL DNS was repaired by rewriting `/etc/resolv.conf` to `8.8.8.8`, `8.8.4.4`, and `192.168.86.1`; `getent hosts` now resolves `partner.instinctvet.com` and `evh.api.instinctvet.com`, but `curl` and Python still need a WSL restart or equivalent network refresh before the reminder token fetch will work again.
+- Coordination rule: worker-local state should be canonical in `pony/work/*.md`; Twilight and team coordination notes should link to those workfiles and summarize deltas instead of duplicating the full state.
+- Rarity instruction: when a worker is handed page-by-page data, save it into a real file immediately instead of creating a stub, summary placeholder, or partial reconstruction.
