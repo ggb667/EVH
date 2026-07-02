@@ -30,7 +30,8 @@ summary generation, and source-linked display.
 ## Tooling decisions
 
 - Database: Handshake's Aurora MySQL, MariaDB-compatible database for the current shared load target.
-- Database state: use durable ingestion/load state rows in the same MariaDB-compatible store first; the shared dictionary seed is already loaded and verified at 3,133 `rag_dictionary_term` rows, so there is no duplicate seed path.
+- Database state: use durable ingestion/load state rows in the same MariaDB-compatible store first.
+- Database state: the shared dictionary seed is already loaded and verified at 3,133 `rag_dictionary_term` rows; do not route a duplicate seed/load retry for that data.
 - Python package manager: `uv`.
 - PDF extraction: start with PyMuPDF.
 - OCR: add Tesseract or AWS Textract only for scanned or image-only pages.
@@ -106,8 +107,8 @@ Existing agents will not pick up assignment changes just because the files chang
 - The doc target is the first milestone: one client/pet timeline with source-linked summaries.
 - The shared design anchor is the AJ load-state correction and the PDF ingestion policy.
 - The work should stay on durable MariaDB-compatible ingestion/load states and guided templates.
-- AJ reports `db/rag_dictionary_term_seed_merged.csv` is already loaded and verified at 3,133 `rag_dictionary_term` rows.
-- AJ reports the shared dictionary seed is already present in the live DB state; Spike should document the loaded state, not a duplicate seed path.
+- The shared DB state is already seeded at 3,133 `rag_dictionary_term` rows in Handshake's Aurora MySQL/MariaDB-compatible store.
+- Spike should document the loaded state, not a duplicate seed path.
 - The live coordination files in the root pony tree are the canonical record, but this local note is the fast startup path for the spike worktree.
 
 ## Immediate next step

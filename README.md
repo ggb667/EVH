@@ -1,5 +1,16 @@
 # EVH
 
+## Current DB state
+
+The RAG work currently targets Handshake's Aurora MySQL database, which is MariaDB-compatible.
+
+Keep the live state notes aligned with the handoff:
+
+- durable ingestion and load states should live in MariaDB-compatible tables first
+- LangGraph is not required for MVP ingestion
+- the shared dictionary seed is already loaded and verified at `3,133` `rag_dictionary_term` rows
+- do not document or rerun a duplicate seed/load retry for that dictionary state
+
 ## Instinct API base
 
 The official Instinct Partner API reference lists the fetch-account endpoint as:
