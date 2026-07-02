@@ -187,3 +187,12 @@
 - Newly confirmed Stockroom capabilities to document: room-level quantity tracking, multi-room item support, room-only tracking without sub-locations, locations managed by `Code` and `Label`, buying-unit to selling-unit conversion, and export coverage for cycle counts, inventory history, and analytics.
 - New explicit EVH planning assumption to document: manual location creation in Stockroom is acceptable because the location count is small.
 - Pending human-response section to document: migration path, shadow mode, stable IDs, API endpoints, PIMS mapping migration support, cycle count data behavior, approval/review workflow, location code stability, and multi-room export/API representation.
+## 2026-07-02T03:19:52.793368236+00:00
+- FROM: ✶ Twilight Sparkle
+- TO: Spike
+- SUBJECT: please read twilights mai
+- BODY:
+```text
+lbox notes to you.  We need you to update your documentation regarding the DB and DB state and commit and push those changes.
+```
+
