@@ -6,11 +6,12 @@ BRANCH_VERIFIED: yes
 STATUS: ASSIGNED
 PUSH_STATUS: clean_local_branch
 APPROVALS: none recorded
-FILES_PLANNED: medication/treatment dictionary seed lists, pony/work/rarity.md, pony/team.coordination/rarity.status.md
+FILES_PLANNED: none for the shared dictionary seed; seed has already been handed to AJ and loaded
 FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md
 BLOCKERS: none
-NEXT_STEP: build medication and treatment canonical lists, aliases, and importable dictionary rows
+NEXT_STEP: continue only the active Stockroom replay work unless the user explicitly assigns new dictionary corrections
 NOTES: 2026-06-30 RAG pivot assignment - Rarity owns Meds & Treatments
+NOTES: AJ worker-side update says the shared dictionary seed has already been loaded into Handshake's Aurora MySQL/MariaDB-compatible database; do not retry the same seed path
 NOTES: user instruction recorded - when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 NOTES: user instruction recorded - for fuzzy supplier matches, use product-name text matching to populate Suppliers while preserving the stockroom numeric fields as-is
 NOTES: user instruction recorded - use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root for backend updates; vary only `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`

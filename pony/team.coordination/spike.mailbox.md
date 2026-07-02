@@ -7,12 +7,12 @@
 - Overall product shape:
   - Ingest large PMS PDFs or stable PDF references.
   - Extract text page by page.
-  - Store page text, page links, document boundaries, summaries, detected terms, embeddings, and status/confidence fields in Postgres.
+  - Store page text, page links, document boundaries, summaries, detected terms, embeddings, and status/confidence fields in Handshake's Aurora MySQL/MariaDB-compatible database.
   - Reconstruct sub-documents from merged legacy PDFs.
   - Show a scoped client/pet timeline and source links.
   - Use guided templates instead of free-form questions for MVP.
 - Tooling decisions:
-  - Database: AWS RDS PostgreSQL with pgvector and Postgres full-text search.
+  - Database: Handshake's Aurora MySQL, MariaDB-compatible database for the current shared load target.
   - Python package manager: uv.
   - PDF extraction: start with PyMuPDF.
   - OCR: add Tesseract or AWS Textract only for scanned/image-only pages.
@@ -21,14 +21,14 @@
   - LangGraph: not required for MVP ingestion; use durable DB ingestion states first, and consider LangGraph later for uncertain summarization/classification/Q&A flows.
 - Worker assignments for RAG:
   - RD: PDFs. Obtain PMS/Instinct PDF files or stable PDF references for initial ingestion. The user will personally work from RD's tree for now.
-  - AJ: DB. Design Postgres/pgvector schema, storage model, and ingestion status fields.
-  - Rarity: Meds & Treatments. Build medication/treatment canonical lists, aliases, and importable dictionary rows.
+  - AJ: DB. Keep the Handshake Aurora MySQL/MariaDB-compatible load state current and verify any new assigned loads.
+  - Rarity: Meds & Treatments. Shared dictionary seed is already delivered to AJ and loaded; do not retry it unless the user assigns a correction.
   - FS: Vet Terms. Define veterinary document type clues, source clues, treatment context terms, and template terminology.
   - Spike: Docs. Document the system architecture, worker contracts, and MVP milestones.
   - Twilight: Coordination unchanged.
   - Pinkie: Idle for this split.
 - Suggested build order:
-  - MVP 1 Page Index: PMS document reference, PDF page extraction, Postgres page storage, page links, basic client/pet/name search.
+  - MVP 1 Page Index: PMS document reference, PDF page extraction, MariaDB-compatible page storage, page links, basic client/pet/name search.
   - MVP 2 Medication/Treatment Detection: load dictionaries, detect terms on pages, show mentions with citations.
   - MVP 3 Document Grouping: infer start/end pages, classify type, detect dates, create groups.
   - MVP 4 Summaries: short document summaries, timeline, hyperlinks to source pages.

@@ -46,3 +46,46 @@
 - next_step: treat the worker sandbox/root-coordination write issue as Celestia-owned shared runtime work unless the user explicitly assigns Twilight a local patch
 - questions_for_twi: none
 - decision_needed: none
+
+## 2026-07-01 23:16:11
+- changed_file: aj.status.md
+- action: Twilight review needed
+2:BRANCH: pony/aj/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/aj
+5:STATUS: ASSIGNED
+8:FILES_PLANNED: docs/rag-pgvector-schema-design.md, pony/work/aj.md, pony/team.coordination/aj.status.md, scripts/load_instinct_identity_exports.py
+9:FILES_TOUCHED: docs/rag-pgvector-schema-design.md, pony/work/aj.md, pony/team.coordination/aj.status.md, scripts/load_instinct_identity_exports.py
+10:BLOCKERS: none
+11:NEXT_STEP: keep the MariaDB load state current and proceed with any remaining identity export or verification work as assigned
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
+## 2026-07-01 23:16:11
+- changed_file: rarity.status.md
+- action: Twilight review needed
+2:BRANCH: pony/rarity/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
+6:STATUS: ASSIGNED
+9:FILES_PLANNED: none for the shared dictionary seed; seed has already been handed to AJ and loaded
+10:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md
+11:BLOCKERS: none
+12:NEXT_STEP: continue only the active Stockroom replay work unless the user explicitly assigns new dictionary corrections
+20:FILES_PLANNED: none
+21:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
+22:BLOCKERS: none
+24:FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
+25:FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
+26:BLOCKERS: none
+27:NEXT_STEP: load the emitted browser helper in the Stockroom page and replay rows with `__loadStockroomReplayRows()` / `__updateStockroomReplayByPimsId()` if more row-level capture work is needed
+30:QUESTIONS_FOR_TWI: none
+31:DECISION_NEEDED: none
+
+## 2026-07-01 23:20:00 EDT
+- changed_file: twi.mailbox.md, twi.status.md, rarity.status.md, spike.mailbox.md, pony/work/rarity.md, pony/work/aj.md, pony/work/coordinator-twi.md, scripts/coordination/TASK_BOARD.md
+- action: AJ worker-side RAG load correction recorded in root coordination state
+- status: WAITING
+- blockers: none
+- current_status: shared RAG load target is Handshake's Aurora MySQL/MariaDB-compatible database, not Postgres/pgvector
+- current_status: AJ reports `db/rag_dictionary_term_seed_merged.csv` has already been loaded and verified at 3,133 `rag_dictionary_term` rows
+- next_step: relaunch workers with corrected wording; do not reassign or retry the already-loaded shared dictionary seed path unless the user explicitly asks
+- questions_for_twi: none
+- decision_needed: none

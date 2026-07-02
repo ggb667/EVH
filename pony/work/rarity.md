@@ -8,7 +8,8 @@ Scope: Meds & Treatments
 Permissions granted: none recorded
 
 Artifact: docs/stockroom-merged-stockroom-ur.csv
-- current RAG assignment: build medication and treatment canonical lists, aliases, and importable dictionary rows
+- current RAG assignment: shared dictionary seed is already delivered and loaded; do not retry the same seed path unless assigned
+- shared dictionary load state: AJ worker-side status reports the merged seed was loaded into Handshake's Aurora MySQL/MariaDB-compatible database and verified at 3,133 rows
 - user instruction recorded: when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
 - user instruction recorded: for fuzzy supplier matches, use product-name text matching to populate `Suppliers` while preserving the stockroom numeric fields as-is
 - user instruction recorded: use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root to perform backend updates; only vary `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`
