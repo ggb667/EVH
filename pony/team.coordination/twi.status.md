@@ -2,11 +2,12 @@ AUDIENCE: EVERYONE
 BRANCH: main
 WORKTREE: /home/ggb66/dev/EVH
 BRANCH_VERIFIED: yes
-STATUS: WAITING
-PUSH_STATUS: local_commit_ahead_of_origin
-FILES_PLANNED: .gitignore, README.md, docs/instinct-import.md, docs/instinct-partner-fetch-account.md, pony/*, scripts/instinct_active_patients_audit.py, scripts/instinct_import_payload_builder.py, scripts/instinct_test_account_check.py, tests/test_instinct_active_patients_audit.py, tests/test_instinct_import_payload_builder.py
-FILES_TOUCHED: .gitignore, .git/info/exclude, README.md, docs/instinct-import.md, docs/instinct-partner-fetch-account.md, pony/README.md, pony/bin/*, pony/launch.configs/EVH.pony.team.yaml, pony/launch.prompts/*, pony/pony.system.config.*, pony/scripts/*, pony/team.coordination/*, pony/work/*, scripts/instinct_active_patients_audit.py, scripts/instinct_import_payload_builder.py, scripts/instinct_test_account_check.py, tests/test_instinct_active_patients_audit.py, tests/test_instinct_import_payload_builder.py
+STATUS: ASSIGNED
+PUSH_STATUS: local_changes_pending_commit
+FILES_PLANNED: pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md
+FILES_TOUCHED: pony/team.coordination/twi.mailbox.md, pony/team.coordination/twi.status.md
 BLOCKERS: none
-NEXT_STEP: no pending worker questions are active; await a concrete EVH coordination or implementation task
+NEXT_STEP: track the managed Postgres vector-store handoff and await the next concrete EVH coordination or implementation task
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none
+NOTES: AJ update recorded - EVH RAG should use a separate managed Postgres database for vectors and document chunks; Handshake is MySQL and not the vector-store target
