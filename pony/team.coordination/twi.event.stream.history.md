@@ -89,3 +89,15 @@
 - next_step: relaunch workers with corrected wording; do not reassign or retry the already-loaded shared dictionary seed path unless the user explicitly asks
 - questions_for_twi: none
 - decision_needed: none
+## 2026-07-01 23:19:38
+- changed_file: spike.status.md
+- action: Twilight review needed
+2:BRANCH: pony/spike/main
+3:WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/spike
+5:STATUS: ASSIGNED
+8:FILES_PLANNED: RAG architecture docs, worker contracts, MVP milestones, pony/work/spike.md, pony/team.coordination/spike.status.md
+9:FILES_TOUCHED: pony/work/spike.md, pony/team.coordination/spike.status.md
+10:BLOCKERS: none
+11:NEXT_STEP: update the RAG architecture docs to use Handshake Aurora MySQL/MariaDB-compatible wording and mark the shared dictionary seed as already loaded
+12:QUESTIONS_FOR_TWI: none
+13:DECISION_NEEDED: none
