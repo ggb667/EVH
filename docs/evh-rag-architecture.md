@@ -30,7 +30,7 @@ summary generation, and source-linked display.
 ## Tooling decisions
 
 - Database: Handshake's Aurora MySQL, MariaDB-compatible database for the current shared load target.
-- Database state: use durable ingestion/load state rows in the same MariaDB-compatible store first; do not rely on LangGraph for MVP ingestion control flow.
+- Database state: use durable ingestion/load state rows in the same MariaDB-compatible store first; the shared dictionary seed is already loaded and verified at 3,133 `rag_dictionary_term` rows, so there is no duplicate seed path.
 - Python package manager: `uv`.
 - PDF extraction: start with PyMuPDF.
 - OCR: add Tesseract or AWS Textract only for scanned or image-only pages.
