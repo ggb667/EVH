@@ -382,7 +382,7 @@ def _extract_pdf_text_pages_worker(pdf_bytes: bytes, queue) -> None:
         )
 
 
-def safe_extract_pdf_text_pages(pdf_bytes: bytes, *, timeout_s: int = 120) -> tuple[list[str], int]:
+def safe_extract_pdf_text_pages(pdf_bytes: bytes, *, timeout_s: int = 45) -> tuple[list[str], int]:
     ctx = get_context("spawn")
     queue = ctx.Queue()
     proc = ctx.Process(target=_extract_pdf_text_pages_worker, args=(pdf_bytes, queue), daemon=True)
@@ -1049,18 +1049,33 @@ def chunk_pdf_pages(
     family = _detect_document_family(source, pages)
     full_pdf_terms: list[DetectedTerm] = []
     page_terms_by_number: dict[int, list[DetectedTerm]] = {}
+    profile_pdf = os.environ.get("EVH_IMPORT_PROFILE_PDF", "").strip().lower() in {"1", "true", "yes", "on"}
+    profile_started = perf_counter()
+    timing: dict[str, float] = {}
+
+    detect_terms_start = perf_counter()
     for page_number, page_text in enumerate(pages, start=1):
         page_terms = detect_terms_in_text(page_text, terms, page_number=page_number)
         page_terms_by_number[page_number] = page_terms
         full_pdf_terms.extend(page_terms)
+    timing["detect_terms_seconds"] = perf_counter() - detect_terms_start
 
+    summary_start = perf_counter()
     clinical_summary, summary_style = _build_document_summary(source, pages, full_pdf_terms, family=family)
+    timing["summary_seconds"] = perf_counter() - summary_start
     full_pdf_terms_metadata = detected_terms_to_metadata(full_pdf_terms)
+
+    term_summary_start = perf_counter()
     term_summary = summarize_detected_terms(full_pdf_terms)
+    timing["term_summary_seconds"] = perf_counter() - term_summary_start
+
+    table_records_start = perf_counter()
     table_records = _extract_table_records(pages, term_summary, family=family)
+    timing["table_records_seconds"] = perf_counter() - table_records_start
 
     documents: list[Document] = []
     chunk_index = 1
+    split_and_chunk_start = perf_counter()
     for page_number, page_text in enumerate(pages, start=1):
         for chunk_text in split_text(page_text, chunk_size=config.chunk_size, chunk_overlap=config.chunk_overlap):
             chunk_terms = detect_terms_in_text(chunk_text, terms, page_number=page_number)
@@ -1087,6 +1102,27 @@ def chunk_pdf_pages(
                 )
             )
             chunk_index += 1
+    timing["split_and_chunk_seconds"] = perf_counter() - split_and_chunk_start
+
+    if profile_pdf:
+        timing["total_seconds"] = perf_counter() - profile_started
+        print(
+            json.dumps(
+                {
+                    "stage": "pdf_profile",
+                    "patient_id": source.patient_id,
+                    "patient_name": source.patient_name,
+                    "pdf_path": str(source.pdf_path) if source.pdf_path is not None else None,
+                    "pdf_url": source.pdf_url,
+                    "page_count": len(pages),
+                    "chunk_count": len(documents),
+                    **{k: round(v, 3) for k, v in timing.items()},
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     return documents
 
 
@@ -1106,6 +1142,7 @@ def chunk_patient_pdf_timed(
     *,
     term_index: Iterable[DictionaryTerm] | None = None,
     defer_no_text_page_threshold: int | None = 8,
+    extraction_timeout_s: int = 45,
 ) -> tuple[list[Document], int, dict[str, float]]:
     download_start = perf_counter()
     pdf_bytes = read_pdf_bytes(source)
@@ -1127,6 +1164,7 @@ def chunk_patient_pdf_timed(
             "extraction_seconds": extraction_seconds,
             "chunking_seconds": chunking_seconds,
             "summary_seconds": summary_seconds,
+            "cached_text_seconds": 0.0,
         }
 
     extraction_start = perf_counter()
@@ -1144,8 +1182,9 @@ def chunk_patient_pdf_timed(
                 "extraction_seconds": extraction_seconds,
                 "chunking_seconds": chunking_seconds,
                 "summary_seconds": summary_seconds,
+                "cached_text_seconds": 0.0,
             }
-        pages, page_count = safe_extract_pdf_text_pages(pdf_bytes)
+        pages, page_count = safe_extract_pdf_text_pages(pdf_bytes, timeout_s=extraction_timeout_s)
         _store_cached_text_pages(cache_dir, cache_key, pages, page_count, parser="pypdf")
     except (PdfReadError, RuntimeError, ValueError, OSError) as exc:
         if _looks_like_non_pdf_or_corrupt_pdf(exc):
@@ -1204,6 +1243,7 @@ def chunk_patient_pdf_timed(
         "extraction_seconds": extraction_seconds,
         "chunking_seconds": chunking_seconds,
         "summary_seconds": summary_seconds,
+        "cached_text_seconds": 0.0,
     }
 
 
@@ -1934,17 +1974,25 @@ def load_into_postgres(
     documents: list[Document],
     vector_dimensions: int,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
+    embedding_batch_size: int = 64,
+    load_batch_size: int = 500,
 ) -> tuple[float, float]:
     rows: list[dict[str, Any]] = []
     embed_start = perf_counter()
     source_summary: str = ""
     source_summary_kind: str = "structured_only"
     source_page_count = 0
-    embeddings = embed_texts_openai(
-        [document.page_content for document in documents],
-        model=embedding_model,
-        dimensions=vector_dimensions,
-    )
+    texts = [document.page_content for document in documents]
+    embeddings: list[list[float]] = []
+    batch_size = max(1, embedding_batch_size)
+    for batch_start in range(0, len(texts), batch_size):
+        embeddings.extend(
+            embed_texts_openai(
+                texts[batch_start : batch_start + batch_size],
+                model=embedding_model,
+                dimensions=vector_dimensions,
+            )
+        )
     for document, embedding in zip(documents, embeddings):
         clean_chunk_text = _strip_nuls(document.page_content)
         clean_metadata = _strip_nuls(
@@ -2045,30 +2093,32 @@ def load_into_postgres(
                 )
                 for row in rows
             ]
+            load_batch_size = max(1, load_batch_size)
             with conn.cursor() as cur:
-                cur.executemany(
-                    f"""
-                    INSERT INTO {table_name} (
-                        source_name,
-                        source_uri,
-                        page_number,
-                        chunk_index,
-                        chunk_text,
-                        chunk_hash,
-                        embedding,
-                        metadata
+                for row_start in range(0, len(chunk_rows), load_batch_size):
+                    cur.executemany(
+                        f"""
+                        INSERT INTO {table_name} (
+                            source_name,
+                            source_uri,
+                            page_number,
+                            chunk_index,
+                            chunk_text,
+                            chunk_hash,
+                            embedding,
+                            metadata
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (chunk_hash) DO UPDATE SET
+                            source_uri = EXCLUDED.source_uri,
+                            page_number = EXCLUDED.page_number,
+                            chunk_index = EXCLUDED.chunk_index,
+                            chunk_text = EXCLUDED.chunk_text,
+                            embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata
+                        """,
+                        chunk_rows[row_start : row_start + load_batch_size],
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (chunk_hash) DO UPDATE SET
-                        source_uri = EXCLUDED.source_uri,
-                        page_number = EXCLUDED.page_number,
-                        chunk_index = EXCLUDED.chunk_index,
-                        chunk_text = EXCLUDED.chunk_text,
-                        embedding = EXCLUDED.embedding,
-                        metadata = EXCLUDED.metadata
-                    """,
-                    chunk_rows,
-                )
         conn.commit()
     finally:
         conn.close()

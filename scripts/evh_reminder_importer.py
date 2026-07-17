@@ -635,7 +635,8 @@ class InstinctApiAdapter:
                 else:
                     yield self._get(f"/v1/patients/{patient_id}")
 
-            cursor = data.get("nextPageCursor")
+            metadata = data.get("metadata") if isinstance(data, dict) else None
+            cursor = normalize_text(metadata.get("after")) if isinstance(metadata, dict) else ""
             if not cursor:
                 break
 
@@ -654,7 +655,8 @@ class InstinctApiAdapter:
             for account in accounts:
                 yield account
 
-            cursor = data.get("nextPageCursor") if isinstance(data, dict) else None
+            metadata = data.get("metadata") if isinstance(data, dict) else None
+            cursor = normalize_text(metadata.get("after")) if isinstance(metadata, dict) else ""
             if not cursor:
                 break
 
@@ -671,7 +673,8 @@ class InstinctApiAdapter:
             for patient in patients:
                 yield patient
 
-            cursor = data.get("nextPageCursor") if isinstance(data, dict) else None
+            metadata = data.get("metadata") if isinstance(data, dict) else None
+            cursor = normalize_text(metadata.get("after")) if isinstance(metadata, dict) else ""
             if not cursor:
                 break
 

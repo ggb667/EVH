@@ -118,7 +118,9 @@ That means the reminders visible in the Instinct UI are not yet reproducible fro
 - `docs/instinct-import.md`: integration notes, endpoint checklist, and test-account commands.
 - `scripts/instinct_active_patients_audit.py`: preflight checker for `Active Patients.csv` to verify unique patient identifiers and required mapping fields before bulk import.
 - `scripts/evh_reminder_importer.py`: reminder spreadsheet parser plus live patient/reminder audit mode for validating owner/contact/reminder state before import execution.
+- `scripts/instinct_pdf_chunker.py`: manifest-driven PDF chunker for patient documents with a LangChain-compatible `Document` shape.
 - `tests/test_instinct_import_payload_builder.py`: unit tests for payload merge/dedupe behavior.
+- `tests/test_instinct_pdf_chunker.py`: unit tests for manifest parsing and text splitting.
 
 ## Invocation examples
 

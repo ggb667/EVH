@@ -742,6 +742,46 @@ def _print_progress(item: ImportProgress) -> None:
 
 
 @trace_calls
+def _record_deferred_ocr_best_effort(
+    *,
+    database_url: str,
+    deferred_ocr_table_name: str,
+    source_name: str,
+    source_uri: str,
+    patient_id: str,
+    patient_name: str,
+    pdf_id: str,
+    filename: str,
+    page_count: int | None,
+    reason: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        run_psql(
+            database_url,
+            build_deferred_ocr_upsert_sql(
+                deferred_ocr_table_name,
+                source_name=source_name,
+                source_uri=source_uri,
+                patient_id=patient_id,
+                patient_name=patient_name,
+                pdf_id=pdf_id,
+                filename=filename,
+                page_count=page_count,
+                reason=reason,
+                metadata=metadata,
+            ),
+        )
+        return None
+    except Exception as exc:  # pragma: no cover - best-effort durability path
+        return {
+            "stage": "deferred_ocr_record_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+
+
+@trace_calls
 def _format_eta(seconds: float | None) -> str:
     if seconds is None or seconds < 0:
         return "unknown"
@@ -873,6 +913,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--chunk-overlap", type=int, default=150)
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--vector-dimensions", type=int, default=DEFAULT_EMBEDDING_DIMENSIONS)
+    parser.add_argument("--embedding-batch-size", type=int, default=64, help="Batch size for embedding API requests.")
+    parser.add_argument("--load-batch-size", type=int, default=500, help="Batch size for pgvector upserts.")
+    parser.add_argument("--extraction-timeout", type=int, default=45, help="Seconds before PDF text extraction is deferred.")
     parser.add_argument("--delete-local-after-load", action="store_true", default=True)
     parser.add_argument("--keep-local", action="store_true")
     parser.add_argument("--expected-clients", type=int, default=12053, help="Expected live client/account total for ETA math.")
@@ -1203,6 +1246,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 is_retry_target = pdf_id == resume_failed_pdf and resume_retry_attempts < 1
                 try:
+                    signed_url_start = time.perf_counter()
                     _print_stage(
                         "signed_url",
                         client_id=client_id,
@@ -1212,6 +1256,14 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     progress_state["current_stage"] = "signed_url"
                     pdf_url = create_chart_file_url(pdf_id, inline=True)
+                    _print_timing(
+                        "timing_signed_url",
+                        time.perf_counter() - signed_url_start,
+                        client_id=client_id,
+                        patient_id=patient_id,
+                        pdf_id=pdf_id,
+                        filename=filename,
+                    )
                     _print_progress(ImportProgress(client_id, patient_id, pdf_id, filename, "url_ready"))
                     _print_stage(
                         "process_pdf",
@@ -1227,6 +1279,7 @@ def main(argv: list[str] | None = None) -> int:
                         patient_name=_text(patient.get("name") or patient.get("patientName")) or patient_id,
                         pdf_url=pdf_url,
                     )
+                    process_pdf_start = time.perf_counter()
                     _print_stage(
                         "chunk_start",
                         client_id=client_id,
@@ -1235,7 +1288,12 @@ def main(argv: list[str] | None = None) -> int:
                         filename=filename,
                     )
                     try:
-                        chunk_docs, page_count, timing = chunk_patient_pdf_timed(source, config, term_index=term_index)
+                        chunk_docs, page_count, timing = chunk_patient_pdf_timed(
+                            source,
+                            config,
+                            term_index=term_index,
+                            extraction_timeout_s=args.extraction_timeout,
+                        )
                         progress_state["current_stage"] = "chunk_complete"
                         _print_timing(
                             "timing_extract_chunk",
@@ -1250,6 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
                             filename=filename,
                         )
                     except DeferredOCRDocument as deferred_exc:
+                        deferred_record_started = time.perf_counter()
                         print(
                             json.dumps(
                                 {
@@ -1267,20 +1326,26 @@ def main(argv: list[str] | None = None) -> int:
                             ),
                             flush=True,
                         )
-                        run_psql(
-                            args.database_url,
-                            build_deferred_ocr_upsert_sql(
-                                args.deferred_ocr_table_name,
-                                source_name=f"{client_id}:{patient_id}:{filename}",
-                                source_uri=pdf_url,
-                                patient_id=patient_id,
-                                patient_name=patient_name,
-                                pdf_id=pdf_id,
-                                filename=filename,
-                                page_count=deferred_exc.page_count,
-                                reason=deferred_exc.reason,
-                                metadata=deferred_exc.metadata,
-                            ),
+                        deferred_record_error = _record_deferred_ocr_best_effort(
+                            database_url=args.database_url,
+                            deferred_ocr_table_name=args.deferred_ocr_table_name,
+                            source_name=f"{client_id}:{patient_id}:{filename}",
+                            source_uri=pdf_url,
+                            patient_id=patient_id,
+                            patient_name=patient_name,
+                            pdf_id=pdf_id,
+                            filename=filename,
+                            page_count=deferred_exc.page_count,
+                            reason=deferred_exc.reason,
+                            metadata=deferred_exc.metadata,
+                        )
+                        _print_timing(
+                            "timing_deferred_ocr_record",
+                            time.perf_counter() - deferred_record_started,
+                            client_id=client_id,
+                            patient_id=patient_id,
+                            pdf_id=pdf_id,
+                            filename=filename,
                         )
                         skipped_count += 1
                         processed.add(pdf_id)
@@ -1307,6 +1372,7 @@ def main(argv: list[str] | None = None) -> int:
                                     "error_type": "DeferredOCRDocument",
                                     "error": deferred_exc.reason,
                                     "action": "deferred_for_later_ocr",
+                                    **({"deferred_ocr_record_error": deferred_record_error} if deferred_record_error else {}),
                                 },
                             ),
                         )
@@ -1323,6 +1389,7 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     except NoTextLayerError as no_text_exc:
                         reason = "unexpected pdf structure"
+                        deferred_record_started = time.perf_counter()
                         print(
                             json.dumps(
                                 {
@@ -1340,28 +1407,34 @@ def main(argv: list[str] | None = None) -> int:
                             ),
                             flush=True,
                         )
-                        run_psql(
-                            args.database_url,
-                            build_deferred_ocr_upsert_sql(
-                                args.deferred_ocr_table_name,
-                                source_name=f"{client_id}:{patient_id}:{filename}",
-                                source_uri=pdf_url,
-                                patient_id=patient_id,
-                                patient_name=patient_name,
-                                pdf_id=pdf_id,
-                                filename=filename,
-                                page_count=getattr(no_text_exc, "page_count", None),
-                                reason=reason,
-                                metadata={
-                                    "patient_id": patient_id,
-                                    "patient_name": patient_name,
-                                    "pdf_id": pdf_id,
-                                    "filename": filename,
-                                    "client_id": client_id,
-                                    "client_name": client_name,
-                                    "action": "deferred_no_text_pdf",
-                                },
-                            ),
+                        deferred_record_error = _record_deferred_ocr_best_effort(
+                            database_url=args.database_url,
+                            deferred_ocr_table_name=args.deferred_ocr_table_name,
+                            source_name=f"{client_id}:{patient_id}:{filename}",
+                            source_uri=pdf_url,
+                            patient_id=patient_id,
+                            patient_name=patient_name,
+                            pdf_id=pdf_id,
+                            filename=filename,
+                            page_count=getattr(no_text_exc, "page_count", None),
+                            reason=reason,
+                            metadata={
+                                "patient_id": patient_id,
+                                "patient_name": patient_name,
+                                "pdf_id": pdf_id,
+                                "filename": filename,
+                                "client_id": client_id,
+                                "client_name": client_name,
+                                "action": "deferred_no_text_pdf",
+                            },
+                        )
+                        _print_timing(
+                            "timing_deferred_ocr_record",
+                            time.perf_counter() - deferred_record_started,
+                            client_id=client_id,
+                            patient_id=patient_id,
+                            pdf_id=pdf_id,
+                            filename=filename,
                         )
                         skipped_count += 1
                         processed.add(pdf_id)
@@ -1388,6 +1461,7 @@ def main(argv: list[str] | None = None) -> int:
                                     "error_type": "NoTextLayerError",
                                     "error": reason,
                                     "action": "deferred_no_text_pdf",
+                                    **({"deferred_ocr_record_error": deferred_record_error} if deferred_record_error else {}),
                                 },
                             ),
                         )
@@ -1402,29 +1476,29 @@ def main(argv: list[str] | None = None) -> int:
                             )
                         )
                         continue
-                except RuntimeError as chunk_exc:
-                    chunk_error = str(chunk_exc)
-                    if "PDF text extraction crashed with signal 11" in chunk_error or "PDF text extraction exceeded" in chunk_error:
-                        print(
-                            json.dumps(
-                                {
-                                    "status": "deferred",
-                                    "stage": "defer_problem_pdf",
-                                    "client_id": client_id,
-                                    "patient_id": patient_id,
-                                    "pdf_id": pdf_id,
-                                    "filename": filename,
-                                    "reason": chunk_error,
-                                },
-                                indent=2,
-                                sort_keys=True,
-                            ),
-                            flush=True,
-                        )
-                        run_psql(
-                            args.database_url,
-                            build_deferred_ocr_upsert_sql(
-                                args.deferred_ocr_table_name,
+                    except RuntimeError as chunk_exc:
+                        chunk_error = str(chunk_exc)
+                        if "PDF text extraction crashed with signal 11" in chunk_error or "PDF text extraction exceeded" in chunk_error:
+                            deferred_record_started = time.perf_counter()
+                            print(
+                                json.dumps(
+                                    {
+                                        "status": "deferred",
+                                        "stage": "defer_problem_pdf",
+                                        "client_id": client_id,
+                                        "patient_id": patient_id,
+                                        "pdf_id": pdf_id,
+                                        "filename": filename,
+                                        "reason": chunk_error,
+                                    },
+                                    indent=2,
+                                    sort_keys=True,
+                                ),
+                                flush=True,
+                            )
+                            deferred_record_error = _record_deferred_ocr_best_effort(
+                                database_url=args.database_url,
+                                deferred_ocr_table_name=args.deferred_ocr_table_name,
                                 source_name=f"{client_id}:{patient_id}:{filename}",
                                 source_uri=pdf_url,
                                 patient_id=patient_id,
@@ -1442,68 +1516,76 @@ def main(argv: list[str] | None = None) -> int:
                                     "client_name": client_name,
                                     "action": "deferred_problem_pdf",
                                 },
-                            ),
-                        )
-                        skipped_count += 1
-                        processed.add(pdf_id)
-                        _write_checkpoint(
-                            checkpoint_path,
-                            _checkpoint_payload(
-                                processed_pdf_ids=processed,
+                            )
+                            _print_timing(
+                                "timing_deferred_ocr_record",
+                                time.perf_counter() - deferred_record_started,
                                 client_id=client_id,
                                 patient_id=patient_id,
                                 pdf_id=pdf_id,
                                 filename=filename,
-                                loaded_count=loaded_count,
-                                skipped_count=skipped_count,
-                                pdf_count=pdf_count,
-                                retry_attempts=0,
-                                client_seen_count=base_client_seen + len(seen_clients),
-                                patient_seen_count=base_patient_seen + len(seen_patients),
-                                client_index=account_index,
-                                patient_index=patient_index,
-                                pdf_index=pdf_index,
-                                client_name=client_name,
-                                patient_name=patient_name,
-                                error={
-                                    "error_type": type(chunk_exc).__name__,
-                                    "error": chunk_error,
-                                    "action": "deferred_problem_pdf",
-                                },
-                            ),
-                        )
-                        _print_progress(
-                            ImportProgress(
-                                client_id,
-                                patient_id,
-                                pdf_id,
-                                filename,
-                                "deferred",
-                                detail=chunk_error,
                             )
+                            skipped_count += 1
+                            processed.add(pdf_id)
+                            _write_checkpoint(
+                                checkpoint_path,
+                                _checkpoint_payload(
+                                    processed_pdf_ids=processed,
+                                    client_id=client_id,
+                                    patient_id=patient_id,
+                                    pdf_id=pdf_id,
+                                    filename=filename,
+                                    loaded_count=loaded_count,
+                                    skipped_count=skipped_count,
+                                    pdf_count=pdf_count,
+                                    retry_attempts=0,
+                                    client_seen_count=base_client_seen + len(seen_clients),
+                                    patient_seen_count=base_patient_seen + len(seen_patients),
+                                    client_index=account_index,
+                                    patient_index=patient_index,
+                                    pdf_index=pdf_index,
+                                    client_name=client_name,
+                                    patient_name=patient_name,
+                                    error={
+                                        "error_type": type(chunk_exc).__name__,
+                                        "error": chunk_error,
+                                        "action": "deferred_problem_pdf",
+                                        **({"deferred_ocr_record_error": deferred_record_error} if deferred_record_error else {}),
+                                    },
+                                ),
+                            )
+                            _print_progress(
+                                ImportProgress(
+                                    client_id,
+                                    patient_id,
+                                    pdf_id,
+                                    filename,
+                                    "deferred",
+                                    detail=chunk_error,
+                                )
+                            )
+                            continue
+                        raise
+                    except Exception as chunk_exc:
+                        print(
+                            json.dumps(
+                                {
+                                    "status": "failed",
+                                    "stage": "chunk_patient_pdf",
+                                    "client_id": client_id,
+                                    "patient_id": patient_id,
+                                    "pdf_id": pdf_id,
+                                    "filename": filename,
+                                    "error_type": type(chunk_exc).__name__,
+                                    "error": str(chunk_exc),
+                                },
+                                indent=2,
+                                sort_keys=True,
+                            ),
+                            flush=True,
                         )
-                        continue
-                    raise
-                except Exception as chunk_exc:
-                    print(
-                        json.dumps(
-                            {
-                                "status": "failed",
-                                "stage": "chunk_patient_pdf",
-                                "client_id": client_id,
-                                "patient_id": patient_id,
-                                "pdf_id": pdf_id,
-                                "filename": filename,
-                                "error_type": type(chunk_exc).__name__,
-                                "error": str(chunk_exc),
-                            },
-                            indent=2,
-                            sort_keys=True,
-                        ),
-                        flush=True,
-                    )
-                    traceback.print_exc()
-                    raise
+                        traceback.print_exc()
+                        raise
                     _print_stage(
                         "chunk_complete",
                         client_id=client_id,
@@ -1553,6 +1635,8 @@ def main(argv: list[str] | None = None) -> int:
                         documents=chunk_docs,
                         embedding_model=args.embedding_model,
                         vector_dimensions=args.vector_dimensions,
+                        embedding_batch_size=args.embedding_batch_size,
+                        load_batch_size=args.load_batch_size,
                     )
                     _print_timing(
                         "timing_embed_load",
@@ -1563,6 +1647,14 @@ def main(argv: list[str] | None = None) -> int:
                         filename=filename,
                         embedding_model=args.embedding_model,
                         vector_dimensions=args.vector_dimensions,
+                    )
+                    _print_timing(
+                        "timing_process_pdf_total",
+                        time.perf_counter() - process_pdf_start,
+                        client_id=client_id,
+                        patient_id=patient_id,
+                        pdf_id=pdf_id,
+                        filename=filename,
                     )
                     loaded_count += 1
                     print(f"    loaded into Aurora/Postgres; deleting_local={args.delete_local_after_load and not args.keep_local}", flush=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch the quiet fixed importer, write the real child PID, and record exit status."""
+"""Launch the fixed importer for RAG performance timing runs."""
 
 from __future__ import annotations
 
@@ -53,12 +53,6 @@ def main() -> int:
         "text-embedding-3-small",
         "--vector-dimensions",
         "1536",
-        "--embedding-batch-size",
-        "64",
-        "--load-batch-size",
-        "500",
-        "--extraction-timeout",
-        "45",
         "--delete-local-after-load",
         "--expected-clients",
         "12053",
