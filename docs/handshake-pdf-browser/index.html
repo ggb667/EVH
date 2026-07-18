@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EVH PDF Vector Searcher</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #11192b;
+      --panel-2: #162038;
+      --line: #263556;
+      --text: #ecf2ff;
+      --muted: #9db0d4;
+      --accent: #8dd7ff;
+      --accent-2: #ffd580;
+      --good: #7df0b7;
+      --chip: #22304d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at top, #12203a, var(--bg) 60%);
+      color: var(--text);
+    }
+    header {
+      padding: 24px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(10,16,30,.75);
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(12px);
+      z-index: 5;
+    }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    .sub { color: var(--muted); font-size: 14px; }
+    main {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 16px;
+      padding: 16px 20px 24px;
+      min-height: calc(100vh - 92px);
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.22);
+      overflow: hidden;
+    }
+    .card h2 {
+      margin: 0;
+      padding: 16px 18px 10px;
+      font-size: 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+    }
+    .panel { padding: 14px 18px 18px; }
+    label { display: block; margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+    select, input {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      padding: 12px 13px;
+      font-size: 14px;
+      outline: none;
+    }
+    select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(141,215,255,.12); }
+    .stack > * + * { margin-top: 14px; }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .badge { background: var(--chip); color: var(--text); padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+    .result-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 18px; border-bottom: 1px solid var(--line);
+    }
+    .result-header .meta { color: var(--muted); font-size: 13px; }
+    .docs { padding: 8px 14px 16px; display: grid; gap: 12px; }
+    .doc {
+      border: 1px solid var(--line);
+      background: rgba(17,25,43,.82);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .doc-top {
+      display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;
+      padding: 14px 14px 12px;
+    }
+    .doc-title { font-weight: 700; margin: 0 0 4px; }
+    .doc-meta { color: var(--muted); font-size: 13px; }
+    .doc-summary { color: #d7e3ff; margin: 10px 0 0; line-height: 1.45; }
+    .summary-collapsed { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .doc-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    button, .linkbtn {
+      border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 10px;
+      padding: 8px 10px; cursor: pointer; font-size: 13px; text-decoration: none;
+    }
+    button:hover, .linkbtn:hover { border-color: var(--accent); }
+    .details { border-top: 1px solid var(--line); padding: 12px 14px 14px; display: none; }
+    .doc.open .details { display: block; }
+    .keyword-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .kw { color: #08111f; background: var(--accent-2); padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; text-decoration: none; }
+    .viewer {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 560px;
+    }
+    .viewer-top {
+      padding: 14px 18px; border-bottom: 1px solid var(--line);
+      display: flex; justify-content: space-between; gap: 12px; align-items: center;
+    }
+    .viewer-content { display: grid; grid-template-columns: 1.15fr .85fr; min-height: 520px; }
+    .preview {
+      padding: 18px; border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));
+    }
+    .pdf-box {
+      border: 1px dashed #395176; border-radius: 16px; min-height: 460px; padding: 16px;
+      color: var(--muted); background: rgba(3,8,17,.36);
+    }
+    .pdf-box h3 { margin-top: 0; color: var(--text); }
+    .callout { background: rgba(125,240,183,.08); border: 1px solid rgba(125,240,183,.22); color: #d9ffef; padding: 10px 12px; border-radius: 12px; margin: 12px 0; }
+    .search-match { color: var(--good); font-weight: 700; }
+    .search-snippet { margin-top: 12px; color: #dce7ff; line-height: 1.55; font-size: 14px; }
+    .page-list { padding: 18px; }
+    .page-item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .page-item:last-child { border-bottom: 0; }
+    .page-link {
+      display: block;
+      color: inherit;
+      text-decoration: none;
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin: 0 -10px;
+    }
+    .page-link:hover { background: rgba(255,255,255,.04); }
+    .tiny { color: var(--muted); font-size: 12px; }
+    .empty { color: var(--muted); padding: 18px; }
+    .answer-box {
+      margin-top: 12px;
+      border: 1px solid rgba(141,215,255,.24);
+      background: rgba(11,18,32,.76);
+      border-radius: 14px;
+      padding: 12px 14px;
+    }
+    .answer-box h3 { margin: 0 0 8px; font-size: 15px; }
+    .evidence-list { display: grid; gap: 10px; margin-top: 10px; }
+    .evidence-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255,255,255,.02);
+      padding: 10px 12px;
+    }
+    @media (max-width: 1100px) {
+      main, .viewer-content { grid-template-columns: 1fr; }
+      .viewer-content { grid-template-rows: auto auto; }
+      .preview { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>EVH PDF Vector Searcher</h1>
+    <div class="sub">Client → patient retrieval, newest-first PDFs, expandable summaries, keyword jumping, ranked text search, and a simple answer draft from the best matching evidence.</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Find records</h2>
+      <div class="panel stack">
+        <div>
+          <label for="clientSelect">Client</label>
+          <select id="clientSelect"></select>
+        </div>
+        <div>
+          <label for="patientSelect">Patient</label>
+          <select id="patientSelect"></select>
+        </div>
+        <div>
+          <label for="textSearch">Document text search</label>
+          <input id="textSearch" type="text" placeholder="Type medication, diagnosis, lab terms, or keywords" />
+          <div class="tiny" style="margin-top:8px">Scoring uses 3-9 character prefixes per word. Longer, repeated matches score higher.</div>
+        </div>
+        <div class="badge-row" id="searchStats"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="result-header">
+        <div>
+          <div style="font-weight:700;font-size:16px" id="resultTitle">Select a patient</div>
+          <div class="meta" id="resultMeta">Choose a client and patient to view their PDFs.</div>
+        </div>
+        <div class="meta" id="resultCount"></div>
+      </div>
+      <div class="docs" id="docList"></div>
+
+      <div class="viewer">
+        <div class="viewer-top">
+          <div>
+            <div style="font-weight:700" id="viewerTitle">Document preview</div>
+            <div class="tiny" id="viewerSubtitle">Select a document to inspect keywords and page jumps.</div>
+          </div>
+          <div class="doc-actions">
+            <a class="linkbtn" href="#" id="jumpPrev">Previous hit</a>
+            <a class="linkbtn" href="#" id="jumpNext">Next hit</a>
+          </div>
+        </div>
+        <div class="viewer-content">
+          <div class="preview">
+            <div class="pdf-box" id="previewBox">
+              <h3>Document preview placeholder</h3>
+              <p>This page is wired for the EVH PDF search shape. Hook this preview area to the live PDF renderer or PDF.js viewer, then use keyword jumps to land on the first matching page.</p>
+              <div class="callout">Click a keyword chip to jump to the first match, then use the next/previous controls to continue searching in the PDF.</div>
+              <div class="search-snippet" id="previewSnippet">No document selected yet.</div>
+              <div class="answer-box">
+                <h3>Draft answer</h3>
+                <div class="tiny" id="answerLead">Type a search to see a retrieval-style answer built from the strongest snippets.</div>
+                <div id="answerBody" class="search-snippet">No answer yet.</div>
+                <div class="evidence-list" id="evidenceList"></div>
+              </div>
+            </div>
+          </div>
+          <div class="page-list" id="pageList"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const data = [
+      {
+        client: 'Eustis Veterinary Hospital',
+        patients: [
+          {
+            name: 'Milo',
+            documents: [
+              { date: '2026-07-10', type: 'Discharge summary', summary: 'Hospital discharge after GI upset. Fluids improved hydration. Continue bland diet and anti-nausea meds for 3 days.', keywords: ['GI upset','fluids','bland diet','anti-nausea','hydration'], pages: [
+                { page: 4, text: 'Discharge instructions note hydration improvement after fluids and ongoing bland diet.' },
+                { page: 5, text: 'Anti-nausea medication should continue for 3 days.' }
+              ] },
+              { date: '2026-06-22', type: 'Lab report', summary: 'CBC and chemistry panel largely normal. Mild inflammatory changes; recheck recommended if appetite drops again.', keywords: ['CBC','chemistry panel','inflammatory','recheck','appetite'], pages: [
+                { page: 2, text: 'CBC values largely normal with mild inflammatory changes.' },
+                { page: 3, text: 'Recheck recommended if appetite drops again.' }
+              ] },
+              { date: '2026-05-18', type: 'Exam note', summary: 'Routine exam with vaccine update. Weight stable. No new concerns from owner.', keywords: ['vaccine','weight','exam','owner'], pages: [
+                { page: 1, text: 'Routine exam and vaccine update; weight stable.' }
+              ] }
+            ]
+          },
+          {
+            name: 'Luna',
+            documents: [
+              { date: '2026-07-09', type: 'Radiology report', summary: 'Thoracic radiographs show mild bronchial pattern. No effusion. Monitor cough and activity.', keywords: ['thoracic','radiographs','bronchial','effusion','cough'], pages: [
+                { page: 6, text: 'Thoracic radiographs show mild bronchial pattern.' },
+                { page: 7, text: 'No effusion; monitor cough and activity.' }
+              ] },
+              { date: '2026-04-02', type: 'Dental plan', summary: 'Pre-anesthetic assessment complete. Dental extractions recommended; estimate reviewed with owner.', keywords: ['anesthetic','dental','extractions','estimate','owner'], pages: [
+                { page: 1, text: 'Pre-anesthetic assessment complete.' },
+                { page: 2, text: 'Dental extractions recommended and estimate reviewed.' }
+              ] }
+            ]
+          }
+        ]
+      },
+      {
+        client: 'Northside Animal Care',
+        patients: [
+          {
+            name: 'Pip',
+            documents: [
+              { date: '2026-07-11', type: 'Surgery report', summary: 'Mass removal completed without complications. Pathology pending. Incision check in 10 days.', keywords: ['mass removal','complications','pathology','incision','check'], pages: [
+                { page: 3, text: 'Mass removal completed without complications.' },
+                { page: 4, text: 'Pathology pending; incision check in 10 days.' }
+              ] },
+              { date: '2026-06-01', type: 'Referral note', summary: 'Referred for orthopedic consultation due to intermittent limp and stiffness after exercise.', keywords: ['orthopedic','limp','stiffness','exercise'], pages: [
+                { page: 1, text: 'Referral for orthopedic consultation due to limp.' }
+              ] }
+            ]
+          }
+        ]
+      }
+    ];
+
+    const els = {
+      clientSelect: document.getElementById('clientSelect'),
+      patientSelect: document.getElementById('patientSelect'),
+      textSearch: document.getElementById('textSearch'),
+      docList: document.getElementById('docList'),
+      resultTitle: document.getElementById('resultTitle'),
+      resultMeta: document.getElementById('resultMeta'),
+      resultCount: document.getElementById('resultCount'),
+      searchStats: document.getElementById('searchStats'),
+      viewerTitle: document.getElementById('viewerTitle'),
+      viewerSubtitle: document.getElementById('viewerSubtitle'),
+      previewSnippet: document.getElementById('previewSnippet'),
+      answerLead: document.getElementById('answerLead'),
+      answerBody: document.getElementById('answerBody'),
+      evidenceList: document.getElementById('evidenceList'),
+      pageList: document.getElementById('pageList'),
+      jumpPrev: document.getElementById('jumpPrev'),
+      jumpNext: document.getElementById('jumpNext')
+    };
+
+    let currentDoc = null;
+    let currentHitWords = [];
+    let currentSearchTokens = [];
+    let hitIndex = 0;
+
+    const tokenWords = (text) => {
+      if (!text) return [];
+      return (text.toUpperCase().match(/[A-Z0-9]+/g) || []).filter(Boolean);
+    };
+
+    const uniquePrefixLengths = (typed) => {
+      const tokens = tokenWords(typed);
+      const out = [];
+      for (const token of tokens) {
+        for (let len = 3; len <= 9; len++) {
+          if (token.length >= len) out.push(token.slice(0, len));
+        }
+      }
+      return out;
+    };
+
+    const scoreDocument = (doc, query) => {
+      const tokens = tokenWords(query);
+      if (!tokens.length) return { score: 0, matches: [], snippets: [] };
+      const scoreHits = [];
+      const seen = new Map();
+      for (const tok of tokens) {
+        for (let len = 3; len <= 9; len++) {
+          if (tok.length < len) continue;
+          const prefix = tok.slice(0, len);
+          const count = [doc.type, doc.summary, ...(doc.keywords || []), ...(doc.pages || []).map(p => p.text)].join(' ').toUpperCase();
+          let idx = count.indexOf(prefix);
+          while (idx !== -1) {
+            const key = prefix;
+            seen.set(key, (seen.get(key) || 0) + 1);
+            idx = count.indexOf(prefix, idx + 1);
+          }
+        }
+      }
+      let score = 0;
+      for (const [prefix, count] of seen.entries()) {
+        score += prefix.length * count;
+        scoreHits.push(prefix);
+      }
+      const snippets = [];
+      for (const page of doc.pages || []) {
+        const text = page.text.toUpperCase();
+        if (tokens.some(tok => {
+          for (let len = Math.min(9, tok.length); len >= 3; len--) {
+            if (text.includes(tok.slice(0, len))) return true;
+          }
+          return false;
+        })) snippets.push(page.text);
+      }
+      return { score, matches: scoreHits, snippets };
+    };
+
+    const renderStats = (patient, query) => {
+      const parts = [];
+      if (patient) parts.push({ label: `Docs: ${patient.documents.length}` });
+      if (query && query.trim().length >= 3) parts.push({ label: `Search active` });
+      if (!parts.length) parts.push({ label: 'Ready' });
+      els.searchStats.innerHTML = parts.map(p => `<span class="badge">${p.label}</span>`).join('');
+    };
+
+    const buildAnswer = (docs, query) => {
+      if (!query || query.trim().length < 3 || !docs.length) {
+        return {
+          lead: 'Search at least 3 characters to generate a retrieval-style answer.',
+          body: 'The answer pane will synthesize the top matching PDF snippets once the query is specific enough.',
+          evidence: []
+        };
+      }
+      const best = docs.slice(0, 3).flatMap(doc => {
+        const snippets = (doc._score?.snippets || []).slice(0, 2);
+        return snippets.map(text => ({ doc, text }));
+      });
+      const evidence = best.slice(0, 4);
+      const summary = evidence.length
+        ? `Top matches suggest: ${evidence.map(item => `${item.doc.date} ${item.doc.type}`).join('; ')}.`
+        : 'No strong snippets were found, but the document list still reflects the best-ranked matches.';
+      return {
+        lead: `Retrieved ${evidence.length} evidence snippet${evidence.length === 1 ? '' : 's'} from the highest-ranked PDFs.`,
+        body: summary,
+        evidence
+      };
+    };
+
+    const selectedClient = () => data[els.clientSelect.selectedIndex];
+    const selectedPatient = () => {
+      const client = selectedClient();
+      return client?.patients?.[els.patientSelect.selectedIndex];
+    };
+
+    const updatePatients = () => {
+      const client = selectedClient();
+      els.patientSelect.innerHTML = client.patients.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
+      render();
+    };
+
+    const openDoc = (doc) => {
+      currentDoc = doc;
+      currentHitWords = currentSearchTokens.length ? [...currentSearchTokens] : tokenWords(els.textSearch.value).filter(Boolean);
+      hitIndex = 0;
+      els.viewerTitle.textContent = `${doc.date} · ${doc.type}`;
+      els.viewerSubtitle.textContent = 'Keyword chip jumps land on the first matching page. Connect this pane to the live PDF renderer for production.';
+      els.previewSnippet.innerHTML = doc.summary;
+      els.pageList.innerHTML = (doc.pages || []).map(p => `
+        <div class="page-item">
+          <a href="#" class="page-link" data-page="${p.page}" data-text="${p.text}">
+            <div><strong>Page ${p.page}</strong></div>
+            <div class="tiny">${p.text}</div>
+          </a>
+        </div>`).join('');
+    };
+
+    const render = () => {
+      const patient = selectedPatient();
+      const query = els.textSearch.value.trim();
+      renderStats(patient, query);
+      if (!patient) return;
+      let docs = [...patient.documents].sort((a, b) => b.date.localeCompare(a.date));
+      if (query.length >= 3) {
+        docs = docs.map(doc => ({ ...doc, _score: scoreDocument(doc, query) }))
+          .sort((a, b) => (b._score.score - a._score.score) || b.date.localeCompare(a.date));
+      }
+      const answer = buildAnswer(docs, query);
+      els.resultTitle.textContent = `${patient.name} PDFs`;
+      els.resultMeta.textContent = query.length >= 3 ? `Best matches first for “${query}”.` : 'Sorted newest to oldest.';
+      els.resultCount.textContent = `${docs.length} documents`;
+      els.answerLead.textContent = answer.lead;
+      els.answerBody.textContent = answer.body;
+      els.evidenceList.innerHTML = answer.evidence.map(item => `
+        <div class="evidence-item">
+          <div class="tiny">${item.doc.date} · ${item.doc.type}</div>
+          <div>${item.text}</div>
+        </div>
+      `).join('') || '<div class="tiny">No evidence yet.</div>';
+
+      els.docList.innerHTML = docs.map((doc, idx) => {
+        const scoreBadge = query.length >= 3 ? `<span class="badge">score ${doc._score.score}</span>` : '';
+        const matches = query.length >= 3 && doc._score.snippets.length
+          ? `<div class="tiny" style="margin-top:10px;color:var(--good)">Matched snippets: ${doc._score.snippets.slice(0,2).join(' · ')}</div>`
+          : '';
+        const kw = (doc.keywords || []).map(k => `<a href="#" class="kw" data-keyword="${k}">${k}</a>`).join('');
+        return `
+          <article class="doc ${idx === 0 ? 'open' : ''}" data-doc-index="${idx}">
+            <div class="doc-top">
+              <div>
+                <div class="doc-title">${doc.date} · ${doc.type}</div>
+                <div class="doc-meta">${doc.pages.length} pages${scoreBadge ? ' · ' + scoreBadge.replace(/<[^>]+>/g,'') : ''}</div>
+                <p class="doc-summary summary-collapsed">${doc.summary}</p>
+              </div>
+              <div class="doc-actions">
+                ${scoreBadge}
+                <button type="button" class="toggle">Expand</button>
+                <button type="button" class="select">Open</button>
+              </div>
+            </div>
+            <div class="details">
+              <div class="tiny">Expanded summary</div>
+              <p class="doc-summary">${doc.summary}</p>
+              <div class="tiny">Keywords</div>
+              <div class="keyword-list">${kw || '<span class="tiny">No keywords extracted yet</span>'}</div>
+              ${matches}
+            </div>
+          </article>`;
+      }).join('') || '<div class="empty">No documents found for this patient.</div>';
+
+      els.docList.querySelectorAll('.doc').forEach((el, index) => {
+        const doc = docs[index];
+        el.querySelector('.toggle').addEventListener('click', () => {
+          el.classList.toggle('open');
+          el.querySelector('.toggle').textContent = el.classList.contains('open') ? 'Collapse' : 'Expand';
+        });
+        el.querySelector('.select').addEventListener('click', () => openDoc(doc));
+        el.querySelectorAll('.kw').forEach(chip => {
+          chip.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            openDoc(doc);
+            const keyword = chip.dataset.keyword.toUpperCase();
+            const allText = (doc.pages || []).map(p => p.text);
+            const firstPage = doc.pages.find(p => p.text.toUpperCase().includes(keyword));
+            els.previewSnippet.innerHTML = firstPage
+              ? firstPage.text.replace(new RegExp(`(${keyword})`, 'ig'), '<span class="search-match">$1</span>')
+              : doc.summary;
+            els.viewerSubtitle.textContent = `Jumped to first match for “${chip.dataset.keyword}”.`;
+          });
+        });
+      });
+
+      els.pageList.querySelectorAll('.page-link').forEach(link => {
+        link.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const pageText = link.dataset.text || '';
+          els.previewSnippet.innerHTML = pageText;
+          els.viewerSubtitle.textContent = `Focused page ${link.dataset.page} in the current source-PDF results pane.`;
+        });
+      });
+
+      if (docs.length && !currentDoc) openDoc(docs[0]);
+      if (currentDoc) {
+        const found = docs.find(d => d.date === currentDoc.date && d.type === currentDoc.type);
+        if (found) currentDoc = found;
+      }
+      els.jumpPrev.onclick = (e) => { e.preventDefault(); shiftHit(-1); };
+      els.jumpNext.onclick = (e) => { e.preventDefault(); shiftHit(1); };
+    };
+
+    const shiftHit = (delta) => {
+      if (!currentDoc || !currentHitWords.length) return;
+      hitIndex = (hitIndex + delta + currentHitWords.length) % currentHitWords.length;
+      const word = currentHitWords[hitIndex];
+      const page = (currentDoc.pages || []).find(p => p.text.toUpperCase().includes(word));
+      if (page) {
+        els.previewSnippet.innerHTML = page.text.replace(new RegExp(`(${word})`, 'ig'), '<span class="search-match">$1</span>');
+        els.viewerSubtitle.textContent = `Search hit ${hitIndex + 1}/${currentHitWords.length} for “${word}” on page ${page.page}.`;
+      }
+    };
+
+    els.clientSelect.innerHTML = data.map((c, i) => `<option value="${i}">${c.client}</option>`).join('');
+    els.clientSelect.addEventListener('change', updatePatients);
+    els.patientSelect.addEventListener('change', render);
+    els.textSearch.addEventListener('input', () => {
+      currentSearchTokens = tokenWords(els.textSearch.value);
+      currentHitWords = uniquePrefixLengths(els.textSearch.value);
+      render();
+      if (currentDoc && currentSearchTokens.length) {
+          els.previewSnippet.innerHTML = `Search active for <span class="search-match">${els.textSearch.value}</span>. Best-match text will appear here once connected to the live PDF text layer.`;
+      }
+    });
+
+    updatePatients();
+  </script>
+</body>
+</html>
