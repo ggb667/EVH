@@ -216,3 +216,7 @@ pony/team.coordination/*.review-needed
 
 # Project-local pony runtime
 /pony/
+
+# Runtime-retained Instinct source PDFs (never commit source data)
+/data/instinct-pdfs/
+.secrets/

@@ -212,6 +212,13 @@ def load_client_config(path: Path) -> Dict[str, Any]:
     return data["installed"]
 
 
+def _http_error_body(exc: urllib.error.HTTPError) -> str:
+    try:
+        return exc.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
 def oauth_authorize(client: Dict[str, Any], token_file: Path) -> Token:
     base_redirect_uri = client["redirect_uris"][0]
     parsed = urllib.parse.urlparse(base_redirect_uri)
@@ -280,8 +287,13 @@ def exchange_code_for_token(client: Dict[str, Any], code: str, redirect_uri: str
         data=payload,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req) as resp:
-        data = json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        body = _http_error_body(exc)
+        detail = f": {body}" if body else ""
+        raise SystemExit(f"OAuth token exchange failed with HTTP {exc.code} {exc.reason}{detail}") from exc
     return Token(
         access_token=data["access_token"],
         refresh_token=data.get("refresh_token"),
@@ -307,8 +319,13 @@ def refresh_token(client: Dict[str, Any], token: Token) -> Token:
         data=payload,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req) as resp:
-        data = json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        body = _http_error_body(exc)
+        detail = f": {body}" if body else ""
+        raise SystemExit(f"OAuth refresh failed with HTTP {exc.code} {exc.reason}{detail}") from exc
     token.access_token = data["access_token"]
     token.expires_at = time.time() + int(data.get("expires_in", 3600))
     return token
@@ -333,7 +350,9 @@ def gmail_get(
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token.access_token}"})
             with urllib.request.urlopen(req) as resp:
                 return json.loads(resp.read().decode())
-        raise
+        body = _http_error_body(exc)
+        detail = f": {body}" if body else ""
+        raise SystemExit(f"Gmail API request failed with HTTP {exc.code} {exc.reason}{detail}") from exc
 
 
 def gmail_exact_count_messages(token: Token, query: str) -> int:
@@ -382,15 +401,20 @@ def gmail_get_profile(token: Token, client: Optional[Dict[str, Any]] = None) -> 
     return gmail_get("/users/me/profile", token, client=client)
 
 
-def verify_expected_mailbox(token: Token, client: Optional[Dict[str, Any]] = None) -> str:
+def verify_expected_mailbox(
+    token: Token,
+    client: Optional[Dict[str, Any]] = None,
+    expected_mailbox: str = EXPECTED_MAILBOX_EMAIL,
+) -> str:
     profile = gmail_get_profile(token, client=client)
     mailbox_email = str(profile.get("emailAddress", "")).strip().lower()
     if not mailbox_email:
         raise SystemExit("Could not determine authenticated Gmail mailbox.")
-    if mailbox_email != EXPECTED_MAILBOX_EMAIL:
+    expected_mailbox = expected_mailbox.strip().lower()
+    if mailbox_email != expected_mailbox:
         raise SystemExit(
-            f"Authenticated Gmail mailbox is {mailbox_email!r}, expected {EXPECTED_MAILBOX_EMAIL!r}. "
-            "Use the evhstaff token file and reauthorize the correct account."
+            f"Authenticated Gmail mailbox is {mailbox_email!r}, expected {expected_mailbox!r}. "
+            "Use the matching token file and reauthorize the correct account."
         )
     return mailbox_email
 
@@ -819,26 +843,8 @@ def classify_sender(name: str, email_addr: str, labels: list[str]) -> Optional[s
         return "Government"
     if hit("unsubscribe", "junk", "phishing", "scam"):
         return "Spam"
-    if any(
-        needle in text
-        for needle in (
-            "ziprecruiter",
-            "monster",
-            "linkedin job",
-            "job alert",
-            "job alerts",
-            "talent acquisition",
-            "recruiting",
-            "recruiter",
-            "staffing",
-            "career",
-            "careers",
-            "hiring",
-            "employment",
-            "candidate",
-        )
-    ) or any(part in domain for part in ("ziprecruiter.com", "monster.com", "linkedin.com", "icims.com", "indeed.com", "glassdoor.com")):
-        return "Spam"
+    # Job-search and recruiting mail should remain allowed for review.
+    # We intentionally do not auto-classify these as Spam anymore.
     if any(
         needle in text
         for needle in (
@@ -1093,7 +1099,8 @@ def _llm_classify_sender(
         "categories": categories,
         "instructions": (
             "Choose exactly one category from categories. "
-            "Treat job postings, generic recruiting, unrelated marketing, and non-business/non-animal mail as Spam. "
+            "Do not treat job postings, recruiting, recruiter mail, hiring, career, careers, or staffing as Spam solely because of those terms. "
+            "Treat unrelated marketing and non-business/non-animal mail as Spam. "
             "Staff is internal employee/human-resources mail. Client is pet-owner and patient-related mail. "
             "Vendor is supplier and business service outreach. Scheduling is workflow, appointments, dispatch, and reminders. "
             "Respond with JSON only: {\"category\":\"...\",\"confidence\":0-1,\"reason\":\"...\"}."
@@ -1106,7 +1113,7 @@ def _llm_classify_sender(
                 "role": "system",
                 "content": (
                     "You classify email messages for a veterinary hospital into one of fifteen categories. "
-                    "Return only JSON. Use Spam for job postings, generic recruiting, unrelated marketing, "
+                    "Return only JSON. Do not use Spam solely for job postings, generic recruiting, recruiter mail, hiring, career, careers, or staffing. Use Spam for unrelated marketing, "
                     "and non-business/non-animal mail. Normalize old labels to the closest canonical category."
                 ),
             },
@@ -1174,7 +1181,7 @@ def _openai_classify_sender(
                         "content_text": content_text,
                         "labels": labels,
                         "categories": categories,
-                        "instructions": "Choose exactly one category from categories. Respond with JSON only: {\"category\":\"...\",\"confidence\":0-1,\"reason\":\"...\"}.",
+                        "instructions": "Choose exactly one category from categories. Do not use Spam solely for job postings, recruiting, recruiter mail, hiring, career, careers, or staffing. Respond with JSON only: {\"category\":\"...\",\"confidence\":0-1,\"reason\":\"...\"}.",
                     },
                     ensure_ascii=False,
                 ),
@@ -1495,6 +1502,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--client-secrets", required=True)
     parser.add_argument("--token-file", required=True)
+    parser.add_argument("--mailbox-email", default=EXPECTED_MAILBOX_EMAIL, help="Expected authenticated Gmail mailbox")
     parser.add_argument("--query", default="in:inbox")
     parser.add_argument("--max-results", type=int, default=0, help="0 means no limit")
     parser.add_argument("--export-zip", nargs="?", const="", default="", help="Optional ZIP path; omit value to use a timestamped default")
@@ -1532,7 +1540,7 @@ def main() -> int:
     if token is None:
         token = oauth_authorize(client, token_path)
 
-    authenticated_mailbox = verify_expected_mailbox(token, client=client)
+    authenticated_mailbox = verify_expected_mailbox(token, client=client, expected_mailbox=args.mailbox_email)
     print(f"=== Authenticated Gmail mailbox: {authenticated_mailbox} ===")
 
     max_results = args.max_results if args.max_results and args.max_results > 0 else 10**9

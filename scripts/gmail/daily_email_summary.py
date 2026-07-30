@@ -19,11 +19,17 @@ import json
 import os
 import html
 import re
+from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+try:
+    import boto3
+except ImportError:  # pragma: no cover - local script fallback
+    boto3 = None
 
 try:
     from scripts.gmail.evhstaff_gmail_inventory import (
@@ -54,6 +60,7 @@ except ImportError:  # pragma: no cover - direct script execution path
 EXPECTED_MAILBOX_EMAIL = "evhstaff@gmail.com"
 DEFAULT_OPENAI_MODEL = "gpt-5.6-terra"
 DEFAULT_DAILY_SUMMARY_RECIPIENT = "evhstaff+daily_summary@gmail.com"
+DEFAULT_CHECKPOINT_PARAMETER = "/evh/daily-summary/evhstaff_gmail_com/last_successful_run"
 
 
 @dataclass
@@ -70,16 +77,23 @@ class MailItem:
 @dataclass
 class SentItem:
     message_id: str
+    thread_id: str
     recipients: str
     subject: str
+    body_text: str
 
 
-def verify_expected_mailbox(token: Token, client: dict[str, Any]) -> str:
+def verify_expected_mailbox(
+    token: Token,
+    client: dict[str, Any],
+    expected_mailbox: str = EXPECTED_MAILBOX_EMAIL,
+) -> str:
     profile = gmail_get_profile(token, client=client)
     mailbox_email = str(profile.get("emailAddress", "")).strip().lower()
-    if mailbox_email != EXPECTED_MAILBOX_EMAIL:
+    expected_mailbox = expected_mailbox.strip().lower()
+    if mailbox_email != expected_mailbox:
         raise SystemExit(
-            f"Authenticated Gmail mailbox is {mailbox_email!r}, expected {EXPECTED_MAILBOX_EMAIL!r}."
+            f"Authenticated Gmail mailbox is {mailbox_email!r}, expected {expected_mailbox!r}."
         )
     print(f"=== Authenticated Gmail mailbox: {mailbox_email} ===")
     return mailbox_email
@@ -90,12 +104,16 @@ def _openai_responses_completion(
     model: str,
     input_items: list[dict[str, Any]],
     *,
+    reasoning_effort: str = "none",
+    text_verbosity: str = "low",
     base_url: str = "https://api.openai.com/v1",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
         "input": input_items,
-        "max_output_tokens": 4000,
+        "max_output_tokens": 8000,
+        "reasoning": {"effort": reasoning_effort},
+        "text": {"verbosity": text_verbosity},
     }
     req = urllib.request.Request(
         base_url.rstrip("/") + "/responses",
@@ -138,11 +156,79 @@ def load_sent_messages(token: Token, query: str, max_results: int) -> list[SentI
         items.append(
             SentItem(
                 message_id=str(msg.get("id", "")),
+                thread_id=str(msg.get("threadId", "")),
                 recipients=to_header or "(no recipients found)",
                 subject=subject,
+                body_text=extract_message_classification_text(msg, token, max_lines=12),
             )
         )
     return items
+
+
+def _parse_iso_timestamp(value: str) -> datetime:
+    normalized = value.strip().replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def load_last_successful_run(parameter_name: str) -> datetime | None:
+    if boto3 is None:
+        print("[checkpoint] boto3 unavailable; skipping Parameter Store lookup")
+        return None
+    client = boto3.client("ssm")
+    try:
+        response = client.get_parameter(Name=parameter_name)
+    except Exception as exc:
+        print(f"[checkpoint] failed to load {parameter_name!r}: {exc!r}")
+        return None
+    parameter = response.get("Parameter", {})
+    value = parameter.get("Value", "")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return _parse_iso_timestamp(value)
+    except Exception:
+        return None
+
+
+def store_last_successful_run(parameter_name: str, timestamp: datetime) -> None:
+    if boto3 is None:
+        return
+    client = boto3.client("ssm")
+    client.put_parameter(
+        Name=parameter_name,
+        Value=timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        Type="String",
+        Overwrite=True,
+    )
+
+
+def build_query_since_checkpoint(checkpoint: datetime | None) -> str:
+    if checkpoint is None:
+        return "newer_than:1d"
+    checkpoint_date = checkpoint.astimezone(timezone.utc).strftime("%Y/%m/%d")
+    return f"after:{checkpoint_date}"
+
+
+def build_query_last_24h() -> str:
+    return "newer_than:1d"
+
+
+def build_query_between_checkpoint_and_24h_ago(checkpoint: datetime | None) -> str:
+    if checkpoint is None:
+        return "newer_than:1d"
+    checkpoint_date = checkpoint.astimezone(timezone.utc).strftime("%Y/%m/%d")
+    return f"after:{checkpoint_date} older_than:1d"
+
+
+def sanitize_mailbox_key(mailbox_email: str) -> str:
+    return mailbox_email.strip().lower().replace("@", "_").replace(".", "_")
+
+
+def checkpoint_parameter_for_mailbox(mailbox_email: str) -> str:
+    return f"/evh/daily-summary/{sanitize_mailbox_key(mailbox_email)}/last_successful_run"
 
 
 def build_summary_prompt(items: list[MailItem], query: str) -> list[dict[str, Any]]:
@@ -159,11 +245,12 @@ def build_summary_prompt(items: list[MailItem], query: str) -> list[dict[str, An
         for item in items
     ]
     system = (
-        "You are helping a veterinary hospital staff member triage unread email. "
+        "You are helping a veterinary hospital staff member triage all email from the requested time window. "
         "Return only valid JSON. Keep the JSON compact and complete. "
         "Group messages into client_communications, records, appointments, refills, pet_questions, and other. "
-        "Client communications are the highest priority and should be surfaced first in the summary and follow-up notes. "
-        "Prefer concise, actionable summaries. "
+        "Include every supplied message exactly once, using its exact message_id; do not omit read, promotional, newsletter, or low-priority messages. "
+        "Unread messages are highest priority and should be surfaced first in the summary and follow-up notes; read messages remain below follow-up notes. "
+        "Prefer concise, actionable summaries. Keep each message summary to one short sentence. "
         "If a message contains more than one request type, include it in the most important bucket and mention the overlap. "
         "Do not invent facts."
     )
@@ -218,6 +305,61 @@ def build_summary_prompt(items: list[MailItem], query: str) -> list[dict[str, An
     ]
 
 
+def chunk_mail_items(items: list[MailItem], chunk_size: int) -> list[list[MailItem]]:
+    if chunk_size <= 0:
+        return [items]
+    return [items[index:index + chunk_size] for index in range(0, len(items), chunk_size)]
+
+
+def summarize_mail_chunk(
+    api_key: str,
+    model: str,
+    items: list[MailItem],
+    query: str,
+    *,
+    reasoning_effort: str = "none",
+    text_verbosity: str = "low",
+) -> dict[str, Any]:
+    messages = build_summary_prompt(items, query)
+    response = _openai_responses_completion(
+        api_key,
+        model,
+        messages,
+        reasoning_effort=reasoning_effort,
+        text_verbosity=text_verbosity,
+    )
+    content = extract_response_text(response)
+    if not content:
+        raise SystemExit("OpenAI returned empty content.")
+    return parse_summary_result(content)
+
+
+def merge_chunk_results(
+    chunk_results: list[dict[str, Any]],
+    items: list[MailItem],
+    sent_items: list[SentItem],
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {
+        "summary": "",
+        "follow_up_notes": [],
+    }
+    for key in CATEGORY_KEYS:
+        merged[key] = []
+    for result in chunk_results:
+        for key in CATEGORY_KEYS:
+            rows = result.get(key, [])
+            if isinstance(rows, list):
+                merged[key].extend(row for row in rows if isinstance(row, dict))
+        notes = result.get("follow_up_notes", [])
+        if isinstance(notes, list):
+            merged["follow_up_notes"].extend(str(note).strip() for note in notes if str(note).strip())
+    merged["counts"] = {key: len(merged[key]) for key in CATEGORY_KEYS}
+    merged["summary"] = " | ".join(
+        str(result.get("summary", "")).strip() for result in chunk_results if str(result.get("summary", "")).strip()
+    )
+    return reconcile_summary_result(merged, items, sent_items)
+
+
 def parse_summary_result(content: str) -> dict[str, Any]:
     parsed = json.loads(content)
     if not isinstance(parsed, dict):
@@ -250,6 +392,99 @@ def extract_response_text(response: dict[str, Any]) -> str:
     return ""
 
 
+CATEGORY_KEYS = (
+    "client_communications",
+    "records",
+    "appointments",
+    "refills",
+    "pet_questions",
+    "other",
+)
+CATEGORY_TITLES = {
+    "client_communications": "Client Communications",
+    "records": "Records",
+    "appointments": "Appointments",
+    "refills": "Refills",
+    "pet_questions": "Questions about pets",
+    "other": "Other",
+}
+
+
+def _one_line(text: str, limit: int = 240) -> str:
+    line = " ".join(str(text).split())
+    if len(line) > limit:
+        return line[: limit - 1].rstrip() + "…"
+    return line
+
+
+def reconcile_summary_result(result: dict[str, Any], items: list[MailItem], sent_items: list[SentItem]) -> dict[str, Any]:
+    """Keep the model's categorization, but guarantee one rendered row per input message."""
+    valid = {item.message_id: item for item in items}
+    seen: set[str] = set()
+    clean: dict[str, list[dict[str, Any]]] = {key: [] for key in CATEGORY_KEYS}
+
+    for key in CATEGORY_KEYS:
+        rows = result.get(key, [])
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            message_id = str(row.get("message_id", "")).strip()
+            if message_id not in valid or message_id in seen:
+                continue
+            item = valid[message_id]
+            normalized = dict(row)
+            normalized.update(
+                message_id=message_id,
+                sender=str(row.get("sender") or item.sender_name),
+                email=str(row.get("email") or item.sender_email),
+                subject=str(row.get("subject") or item.subject),
+                unread=item.unread,
+            )
+            clean[key].append(normalized)
+            seen.add(message_id)
+
+    for item in items:
+        if item.message_id in seen:
+            continue
+        clean["other"].append(
+            {
+                "message_id": item.message_id,
+                "sender": item.sender_name,
+                "email": item.sender_email,
+                "subject": item.subject,
+                "summary": _one_line(item.body_text) or "No summary available.",
+                "unread": item.unread,
+            }
+        )
+
+    result.update(clean)
+    result["counts"] = {key: len(clean[key]) for key in CATEGORY_KEYS}
+
+    # Match sent replies by recipient and normalized subject, then expose a direct reply link.
+    def subject_key(subject: str) -> str:
+        return re.sub(r"^(?:(?:re|fwd|fw)\s*:\s*)+", "", subject.strip(), flags=re.I)
+
+    for key in CATEGORY_KEYS:
+        for row in clean[key]:
+            email = str(row.get("email", "")).lower()
+            subject = subject_key(str(row.get("subject", "")))
+            matches = [
+                sent for sent in sent_items
+                if email and email in sent.recipients.lower()
+                and subject and subject_key(sent.subject) == subject
+            ]
+            if not matches:
+                continue
+            reply = matches[-1]
+            row["reply"] = {
+                "message_id": reply.message_id,
+                "summary": _one_line(reply.body_text) or "Reply sent; no body summary available.",
+            }
+    return result
+
+
 def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
     summary = str(result.get("summary", "")).strip()
     counts = result.get("counts", {})
@@ -262,8 +497,7 @@ def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
 
     lines: list[str] = []
     lines.append("# Communication Summary")
-    lines.append(f"- Query: `{query}`")
-    lines.append(f"- Unread Reviewed: {count}")
+    lines.append(f"- Messages Reviewed: {count}")
     lines.append(f"- Total Emails: {count}")
     lines.append(
         "- Counts: "
@@ -277,33 +511,18 @@ def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
         lines.append(summary)
         lines.append("")
 
-    for key, title in (
-        ("client_communications", "Client Communications"),
-        ("records", "Records"),
-        ("appointments", "Appointments"),
-        ("refills", "Refills"),
-        ("pet_questions", "Questions about pets"),
-        ("other", "Other"),
-    ):
-        rows = records_for(key)
-        lines.append(f"## {title} ({len(rows)})")
-        if not rows:
-            lines.append("")
-            continue
+    def render_rows(rows: list[dict[str, Any]]) -> None:
         for row in rows:
-            if not isinstance(row, dict):
-                continue
             message_id = str(row.get("message_id", "")).strip()
             sender = str(row.get("sender", "")).strip()
             email = str(row.get("email", "")).strip()
             subject = str(row.get("subject", "")).strip()
             text = str(row.get("summary", "")).strip()
-            unread = bool(row.get("unread", False))
             head = f"- {sender}"
-            if unread:
+            if bool(row.get("unread", False)):
                 head += " **[UNREAD]**"
             if email:
-                head += f" <{email}>"
+                head += f" ({email})"
             if subject and message_id:
                 gmail_url = f"https://mail.google.com/mail/u/0/#all/{message_id}"
                 head += f" — [{subject}]({gmail_url})"
@@ -311,8 +530,25 @@ def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
                 head += f" — {subject}"
             lines.append(head)
             if text:
-                lines.append(f"  - {text}")
-        lines.append("")
+                lines.append(f"    {text}")
+            reply = row.get("reply")
+            if isinstance(reply, dict) and reply.get("message_id"):
+                reply_id = str(reply["message_id"])
+                reply_url = f"https://mail.google.com/mail/u/0/#all/{reply_id}"
+                reply_summary = _one_line(str(reply.get("summary", "")))
+                lines.append(f"    Reply: [View reply]({reply_url}) — {reply_summary}")
+
+    def render_group(unread: bool, prefix: str = "") -> None:
+        for key in CATEGORY_KEYS:
+            rows = [row for row in records_for(key) if bool(row.get("unread", False)) is unread]
+            if not rows:
+                continue
+            title = f"{prefix}{CATEGORY_TITLES[key]}" if prefix else CATEGORY_TITLES[key]
+            lines.append(f"## {title} ({len(rows)})")
+            render_rows(rows)
+            lines.append("")
+
+    render_group(True)
 
     follow_up = result.get("follow_up_notes", [])
     if isinstance(follow_up, list) and follow_up:
@@ -322,6 +558,15 @@ def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
             if note:
                 lines.append(f"- {note}")
         lines.append("")
+
+    read_count = sum(
+        1 for key in CATEGORY_KEYS for row in records_for(key)
+        if not bool(row.get("unread", False))
+    )
+    if read_count:
+        lines.append(f"## Read messages ({read_count})")
+        lines.append("")
+    render_group(False, "Read — ")
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -390,50 +635,78 @@ def markdown_to_html(text: str) -> str:
     lines = text.splitlines()
     out: list[str] = ["<html><body>"]
     in_list = False
+    open_list_item = False
+
+    def close_list_item() -> None:
+        nonlocal open_list_item
+        if open_list_item:
+            out.append("</li>")
+            open_list_item = False
+
+    def close_list() -> None:
+        nonlocal in_list
+        close_list_item()
+        if in_list:
+            out.append("</ul>")
+            in_list = False
+
     for line in lines:
         if not line.strip():
-            if in_list:
-                out.append("</ul>")
-                in_list = False
+            close_list()
             continue
         if line.startswith("# "):
-            if in_list:
-                out.append("</ul>")
-                in_list = False
+            close_list()
             out.append(f"<h1>{html.escape(line[2:].strip())}</h1>")
             continue
         if line.startswith("## "):
-            if in_list:
-                out.append("</ul>")
-                in_list = False
+            close_list()
             out.append(f"<h2>{html.escape(line[3:].strip())}</h2>")
             continue
         if line.startswith("- "):
             if not in_list:
                 out.append("<ul>")
                 in_list = True
-            out.append(f"<li>{inline_markdown_to_html(line[2:].strip())}</li>")
+            close_list_item()
+            out.append(f"<li>{inline_markdown_to_html(line[2:].strip())}")
+            open_list_item = True
             continue
-        if line.startswith("  - "):
-            out.append(f"<p style='margin-left: 1.5em;'>{inline_markdown_to_html(line[4:].strip())}</p>")
+        if line.startswith("    ") and open_list_item:
+            out.append(
+                '<div style="margin-top: 0;">'
+                f"{inline_markdown_to_html(line.strip())}"
+                "</div>"
+            )
             continue
-        if in_list:
-            out.append("</ul>")
-            in_list = False
+        close_list()
         out.append(f"<p>{inline_markdown_to_html(line.strip())}</p>")
-    if in_list:
-        out.append("</ul>")
+    close_list()
     out.append("</body></html>")
     return "\n".join(out)
 
 
 def inline_markdown_to_html(text: str) -> str:
     escaped = html.escape(text)
+    links: list[str] = []
+
+    def preserve_link(match: re.Match[str]) -> str:
+        links.append(
+            f'<a href="{html.escape(match.group(2), quote=True)}">'
+            f"{html.escape(match.group(1))}</a>"
+        )
+        return f"\x00LINK{len(links) - 1}\x00"
+
     escaped = re.sub(
-        r"\[([^\]]+)\]\((https?://[^)]+)\)",
-        lambda m: f"<a href=\"{html.escape(m.group(2), quote=True)}\">{html.escape(m.group(1))}</a>",
+        r"\[([^\]]+)\]\(((?:https?://|mailto:)[^)]+)\)",
+        preserve_link,
         escaped,
     )
+    escaped = re.sub(
+        r"(?<![\w@])([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)",
+        lambda m: f'<a href="mailto:{html.escape(m.group(1), quote=True)}">{html.escape(m.group(1))}</a>',
+        escaped,
+    )
+    for index, link in enumerate(links):
+        escaped = escaped.replace(f"\x00LINK{index}\x00", link)
     escaped = escaped.replace("**", "")
     return escaped
 
@@ -461,6 +734,21 @@ def main() -> int:
     parser.add_argument("--openai-model", default=DEFAULT_OPENAI_MODEL)
     parser.add_argument("--openai-reasoning-effort", default="none")
     parser.add_argument("--openai-text-verbosity", default="low")
+    parser.add_argument("--chunk-size", type=int, default=30, help="Number of messages per OpenAI chunk; 0 disables chunking")
+    parser.add_argument("--checkpoint-parameter", default="")
+    parser.add_argument("--mailbox-email", default=EXPECTED_MAILBOX_EMAIL)
+    parser.add_argument("--use-checkpoint", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--time-window",
+        choices=("checkpoint", "last24hours", "both"),
+        default="checkpoint",
+        help="checkpoint = since last success; last24hours = only the last day; both = overlap checkpoint with last day",
+    )
+    parser.add_argument(
+        "--keep-current-checkpoint",
+        action="store_true",
+        help="Do not update the checkpoint after a successful run",
+    )
     args = parser.parse_args()
 
     client = load_client_config(Path(args.client_secrets))
@@ -470,16 +758,59 @@ def main() -> int:
         token = refresh_token(client, token)
         token_path.write_text(json.dumps(token.dump(), indent=2, sort_keys=True))
 
-    verify_expected_mailbox(token, client)
+    verify_expected_mailbox(token, client, expected_mailbox=args.mailbox_email)
 
-    items = load_messages(token, args.query, args.max_results)
+    checkpoint_parameter = args.checkpoint_parameter or checkpoint_parameter_for_mailbox(args.mailbox_email)
+    checkpoint = load_last_successful_run(checkpoint_parameter) if args.use_checkpoint else None
+    checkpoint_query = build_query_since_checkpoint(checkpoint)
+    last_24h_query = build_query_last_24h()
+    sent_checkpoint_query = f"in:sent {checkpoint_query}".strip()
+    sent_last_24h_query = "in:sent newer_than:1d"
+
+    print(f"[checkpoint] mailbox_email={args.mailbox_email}")
+    print(f"[checkpoint] parameter={checkpoint_parameter}")
+    print(f"[checkpoint] loaded={checkpoint.isoformat() if checkpoint else None}")
+    print(f"[checkpoint] base_query={args.query!r}")
+    print(f"[checkpoint] checkpoint_query={checkpoint_query!r}")
+    print(f"[checkpoint] last_24h_query={last_24h_query!r}")
+    print(f"[checkpoint] sent_base_query={args.sent_query!r}")
+    print(f"[checkpoint] sent_checkpoint_query={sent_checkpoint_query!r}")
+    print(f"[checkpoint] sent_last_24h_query={sent_last_24h_query!r}")
+
+    if args.time_window == "checkpoint":
+        query = query = build_query_since_checkpoint(checkpoint)
+        sent_query = sent_checkpoint_query
+    elif args.time_window == "last24hours":
+        query = build_query_last_24h()
+        sent_query = sent_last_24h_query
+    else:
+        query = build_query_between_checkpoint_and_24h_ago(checkpoint)
+        sent_query = f"in:sent {query}".strip()
+
+    print(f"[checkpoint] time_window={args.time_window}")
+    print(f"[checkpoint] final_query={query!r}")
+    print(f"[checkpoint] final_sent_query={sent_query!r}")
+
+    items = load_messages(token, query, args.max_results)
     sent_items = [
         {
             "message_id": item.message_id,
+            "thread_id": item.thread_id,
             "recipients": item.recipients,
             "subject": item.subject,
+            "body_text": item.body_text,
         }
-        for item in load_sent_messages(token, args.sent_query, args.max_results)
+        for item in load_sent_messages(token, sent_query, args.max_results)
+    ]
+    sent_records = [
+        SentItem(
+            message_id=str(item.get("message_id", "")),
+            thread_id=str(item.get("thread_id", "")),
+            recipients=str(item.get("recipients", "")),
+            subject=str(item.get("subject", "")),
+            body_text=str(item.get("body_text", "")),
+        )
+        for item in sent_items
     ]
     if not items:
         rendered = "# Communication Summary\n\nNo unread messages matched the query.\n"
@@ -495,16 +826,36 @@ def main() -> int:
         if not api_key:
             raise SystemExit(f"Missing OpenAI API key in ${args.openai_api_key_env}")
 
-        messages = build_summary_prompt(items, args.query)
-        response = _openai_responses_completion(
-            api_key,
-            args.openai_model,
-            messages,
-        )
-        content = extract_response_text(response)
-        if not content:
-            raise SystemExit("OpenAI returned empty content.")
-        result = parse_summary_result(content)
+        if args.chunk_size and len(items) > args.chunk_size:
+            chunk_results: list[dict[str, Any]] = []
+            for index, chunk in enumerate(chunk_mail_items(items, args.chunk_size), start=1):
+                print(f"[openai] summarizing chunk {index}/{((len(items) - 1) // args.chunk_size) + 1} with {len(chunk)} messages")
+                chunk_results.append(
+                    summarize_mail_chunk(
+                        api_key,
+                        args.openai_model,
+                        chunk,
+                        args.query,
+                        reasoning_effort=args.openai_reasoning_effort,
+                        text_verbosity=args.openai_text_verbosity,
+                    )
+                )
+            result = merge_chunk_results(chunk_results, items, sent_records)
+        else:
+            messages = build_summary_prompt(items, args.query)
+            response = _openai_responses_completion(
+                api_key,
+                args.openai_model,
+                messages,
+                reasoning_effort=args.openai_reasoning_effort,
+                text_verbosity=args.openai_text_verbosity,
+            )
+            content = extract_response_text(response)
+            if not content:
+                raise SystemExit("OpenAI returned empty content.")
+            result = parse_summary_result(content)
+    if "counts" not in result:
+        result = reconcile_summary_result(result, items, sent_records)
     result["sent_today"] = sent_items
     rendered = render_markdown(result, args.query, len(items))
 
@@ -515,7 +866,7 @@ def main() -> int:
         raw_message = build_email_message(
             args.email_subject,
             rendered,
-            from_addr=EXPECTED_MAILBOX_EMAIL,
+            from_addr=args.mailbox_email,
             to_addrs=args.send_to,
             cc_addrs=args.send_cc or None,
         )
@@ -524,6 +875,8 @@ def main() -> int:
             f"=== Sent summary email: id={sent.get('id', '')} threadId={sent.get('threadId', '')} to={', '.join(args.send_to)} ==="
         )
 
+    if not args.dry_run and not args.keep_current_checkpoint:
+        store_last_successful_run(checkpoint_parameter, datetime.now(timezone.utc))
     print(rendered, end="")
     return 0
 

@@ -3,29 +3,19 @@ BRANCH: pony/rarity/main
 WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
 WORKFILE: [pony/work/rarity.md](../work/rarity.md)
 BRANCH_VERIFIED: yes
-STATUS: ASSIGNED
-PUSH_STATUS: clean_local_branch
+STATUS: SHUTDOWN_SAVED_PARKED_NO_ACTIVE_MAIL_TASK
+PUSH_STATUS: no_staging_or_commit_from_shutdown_context
 APPROVALS: none recorded
-FILES_PLANNED: none for the shared dictionary seed; seed has already been handed to AJ and loaded
-FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md
-BLOCKERS: none
-NEXT_STEP: continue only the active Stockroom replay work unless the user explicitly assigns new dictionary corrections
-NOTES: 2026-06-30 RAG pivot assignment - Rarity owns Meds & Treatments
-NOTES: AJ worker-side update says the shared dictionary seed has already been loaded into Handshake's Aurora MySQL/MariaDB-compatible database; do not retry the same seed path
-NOTES: user instruction recorded - when handed page-by-page data, save it into a real file instead of creating a stub or summary placeholder
-NOTES: user instruction recorded - for fuzzy supplier matches, use product-name text matching to populate Suppliers while preserving the stockroom numeric fields as-is
-NOTES: user instruction recorded - use `view.pushHookEvent(el, null, "live_fetch.update_global_product", payload, callback)` from the `product-catalog` LiveView root for backend updates; vary only `payload.id`, `payload.params.suppliers`, `payload.params.buying_cost`, `payload.params.unit` fields, and `payload.params.emr_products`; do not use `execJS`
-NOTES: current working abstraction - intercept `view.pushHookEvent` on the `product-catalog` LiveView root and log every outgoing `live_fetch.*` event plus reply into `window.__stockroomWireLog`
-NOTES: current working interceptor - wraps `view.pushHookEvent`, clones each payload, records `{event,payload,elId,ref}`, and logs replies with `pushRef`
-FILES_PLANNED: none
-FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, docs/inventory-ally-stockroom-ownership-matrix.md, docs/inventory-ally-stockroom-discovery-checklist.md, pony/team.coordination/twi.mailbox.md, pony/team.coordination/spike.mailbox.md
-BLOCKERS: none
-CURRENT_STOP: browser replay helper now emits a self-contained supplier lookup and loads the merged UR file
-FILES_PLANNED: docs/stockroom-merged-stockroom-ur.csv
-FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, scripts/stockroom/emit_merged_stockroom_rows.py, tests/test_emit_merged_stockroom_rows.py, docs/stockroom-merged-stockroom-ur.csv
-BLOCKERS: none
-NEXT_STEP: load the emitted browser helper in the Stockroom page and replay rows with `__loadStockroomReplayRows()` / `__updateStockroomReplayByPimsId()` if more row-level capture work is needed
-NOTES: emitter verified in the venv; `/tmp/rarity-stockroom-merged.csv` was generated with 1,041 rows and the targeted Stockroom tests passed
-NOTES: browser replay snippet generator now matches the merged UR schema and the targeted replay test passes in the venv
-QUESTIONS_FOR_TWI: none
-DECISION_NEEDED: none
+FILES_PLANNED: none unless Twilight/user assigns a concrete mail-archival follow-up
+FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, pony/memory/rarity.md
+BLOCKERS: No active Rarity task. Older ggb667 deployment blocker remains only as dormant deployment context: if resumed, deployment needs AWS Secrets Manager secret ARN plus GMAIL_EXPECTED_MAILBOX_EMAIL=ggb667@gmail.com; do not record secret contents. Root git metadata read-only remains relevant only for commit/stage requests.
+NEXT_STEP: stay parked in shutdown; reread memory capsule, workfile, and authoritative coordination state before acting if reassigned
+QUESTIONS_FOR_TWI: answered 2026-07-27: stay parked; stale active OpenAI-first Gmail sender-category guesser memory is superseded/refreshed; no live mail-archival follow-up assigned.
+DECISION_NEEDED: none recorded
+NOTES: shutdown handoff refreshed on 2026-07-19
+
+NOTES_2026_07_19_SHUTDOWN_REFRESH_COMPLETE_FINAL: Rarity shutdown refresh complete: local authoritative state `shutdown_saved`, branch `pony/rarity/main`, worktree `/home/ggb66/dev/EVH/pony/worktrees/rarity`. Updated `pony/memory/rarity.md`, `pony/work/rarity.md`, and `pony/team.coordination/rarity.status.md`. Saved deliverables remain prior daily-summary source/ZIP updates and alternate ggb667 ZIP; no staging/commit from this context. Unsaved local work is only metadata refresh. Blockers: root git metadata read-only; ggb667 deployment needs AWS Secrets Manager secret ARN plus `GMAIL_EXPECTED_MAILBOX_EMAIL=ggb667@gmail.com`; no secret contents recorded. Next restart: reread memory capsule, workfile, and authoritative coordination state before acting.
+
+NOTES_2026_07_22_ROUTING_CONFIRMATION: Rarity stays parked in shutdown with no active mail-archival follow-up. Older ggb667 secret-ARN/deployment blocker remains dormant context only unless user/Twilight resumes that lane.
+
+NOTES_2026_07_27_ROUTING_RECHECK: Rarity remains `SHUTDOWN_SAVED_PARKED_NO_ACTIVE_MAIL_TASK`; no new concrete mail task is assigned. Stale memory capsule text about an active OpenAI-first Gmail sender-category guesser and `/tmp/reviewed_email_categories.guessed.txt` has been superseded/refreshed.

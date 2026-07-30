@@ -3,24 +3,63 @@ BRANCH: pony/pinkie/main
 WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
 WORKFILE: [pony/work/pinkie.md](../work/pinkie.md)
 BRANCH_VERIFIED: yes
-STATUS: HOLD
-PUSH_STATUS: local_changes_not_pushed
+STATUS: PDF_SEARCH_VALIDATION_PAUSED_BACKEND_RDS_RECOVERY
+PUSH_STATUS: prior_browser_commit_9deae36_pushed_new_rag_ui_adapter_local_uncommitted
 APPROVALS: none recorded
-FILES_PLANNED: none
-FILES_TOUCHED: pony/team.coordination/pinkie.status.md
-BLOCKERS: no RAG assignment in the current split
-NEXT_STEP: remain idle unless the user or Twilight assigns a new RAG task
-QUESTIONS_FOR_TWI: none
-DECISION_NEEDED: none
-NOTES: 2026-06-30 RAG pivot assignment - Pinkie is idle
-LAUNCH_CHECK: preflight reported no immediate active coding slice; local Pinkie state was verified and remains assigned to Weave Contacts
+FILES_PLANNED: final live validation after backend route implementation/ownership; commit/push Pinkie RAG UI adapter when ready
+FILES_TOUCHED: docs/handshake-pdf-browser/index.html, scripts/rag_ui/static/index.html, tests/test_rag_ui.py, pony/work/pinkie.md, pony/memory/pinkie.md, pony/team.coordination/pinkie.status.md
+BLOCKERS: Endpoint validation stays paused on RDS/backend recovery. evh-vector-pg has storage-full / not-accepting-connections history after the pms_page_chunk export fallout; Pinkie will rerun UI validation only after backend health is confirmed, non-destructive SELECT/live endpoint checks pass, and AJ has a live endpoint. Pinkie performs no DB cleanup actions.
+NEXT_STEP: wait for backend health confirmation, successful non-destructive SELECT/live endpoint checks, and AJ live endpoint report; then rerun PDF-search UI validation for source_page_url, one canonical source-of-truth, and text-layer-vs-OCR navigation semantics.
+QUESTIONS_FOR_TWI: answered 2026-07-27: Pinkie durable refinement recorded; endpoint validation paused until backend health, non-destructive SELECT/live endpoint checks, and AJ live endpoint are all confirmed. No DB cleanup actions from Pinkie.
+DECISION_NEEDED: none for Pinkie until RDS/backend health plus non-destructive SELECT/live endpoint checks pass and AJ has a live endpoint.
+NOTES: 2026-06-30 RAG pivot assignment - Pinkie was idle until the 2026-07-14 reassignment
+LAUNCH_CHECK: superseded on 2026-07-14; Pinkie is now assigned to UI for PDF search, not Weave Contacts
 LAUNCH_VERIFICATION: local state rechecked on 2026-05-07 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_08: local state rechecked on 2026-05-08 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_10: local state rechecked on 2026-05-10 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_15: local state rechecked on 2026-05-15 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_19: local state rechecked on 2026-05-19 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
 LAUNCH_VERIFICATION_2026_05_22: local state rechecked on 2026-05-22 and still points at the Weave Contacts slice; branch `pony/pinkie/main` is behind `origin/main` by 4 commits and the worktree contains an untracked `.codex` file
-LIVE_POSTURE: holding for direct follow-up input
+LIVE_POSTURE: assigned; take concrete UI for PDF search follow-up from Twilight or the user
 SYNC_NOTE: Weave and Instinct are already synched; the local Weave export mostly mirrors the Instinct account list with only minor extra rows
 SUPPORT_NOTE: Weave support case 901174 is closed and Weave will not provide an API
 LAUNCH_VERIFICATION_2026_06_30: local state rechecked on 2026-06-30 and still points at the Weave Contacts slice; no new blocker appeared beyond the closed Weave API path
+
+NOTES: 2026-07-14 user correction - Pinkie assignment is UI for PDF search; Weave Contacts is no longer Pinkie's active assignment.
+NOTES_2026_07_14_PROGRESS: updated `scripts/rag_ui/static/index.html` with PDF-search wording and a PDF query intent panel; verified with `/home/ggb66/dev/EVH/.venv/bin/python -m pytest tests/test_rag_ui.py`
+NOTES_2026_07_14_PINKIE_LETTER: took over UI for PDF search; updated `scripts/rag_ui/static/index.html` to reframe the shell as EVH Instinct PDF RAG, added a PDF query intent panel plus preview state, refreshed Pinkie work/status files, and reports `/home/ggb66/dev/EVH/.venv/bin/python -m pytest tests/test_rag_ui.py` passed.
+
+NOTES_2026_07_17_PINKIE_CONTINUING: Pinkie read memory/workfile and is actively continuing the UI for PDF search task; next restart context is UI surface inspection plus backend-contract follow-up if needed. Weave Contacts remains superseded unless explicitly reassigned.
+
+NOTES_2026_07_17_SOURCE_PDF_BROWSER_SLICE: Pinkie added a source-PDF-like browsing slice in `docs/handshake-pdf-browser/index.html`: clickable page-link rows in the evidence pane, click-to-focus source pages, and separate current search token state so preview behaves like a document results viewer. Remaining blocker is backend document-search/source-PDF response shape; live renderer wiring waits on the contract.
+NOTES_2026_07_18_SHUTDOWN: project deliverable commit `9deae36` pushed to `origin/pony/twi/main`; pony metadata remains local-only and uncommitted by request.
+
+NOTES_2026_07_18_PINKIE_SHUTDOWN_FINAL: Pinkie reported project deliverable commit `9deae36` on `pony/twi/main` for `docs/handshake-pdf-browser/index.html` pushed successfully. Pony metadata refreshed locally but not staged/committed. Future blocker remains backend document-search/source-PDF response shape; no git blocker remains.
+
+NOTES_2026_07_18_PINKIE_RECHECK_LETTER: Pinkie reports startup/recheck complete: UI PDF-search slice delivered in `docs/handshake-pdf-browser/index.html` with commit `9deae36` already pushed; current worktree has the RAG shell and no live document-search route. Pinkie inspected `scripts/rag_ui/lambda_app.py` in her context and found only `/api/options`, `/health`, and static index. Final endpoint/live-renderer wiring is blocked until backend document-search/source-PDF response shape is provided (route, request params, hit fields, source-PDF/page URL fields, snippets, pagination), or a concrete UI-only slice is assigned. No git blocker for Pinkie.
+
+NOTES_2026_07_18_AJ_RD_CONTRACT: Proposed only (no implemented endpoint): GET /api/rag/documents/search; params: client_id required, pet_id optional, q optional (>=3 chars for text search), page 1-based default 1, page_size default 20 max 100, cursor opaque alternative to page, sort relevance|date_desc (default relevance when q else date_desc). Response items: document_id, source_system, source_reference_id, clinic_id, client_id, pet_id, filename, mime_type, page_count, ingest_status, summary, score, pages [{page_id,page_number,page_label,source_page_url,snippet,match_score,chunks [{chunk_id,chunk_index,snippet,score}]}], pagination {page,page_size,total,has_next,next_cursor}. RD canonical PDF/source_reference_id is Instinct GraphQL ChartFile.id, persisted by importer as pdf_id; source_uri is the signed URL returned by createChartFileUrl(id=ChartFile.id, inline=true). RD has no native per-page identifier/page-link builder; extracted page_number is 1-based; pms_document_page.id must be backend-generated. Direct page link may be source_uri + #page=<page_number>, but signed URLs expire, so a stable backend/proxy page route is preferred. Pinkie should not wire final live renderer yet because the route is not implemented and stable source-page URL construction is unconfirmed.
+
+NOTES_2026_07_18_RAG_UI_ADAPTER_CONTRACT_READY: Pinkie incorporated the proposed `GET /api/rag/documents/search` contract into `scripts/rag_ui/static/index.html`: client_id required, optional pet_id/q, page/page_size, relevance sort; renders item pages, source_page_url links, snippets, scores, pagination totals, source URI/page fallback, and graceful unavailable-route messaging. Reported verification: `/home/ggb66/dev/EVH/.venv/bin/python -m pytest tests/test_rag_ui.py` passes (3 tests). Not wired as live; final validation waits for backend route implementation/ownership. Final id/link rules: source_reference_id must be exact Instinct GraphQL ChartFile.id/importer pdf_id; never filename, content hash, or source_name. source_uri stores the observed createChartFileUrl(id=ChartFile.id, inline=true) signed URL for provenance only; it expires and is not canonical/stable. pms_document_page.id/page_id is backend-generated. pms_document_page.source_page_link/source_page_url is canonical for UI only when backend generates a stable proxy/link from source_reference_id + 1-based page_number; source_uri#page=N is temporary fallback only.
+
+NOTES_2026_07_19_SHUTDOWN_REFRESH: branch `pony/pinkie/main`, worktree `/home/ggb66/dev/EVH/pony/worktrees/pinkie`; saved deliverables are `docs/handshake-pdf-browser/index.html`, `scripts/rag_ui/static/index.html`, and `tests/test_rag_ui.py` verification; local coordination metadata remains uncommitted by design; blocker is still the non-live document-search route and unconfirmed stable backend-generated `source_page_url`; next restart step is backend route implementation followed by live endpoint-backed PDF-search UI verification.
+
+NOTES_2026_07_21_ROUTE_ASSIGNMENT: Twilight assigned AJ as backend owner for `GET /api/rag/documents/search` implementation/DB projection. Pinkie remains UI validation owner. Contract is final: client_id required; pet_id optional; q optional >=3 chars; page 1-based default 1; page_size default 20 max 100; cursor optional opaque; sort relevance|date_desc. Response items include document_id, source_system, source_reference_id, clinic_id, client_id, pet_id, filename, mime_type, page_count, ingest_status, summary, score, pages[{page_id,page_number,page_label,source_page_url,snippet,match_score,chunks[{chunk_id,chunk_index,snippet,score}]}], pagination{page,page_size,total,has_next,next_cursor}. source_reference_id is exact Instinct ChartFile.id/pdf_id; source_page_url must be backend-generated stable proxy from source_reference_id + 1-based page_number; source_uri#page=N is only temporary fallback. Next step: rerun live endpoint-backed PDF-search UI verification after AJ reports the endpoint live.
+
+NOTES_2026_07_21_BACKEND_ROUTE_ASSIGNMENT: Twilight assigned AJ as backend owner for GET /api/rag/documents/search. Response contract remains the proposed items/pages/pagination shape. source_reference_id is exact Instinct ChartFile.id/pdf_id; source_page_url must be backend-generated stable proxy from source_reference_id + 1-based page_number; source_uri#page=N is fallback only.
+
+NOTES_2026_07_22_ROUTING_CONFIRMATION: Pinkie stays on UI-for-PDF-search standby. Workfile restart capsule/memory drift is stale/documentary; authoritative blocker is AJ-owned backend route GET /api/rag/documents/search not yet live. No new UI task or alternate backend route assigned.
+
+NOTES_2026_07_22_SOURCE_TRUTH_LOCATION_RULE: One canonical source of truth per hit: text-layer PDF hits may support exact text-location jumps; OCR PDF hits may only jump to the page unless text-layer reconstruction/coordinates are added later. Pinkie remains UI validation owner and should verify the implemented AJ endpoint exposes/behaves consistently enough to avoid competing hit sources.
+
+NOTES_2026_07_22_OCR_BACKEND_DIRECTION: RD OCR utility backend direction recorded: `rag_pdf_ocr_page` persists page-level OCR text separately from vector chunks; deferred OCR reprocess will fill it, mark failed OCR rows `could_not_be_processed`, and continue on failures. Pinkie still waits on AJ endpoint live and should treat OCR hit navigation as page-level unless later text reconstruction/coordinates exist.
+
+NOTES_2026_07_22_BACKEND_ROUTE_OWNER_PATH_BLOCKER: AJ found no AJ-owned backend route file for `GET /api/rag/documents/search`; Twilight local search found no root route and only Pinkie UI adapter/lambda placeholder. Pinkie remains blocked until backend owner/file path is assigned and endpoint goes live.
+
+NOTES_2026_07_22_OCR_TABLE_SCHEMA_CONTRACT: OCR page-source table details for later UI/search validation: `rag_pdf_ocr_page` stores one row per OCR page with `pdf_id`, `source_name`, `source_uri`, `page_number`, `page_text`, `page_kind`, `ocr_method`, `status`, `processed_at`, and `metadata`; unique `(pdf_id, page_number)` plus `pdf_id` lookup index.
+
+NOTES_2026_07_22_AJ_ROUTE_FILE_AUTHORIZED: Twilight authorized AJ to create `/home/ggb66/dev/EVH/pony/worktrees/aj/scripts/rag_document_search_api.py` for `GET /api/rag/documents/search`. Pinkie remains waiting for AJ to report the endpoint/handler live, then runs endpoint-backed UI validation for stable `source_page_url`, one canonical source of truth, and text-layer-vs-OCR navigation semantics.
+
+NOTES_2026_07_27_BACKEND_RDS_AVAILABILITY_BLOCKER: Pinkie confirmed local blocker shifted from route ownership to backend availability. evh-vector-pg/RDS is not accepting connections after the pms_page_chunk export attempt; hot standby is disabled. DB-backed route/live validation stays blocked until RDS recovery plus non-destructive connectivity verification. No truncate/import/rebuild attempts are authorized. Keep endpoint-validation expectations paused; Pinkie reruns UI validation only after DB/backend is healthy again.
+
+NOTES_2026_07_27_PINKIE_ENDPOINT_VALIDATION_PAUSED_REFINED: evh-vector-pg has storage-full / not-accepting-connections history after the pms_page_chunk export fallout; Pinkie will rerun UI validation only after backend health is confirmed, non-destructive SELECT/live endpoint checks pass, and AJ has a live endpoint. Pinkie performs no DB cleanup actions.
