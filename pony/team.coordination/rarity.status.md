@@ -3,15 +3,15 @@ BRANCH: pony/rarity/main
 WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/rarity
 WORKFILE: [pony/work/rarity.md](../work/rarity.md)
 BRANCH_VERIFIED: yes
-STATUS: SHUTDOWN_SAVED_PARKED_NO_ACTIVE_MAIL_TASK
-PUSH_STATUS: no_staging_or_commit_from_shutdown_context
+STATUS: DAILY_SUMMARY_ADP_FILTER_TOKEN_HARDENING_COMMIT_BLOCKED_LABEL_FOLLOWUP_NEXT
+PUSH_STATUS: source_and_deploy_zip_modified_commit_blocked_read_only_git_metadata
 APPROVALS: none recorded
-FILES_PLANNED: none unless Twilight/user assigns a concrete mail-archival follow-up
-FILES_TOUCHED: pony/work/rarity.md, pony/team.coordination/rarity.status.md, pony/memory/rarity.md
-BLOCKERS: No active Rarity task. Older ggb667 deployment blocker remains only as dormant deployment context: if resumed, deployment needs AWS Secrets Manager secret ARN plus GMAIL_EXPECTED_MAILBOX_EMAIL=ggb667@gmail.com; do not record secret contents. Root git metadata read-only remains relevant only for commit/stage requests.
-NEXT_STEP: stay parked in shutdown; reread memory capsule, workfile, and authoritative coordination state before acting if reassigned
-QUESTIONS_FOR_TWI: answered 2026-07-27: stay parked; stale active OpenAI-first Gmail sender-category guesser memory is superseded/refreshed; no live mail-archival follow-up assigned.
-DECISION_NEEDED: none recorded
+FILES_PLANNED: next if assigned: Daily Communication summary label-routing investigation and evhstaff inbox auto-label design; commit source+ZIP only from writable git metadata context
+FILES_TOUCHED: scripts/gmail/daily_email_summary.py, deploy/evh-lambda.zip, pony/work/rarity.md, pony/team.coordination/rarity.status.md, pony/memory/rarity.md
+BLOCKERS: commit/push blocked because `/home/ggb66/dev/EVH/.git/index.lock` cannot be created in this read-only git-metadata environment. cbcdvm and ggb667 Lambda OAuth remain deployment-secret cleanup issues due to AWS refresh-token mismatch/whitespace; no secret contents recorded. No blocker for evhstaff ADP-filter artifact.
+NEXT_STEP: await explicit go for Daily Communication label-routing/evhstaff auto-label investigation; from writable git metadata context, stage/commit only `scripts/gmail/daily_email_summary.py` and `deploy/evh-lambda.zip` if requested.
+QUESTIONS_FOR_TWI: answered 2026-07-30 12:06 EDT: handoff recorded; next investigation is Daily Communication summary label routing and evhstaff auto-label behavior; no implementation started.
+DECISION_NEEDED: user/Twilight explicit assignment before label-routing implementation; writable git metadata plus confirmed commit scope before staging source+ZIP.
 NOTES: shutdown handoff refreshed on 2026-07-19
 
 NOTES_2026_07_19_SHUTDOWN_REFRESH_COMPLETE_FINAL: Rarity shutdown refresh complete: local authoritative state `shutdown_saved`, branch `pony/rarity/main`, worktree `/home/ggb66/dev/EVH/pony/worktrees/rarity`. Updated `pony/memory/rarity.md`, `pony/work/rarity.md`, and `pony/team.coordination/rarity.status.md`. Saved deliverables remain prior daily-summary source/ZIP updates and alternate ggb667 ZIP; no staging/commit from this context. Unsaved local work is only metadata refresh. Blockers: root git metadata read-only; ggb667 deployment needs AWS Secrets Manager secret ARN plus `GMAIL_EXPECTED_MAILBOX_EMAIL=ggb667@gmail.com`; no secret contents recorded. Next restart: reread memory capsule, workfile, and authoritative coordination state before acting.
@@ -19,3 +19,8 @@ NOTES_2026_07_19_SHUTDOWN_REFRESH_COMPLETE_FINAL: Rarity shutdown refresh comple
 NOTES_2026_07_22_ROUTING_CONFIRMATION: Rarity stays parked in shutdown with no active mail-archival follow-up. Older ggb667 secret-ARN/deployment blocker remains dormant context only unless user/Twilight resumes that lane.
 
 NOTES_2026_07_27_ROUTING_RECHECK: Rarity remains `SHUTDOWN_SAVED_PARKED_NO_ACTIVE_MAIL_TASK`; no new concrete mail task is assigned. Stale memory capsule text about an active OpenAI-first Gmail sender-category guesser and `/tmp/reviewed_email_categories.guessed.txt` has been superseded/refreshed.
+
+NOTES_2026_07_30_ADP_FILTER_TOKEN_HARDENING_HANDOFF: Rarity completed ADP noise filtering in `scripts/gmail/daily_email_summary.py`: hourly time-management meal-break notifications from `adpdonotreply@adp.com` are skipped entirely when the subject contains `Hourly Time Management Notification`; `deploy/evh-lambda.zip` was rebuilt with the updated script. Lambda token handling was hardened so each run seeds from the current AWS secret and ignores stale `/tmp` token cache unless refresh token and scope match. Credential comparison across evhstaff, cbcdvm, and ggb667 found evhstaff matched/working, while cbcdvm and ggb667 had AWS secret refresh-token mismatch/whitespace issues explaining multi-account Lambda failures; no secret contents recorded. Twilight verified `python3 -m py_compile scripts/gmail/daily_email_summary.py`, `unzip -tq deploy/evh-lambda.zip`, and the ZIP contains `scripts/gmail/daily_email_summary.py`. Commit/push remains blocked because `/home/ggb66/dev/EVH/.git/index.lock` cannot be created in this read-only git-metadata environment. Next task: investigate why the Daily Communication summary is being tagged `CBC Business` and `Job Search`/`JobSearch / Human` instead of staying in inbox, and determine how to auto-apply labels to evhstaff inbox items. Spike independently relayed the same Rarity handoff: ADP hourly meal-break notices are skipped, deploy ZIP rebuilt/integrity verified, evhstaff OAuth path matches while cbcdvm/ggb667 AWS secrets have refresh-token mismatch/whitespace issues, Lambda now uses secret-only token seeding and ignores stale `/tmp` cache, git add/commit is blocked by read-only `.git/index.lock`, and the next user-facing task is Daily Communication label-routing plus evhstaff auto-label application investigation.
+NOTES_2026_07_31_ROUTING_PARKED_CONFIRMATION: Rarity remains parked on `pony/rarity/main` until explicit go for Daily Communication label-routing/evhstaff auto-label investigation. No implementation has started. Commit/push for `scripts/gmail/daily_email_summary.py` and `deploy/evh-lambda.zip` remains blocked from this context by read-only git metadata (`/home/ggb66/dev/EVH/.git/index.lock` cannot be created).
+
+NOTES_2026_08_04_ROUTING_ANSWER: Rarity branch/task authority confirmed as `pony/rarity/main`; `pony/twi/main` is Twilight coordinator context only. Stay parked until explicit Daily Communication label-routing/evhstaff auto-label investigation assignment; no implementation started.

@@ -1363,3 +1363,89 @@
 - Applejack reported local state `ROUTE_MODULE_READY_WIRING_BLOCKED_RDS_RECOVERY_MONITORING` on `pony/aj/main`. Decision: no launcher blocker; keep AJ parked/recovery-monitoring because exact live backend/router entrypoint and DB env wiring are not exposed locally, and RDS recovery plus non-destructive SELECT are still required before validation. No DB cleanup/truncate/import/vacuum/rebuild authorized.
 
 - Tell IDs: Rarity `9b3602cd-1c43-4147-bac9-644f3df4f44a`; AJ `f97aa2db-dc63-42b0-a2e7-afe4d8451885`.
+
+
+## 2026-07-29 23:18 EDT - Twilight routing/RD bucket/Spike idle reconciliation
+- changed_file: assignment.registry.tsv, twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, twi.md memory, rd.status.md, rd.md work/memory, spike.status.md, spike.md work/memory
+- action: reconciled TWILIGHT_SPARKLE routing metadata and recorded worker letters
+- Twilight: actual live checkout is `pony/twi/main`; stale local `main` labels in registry/status/todo/workfile are metadata drift, not a launcher blocker. Continue coordinating from `/home/ggb66/dev/EVH`; existing dirty/untracked project files are git-hygiene/commit-scope only.
+- RD: deferred bucket aligned. `/home/ggb66/dev/EVH/data/instinct-pdfs-deferred` has 617 PDFs and matching `rag_deferred_ocr_document` rows for those PDF IDs also total 617. Split: `ocr_needed=373`, `ocr_not_reached_deferred=228`, `pending=16`. RD moved 796 deferred-but-table-missing PDFs back into `/home/ggb66/dev/EVH/data/instinct-pdfs` for cache reuse. No bucket blocker reported.
+- Spike: no Docs launcher/routing blocker; stay idle on `pony/spike/main`. RD bucket update is coordination-only, not a Docs or commit task.
+- decision_needed: none for Twilight routing, RD bucket alignment, or Spike idle routing. Existing separate AJ/FS/staging decisions remain as previously recorded.
+
+
+## 2026-07-30 10:17 EDT - RD deferred/state backfill and index fixes recorded
+- changed_file: twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, twi.md memory, rd.status.md, rd.md work/memory, twi.event.stream.history.md
+- action: recorded Rainbow Dash status update
+- RD: `rag_deferred_ocr_document` was backfilled from successful `rag_source_document` rows; 85,617 inserted and table now totals 101,031 rows.
+- indexes: live DB now has indexes on `rag_deferred_ocr_document(document_pdf_id)`, active-bucket `rag_deferred_ocr_document(status, document_pdf_id)`, and `rag_source_document((metadata->>source_reference_id))`.
+- performance: skip lookup rewritten into indexed branches; `EXPLAIN ANALYZE` improved from approximately 678 ms to approximately 0.096 ms.
+- status: current state clean; RD awaiting next instruction.
+- decision_needed: none.
+
+
+## 2026-07-30 10:18 EDT - RD deferred/state pipeline repaired indexed full detail recorded
+- changed_file: twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, twi.md memory, rd.status.md, rd.md work/memory, twi.event.stream.history.md
+- action: recorded expanded Rainbow Dash status update
+- table: `rag_deferred_ocr_document` is the deferred/state table.
+- statuses: meaningful flow statuses are `ocr_needed`, `ocr_not_reached_deferred`, `pending`, and `skipped_already_loaded`; legacy `deferred` rows are still recognized by bucket logic.
+- backfill: 85,617 rows backfilled from already-successful `rag_source_document` rows and marked `skipped_already_loaded`; `rag_deferred_ocr_document` now has 101,031 rows total.
+- new_indexes: `rag_deferred_ocr_document(document_pdf_id)`, partial active-bucket `rag_deferred_ocr_document(status, document_pdf_id)`, and `rag_source_document((metadata->>source_reference_id))`.
+- existing_related_indexes: `rag_source_document((metadata->>pdf_id))`, `rag_source_document(content_hash)`, unique `pms_page_chunk(chunk_hash)`, `pms_page_chunk(source_name, page_number, chunk_index)`, and `pms_page_chunk(embedding)`.
+- code: `scripts/instinct_pdf_chunker.py` splits skip lookup into indexed branches; `EXPLAIN ANALYZE` dropped from approximately 678 ms to approximately 0.096 ms; TransactionHistory PDFs now get at least one OCR retry before defer is allowed.
+- status: clean, no blocker, waiting for next instruction.
+- decision_needed: none.
+
+
+## 2026-07-30 10:19 EDT - Spike resume-path deferred-state docs delta recorded
+- changed_file: twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, twi.md memory, spike.status.md, spike.md work/memory, twi.event.stream.history.md
+- action: recorded Spike docs handoff and light verification
+- docs: `pony/worktrees/spike/docs/instinct-import.md` and `pony/worktrees/spike/docs/evh-rag-architecture.md` now cover the `rag_deferred_ocr_document` status set, 85,617-row `skipped_already_loaded` backfill to 101,031 rows total, new deferred/source-reference indexes, and existing related source/chunk indexes.
+- verification: Twilight grep-verified references to `rag_deferred_ocr_document`, `skipped_already_loaded`, `ocr_not_reached_deferred`, `source_reference_id`, and `pms_page_chunk(embedding)` in the Spike docs.
+- status: docs delta complete and unstaged; Spike stays idle unless a scoped commit/staging or new docs task is explicitly assigned.
+- decision_needed: none.
+
+
+## 2026-07-30 12:06 EDT - Rarity ADP filter/token hardening handoff recorded
+- changed_file: twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, twi.md memory, rarity.status.md, rarity.md work/memory, spike.status.md, spike.md work/memory, twi.event.stream.history.md
+- action: recorded Rarity handoff and Spike relay
+- Rarity: ADP hourly time-management meal-break notices from `adpdonotreply@adp.com` are skipped entirely from `scripts/gmail/daily_email_summary.py`; `deploy/evh-lambda.zip` rebuilt with updated script.
+- token_path: Lambda now seeds token state from the current AWS secret each run and ignores stale `/tmp` cache unless refresh token and scope match.
+- credential_diagnosis: evhstaff matched/working; cbcdvm and ggb667 had AWS secret refresh-token mismatch/whitespace issues explaining multi-account Lambda failures. No secret contents recorded.
+- verification: Twilight verified `python3 -m py_compile scripts/gmail/daily_email_summary.py`, `unzip -tq deploy/evh-lambda.zip`, and ZIP contains `scripts/gmail/daily_email_summary.py`.
+- git_blocker: commit/push blocked because `/home/ggb66/dev/EVH/.git/index.lock` cannot be created in this read-only git-metadata environment.
+- next_task_recorded_not_started: investigate why Daily Communication summary is tagged `CBC Business` and `Job Search`/`JobSearch / Human` instead of staying in inbox, and determine how to auto-apply labels to evhstaff inbox items.
+- Spike: relay of the same handoff recorded; no new Spike docs task.
+- decision_needed: explicit assignment before label-routing implementation; writable git metadata and confirmed scope before staging source+ZIP.
+
+## 2026-07-31 14:30 EDT - FS/AJ/Rarity/RD routing letters answered
+- changed_file: assignment.registry.tsv, twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, rd.status.md, rd.md work/memory, rarity.status.md, rarity.md work/memory, twi.event.stream.history.md
+- action: answered worker routing letters and corrected Twilight metadata drift
+- Twilight: live checkout is `pony/twi/main`; stale local `main` labels were metadata drift, not a launcher blocker and not a worker retarget.
+- Fluttershy: authoritative state remains `pony/fs/main` in Vet Terms. Local commit `ac7793c` remains push-blocked non-fast-forward; wait for merge/rebase or explicit push instruction, no force-push by default.
+- Applejack: authoritative state remains `pony/aj/main`, `ROUTE_MODULE_READY_WIRING_BLOCKED_RDS_RECOVERY_MONITORING`. Stay parked until exact live backend/router entrypoint, DB env wiring, and safe RDS non-destructive SELECT are available.
+- Rarity: authoritative state remains `pony/rarity/main`, parked until explicit go for Daily Communication label-routing/evhstaff auto-label investigation. No implementation started. Source+deploy ZIP commit remains blocked by read-only git metadata.
+- Rainbow Dash: live `scripts/instinct_rag_import_2_0.py` run failed at client 0 / patient 9 in psql schema bootstrap because existing `rag_source_document` lacks expected `pdf_id`; this is schema/launcher mismatch, not network/credential. Do not restart until table-column contract is reconciled.
+- decision_needed: RD schema alignment path; separate future decisions remain explicit go for Rarity label investigation, AJ entrypoint/env plus RDS SELECT, and FS merge/rebase/push direction.
+SHUTDOWN_RESTART_SAVE_2026_08_02: User said they are going to restart. Twilight sent local `/tell all` id 357793bc-d275-42ab-b7ea-5d13356774e7 instructing workers to refresh memory capsules from authoritative shared state, update workfile/status with task/branch/worktree/files/next/blockers/handoff, report shutdown status, avoid secrets, and preserve checkpoints/logs/artifacts. Twilight also sent Celestia notice id dddaa642-a329-4913-b969-9eabadafe4d7 to save source-governance state if needed. Current local launcher fixes synced/validated: commit-capable writable roots in EVH local `pony/scripts/enter-worker-and-codex.sh` and `pony/scripts/pony-session-host.py`; legacy prompt path shim in EVH local `enter-worker-and-codex.sh` and `enter-worker-from-prompt-file.sh`. RD must relaunch before retrying git add/commit/push. Outstanding substantive EVH state remains: RD schema/launcher mismatch for `scripts/instinct_rag_import_2_0.py` vs existing `rag_source_document` missing `pdf_id`; Rarity daily-summary source/ZIP commit blocked unless writable git metadata and scoped commit; Daily Communication label-routing investigation requires explicit assignment.
+RD_SHUTDOWN_REPORT_2026_08_02_0055: Rainbow Dash reported shutdown/restart status refreshed from authoritative shared state at 2026-08-02 00:55 EDT. Current state: RESTART_PENDING_COMMIT_BLOCKED. Work centers on `scripts/instinct_rag_import_2_0.py` importer skip/reuse and client-slice batching. Commit/push remains blocked in the current RD session by read-only linked-worktree git metadata / old sandbox; relaunch is required before retrying staging and push. Checkpoints, logs, and artifacts preserved; no secrets echoed.
+
+## 2026-08-02 18:18 EDT - coordinator routing recheck after Pinkie/FS/Spike letters
+- Verified live Twilight checkout is `pony/twi/main`; corrected stale Twilight `main` labels in local coordinator state. This is metadata drift, not a launcher blocker.
+- Pinkie: keep waiting on backend/RDS recovery, non-destructive SELECT/live endpoint checks, and AJ live endpoint; no new UI-only task.
+- Fluttershy: remain parked on `pony/fs/main`; local commit `ac7793c` remains push-blocked non-fast-forward; no force-push without explicit instruction.
+- Spike: remain idle on completed docs handoff; no new docs/routing task from the coordinator-level inspect-local-state ask.
+
+## 2026-08-02 18:18 EDT - RD durable importer skip/reuse update
+- RD reports active task remains `scripts/instinct_rag_import_2_0.py` importer skip/reuse plus client-slice batching.
+- `py_compile` passed for importer, batch walk, new/changed import helper, and relevant tests; RD memory/workfile refreshed.
+- Next route: retry narrow staging/commit/push in refreshed session; if linked-worktree git metadata remains read-only, report exact git/index error and preserve checkpoints/logs/artifacts.
+- Twilight acked RD via `/tell` id `2437fcec-1e1f-4dc2-883c-55ab68ea882d`; Pinkie/FS/Spike routing tells: `9a18e48a-ec42-4a55-8d24-4aea4c761de5`, `dbd31d58-b8dd-4b90-b043-d98e8c78ba7e`, `dbf58b7f-19a6-4a16-a1f0-1cc04ec3241c`.
+
+## 2026-08-04 Rarity/AJ routing letters answered
+- changed_file: assignment.registry.tsv, twi.status.md, twi.todo.md, twi.decisions.md, coordinator-twi.md, rarity.status.md, rarity.md work/memory, aj.status.md, aj.md work/memory
+- Twilight: actual live checkout is `pony/twi/main`; stale `main` metadata for TWILIGHT_SPARKLE was corrected locally. This is coordinator context, not a worker retarget.
+- Rarity: authoritative lane is `pony/rarity/main`; memory/workfile/status agree the work is parked until explicit go for Daily Communication label-routing/evhstaff auto-label investigation. The ADP filter/token hardening handoff remains recorded; no implementation started.
+- AJ: authoritative lane is `pony/aj/main`, status `ROUTE_MODULE_READY_WIRING_BLOCKED_RDS_RECOVERY_MONITORING`. No exact live backend/router entrypoint or DB env wiring is present locally, and safe non-destructive SELECT is still required. AJ should stay parked/recovery-monitoring unless user/deployment owner supplies those artifacts.
+- questions_for_twi: none after routing answer
+- decision_needed: user/deployment owner supplies AJ entrypoint/env/SELECT if wiring should proceed; user/Twilight explicitly assigns Rarity label-routing before implementation

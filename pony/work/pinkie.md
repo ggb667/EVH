@@ -16,3 +16,4 @@ Notes:
 - validate source_page_url, one canonical source of truth, and text-layer-vs-OCR navigation semantics once live
 
 - 2026-07-27 Pinkie endpoint validation pause refined: evh-vector-pg has storage-full / not-accepting-connections history after the pms_page_chunk export fallout; Pinkie will rerun UI validation only after backend health is confirmed, non-destructive SELECT/live endpoint checks pass, and AJ has a live endpoint. Pinkie performs no DB cleanup actions.
+- 2026-08-02 routing confirmed by Twilight: keep waiting on backend/RDS recovery, non-destructive SELECT/live endpoint checks, and AJ live endpoint; no new UI-only task assigned.
