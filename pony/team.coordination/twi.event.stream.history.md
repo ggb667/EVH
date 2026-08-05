@@ -1449,3 +1449,14 @@ RD_SHUTDOWN_REPORT_2026_08_02_0055: Rainbow Dash reported shutdown/restart statu
 - AJ: authoritative lane is `pony/aj/main`, status `ROUTE_MODULE_READY_WIRING_BLOCKED_RDS_RECOVERY_MONITORING`. No exact live backend/router entrypoint or DB env wiring is present locally, and safe non-destructive SELECT is still required. AJ should stay parked/recovery-monitoring unless user/deployment owner supplies those artifacts.
 - questions_for_twi: none after routing answer
 - decision_needed: user/deployment owner supplies AJ entrypoint/env/SELECT if wiring should proceed; user/Twilight explicitly assigns Rarity label-routing before implementation
+
+
+## 2026-08-05 08:19 EDT - Dirty preflight reconciled and routing letters answered
+- action: inspected root dirty worktree before normal coordination; verified `scripts/gmail/daily_email_summary.py` compile, deploy ZIP integrity/source match, focused daily-summary tests, and Gmail helper syntax.
+- put_away: local-only `.git/info/exclude` now hides `/.venv-evh/`, `/data/instinct-pdfs-deferred/`, and `/data/instinct-pdfs-processed/`; no runtime data deleted.
+- commits: 4662d38 `Update Gmail summary filtering and review helpers`; 20ccb08 `Document handshake PDF browser prototype`; e12c09e `Record pony coordination state updates`. Branch is ahead of origin pending optional push.
+- Spike: confirmed idle on `pony/spike/main`; no Docs task assigned; tell 1138a7b0-3695-406e-8249-2909e3727e63.
+- AJ: confirmed `ROUTE_MODULE_READY_WIRING_BLOCKED_RDS_RECOVERY_MONITORING`; missing deployed backend/router entrypoint, DB env wiring, and safe non-destructive SELECT remain user/deployment-owner artifacts; no DB cleanup/validation; tell e0f2e279-a516-43d2-aa49-16215892c126.
+- RD: acknowledged crash-recovery hardening in `scripts/instinct_rag_import_2_0.py`; next is narrow recovery-path validation with checkpoints/logs/artifacts preserved and no secrets; tell c52de96f-ffe8-4629-a5c3-671a1e535924.
+
+- AJ durable refresh ack: AJ reported memory/workfile refreshed with the same route-module-ready/wiring-blocked state; Twilight acknowledged tell f7761f68-fe01-4b97-bac5-9a06dccfe81b.

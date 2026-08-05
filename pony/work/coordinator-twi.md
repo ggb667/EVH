@@ -1,9 +1,9 @@
 # Twilight Workfile
 
 Project: EVH
-Branch: main
+Branch: pony/twi/main
 
-Status: HOLD_RARITY_DAILY_SUMMARY_ADP_FILTER_HANDOFF_RECORDED
+Status: DIRTY_PREFLIGHT_RECONCILED_ROUTING_LETTERS_ANSWERED
 Scope: coordinate assigned EVH workers
 Permissions granted: none recorded
 Restart capsule:
@@ -12,6 +12,10 @@ Restart capsule:
 - next: none recorded
 - blocker: none recorded
 Notes:
+- AJ durable update ack 2026-08-05: AJ refreshed memory/workfile confirming route-module-ready/wiring-blocked, missing deployed entrypoint/env/SELECT, and no DB cleanup; ack tell f7761f68-fe01-4b97-bac5-9a06dccfe81b.
+
+- 2026-08-05 dirty preflight: inspected root changes, put local runtime artifacts away via `.git/info/exclude` (`.venv-evh`, deferred/processed Instinct PDF buckets), verified daily summary source/ZIP/tests/helpers, and committed old pending project changes locally: 4662d38, 20ccb08, e12c09e. Branch is ahead of origin pending optional user-directed push.
+- 2026-08-05 routing letters: Spike stays idle; AJ remains route-module-ready/wiring-blocked pending exact deployed entrypoint, DB env wiring, and safe non-destructive SELECT from user/deployment owner; RD crash-recovery hardening acknowledged and routed to narrow validation. Tell IDs: Spike 1138a7b0-3695-406e-8249-2909e3727e63, AJ e0f2e279-a516-43d2-aa49-16215892c126, RD c52de96f-ffe8-4629-a5c3-671a1e535924.
 - startup fast path: after dirty-worktree preflight, read `assignment.registry.tsv`, `*.status.md`, `twi.todo.md`, `twi.decisions.md`, `twi.mailbox.md`, and this workfile; treat `twi.event.stream.history.md` as a short rolling log and do not open `*.archive.md` files unless current state explicitly points there
 - canonical worker scopes are assigned in pony/team.coordination/assignment.registry.tsv
 - keep workers aligned to their current EVH areas and handle follow-up routing

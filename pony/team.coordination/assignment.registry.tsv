@@ -5,4 +5,4 @@ fs	FS	FLUTTERSHY	EVH	pony/fs/main	/home/ggb66/dev/EVH/pony/worktrees/fs	/home/gg
 rarity	Rarity	RARITY	EVH	pony/rarity/main	/home/ggb66/dev/EVH/pony/worktrees/rarity	/home/ggb66/dev/EVH/pony/work/rarity.md	/home/ggb66/dev/EVH/pony/launch.prompts/rarity.txt	EVH Mail Archival and Organization
 rd	RD	RAINBOW_DASH	EVH	pony/rd/main	/home/ggb66/dev/EVH/pony/worktrees/rd	/home/ggb66/dev/EVH/pony/work/rd.md	/home/ggb66/dev/EVH/pony/launch.prompts/rd.txt	PDFs
 spike	Spike	SPIKE	EVH	pony/spike/main	/home/ggb66/dev/EVH/pony/worktrees/spike	/home/ggb66/dev/EVH/pony/work/spike.md	/home/ggb66/dev/EVH/pony/launch.prompts/spike.txt	Docs
-twi	Twilight	TWILIGHT_SPARKLE	EVH	main	/home/ggb66/dev/EVH	/home/ggb66/dev/EVH/pony/work/coordinator-twi.md	/home/ggb66/dev/EVH/pony/launch.prompts/twi.txt	coordinate the team
+twi	Twilight	TWILIGHT_SPARKLE	EVH	pony/twi/main	/home/ggb66/dev/EVH	/home/ggb66/dev/EVH/pony/work/coordinator-twi.md	/home/ggb66/dev/EVH/pony/launch.prompts/twi.txt	coordinate the team
