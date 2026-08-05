@@ -133,6 +133,13 @@ def load_messages(token: Token, query: str, max_results: int) -> list[MailItem]:
         labels = [str(v) for v in msg.get("labelIds", []) if isinstance(v, str)]
         unread = "UNREAD" in labels
         from_header, sender_name, sender_email, subject = extract_sender_info(msg, token)
+        normalized_sender = sender_email.strip().lower()
+        normalized_subject = subject.strip().lower()
+        if (
+            normalized_sender == "adpdonotreply@adp.com"
+            and "hourly time management notification" in normalized_subject
+        ):
+            continue
         body_text = extract_message_classification_text(msg, token, max_lines=40)
         items.append(
             MailItem(
