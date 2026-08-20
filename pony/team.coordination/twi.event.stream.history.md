@@ -1460,3 +1460,37 @@ RD_SHUTDOWN_REPORT_2026_08_02_0055: Rainbow Dash reported shutdown/restart statu
 - RD: acknowledged crash-recovery hardening in `scripts/instinct_rag_import_2_0.py`; next is narrow recovery-path validation with checkpoints/logs/artifacts preserved and no secrets; tell c52de96f-ffe8-4629-a5c3-671a1e535924.
 
 - AJ durable refresh ack: AJ reported memory/workfile refreshed with the same route-module-ready/wiring-blocked state; Twilight acknowledged tell f7761f68-fe01-4b97-bac5-9a06dccfe81b.
+## 2026-08-06 19:48 EDT - Pinkie/FS/AJ routing checks answered
+- action: inspected authoritative local pony state and answered worker routing ambiguity.
+- Twilight: live checkout is `pony/twi/main`; this is coordinator-only context and does not retarget worker sessions. Local Twilight branch metadata drift back to `main` was corrected.
+- Pinkie: remains `pony/pinkie/main`, `PDF_SEARCH_VALIDATION_PAUSED_BACKEND_RDS_RECOVERY`; continue Pinkie lane ownership but parked until backend/RDS health, non-destructive SELECT/live endpoint checks, and AJ live endpoint are confirmed. Tell `2117a01f-08db-4ee3-881f-b8357c1c21fa`.
+- Fluttershy/FS: remains `pony/fs/main` Vet Terms; commit `ac7793c` remains push-blocked non-fast-forward pending merge/rebase or explicit push instruction; no force-push. Tell `1c7c7d7d-4694-4c1f-a9ca-440a7afa5e94`.
+- Applejack/AJ: remains `pony/aj/main`, `ROUTE_MODULE_READY_WIRING_BLOCKED_RDS_RECOVERY_MONITORING`; no exact deployed backend/router entrypoint or DB env wiring is exposed locally, and safe non-destructive SELECT/green-light is still required before validation. Missing artifacts stay with user/deployment owner. Tell `95577f8e-2e8e-4a42-8482-2ca5f51d0af2`.
+- decision_needed: user/deployment owner must supply AJ live entrypoint, DB env wiring, and safe SELECT confirmation before AJ can wire/validate; user must give merge/rebase/push direction before FS commit moves.
+## 2026-08-06 19:56 EDT - RD crash-recovery validation accepted
+- RD completed supervised narrow crash-recovery validation for `scripts/instinct_rag_import_2_0.py` with local `postgress_connection.zsh` env, `--supervise --max-restarts 1`, `--start-client-index 3012`, `--limit-clients 1`, and forced child SIGSEGV.
+- Observed `supervisor_restart` with exit_code `-11`, then resumed process logged `resume_window` and `resume_window_exhausted` because checkpoint `client_index=3727` was already beyond the one-client requested window.
+- Result: no blocker; RD refreshed memory/workfile and stands by unless a different crash-injection shape or narrow commit/push is explicitly requested.
+
+
+## 2026-08-19 16:37 EDT - Pinkie/Fluttershy routing answers
+- Dirty preflight inspected first; actual checkout is `pony/twi/main` and stale local Twilight metadata drift to `main` was corrected.
+- Pinkie: stay parked on `pony/pinkie/main`; no UI implementation in coordinator root; wait for backend/RDS health, non-destructive SELECT/live endpoint checks, and AJ live endpoint.
+- Fluttershy/FS: stay parked on `pony/fs/main` Vet Terms; commit `ac7793c` remains push-blocked non-fast-forward; no force-push, merge, rebase, or push without explicit instruction.
+- Untracked local data files `data/MICROCHIPS.CSV`, `data/Rabies.xlsx`, and `data/eustisvet.com.har` were classified as local/user data and left untouched.
+- Live delivery IDs: Pinkie tell 33637e69-c555-4dfd-914a-2acfc3924430; FS tell fcea2d53-d1bd-4b8f-a77d-cf8cd0dfa69e.
+
+## 2026-08-20 00:18 EDT - Pinkie AWS RAG live DB network blocker
+- Pinkie reported AWS-hosted EVH RAG page live at https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com/; Twilight verified `/health` HTTP 200 and `/api/options` HTTP 500.
+- Lambda `evh_instinct_rag_search` has VpcConfig subnets `subnet-00c33cb5e66426a06`, `subnet-07cbe1ff8bd7173ff`, SG `sg-0def166ef7fcb218a`; RDS SG `sg-0d4114e2b4ab03378` allows that SG on 5432, but Lambda logs `pg8000` timeout to `evh-vector-pg.c6hqq6a8ukmj.us-east-1.rds.amazonaws.com:5432`.
+- Current blocker is AWS network path, not UI code. Missing artifact/owner: deployment/AWS network owner must provide/approve NAT/private-subnet route for Lambda to reach the public RDS endpoint, or a different approved DB access path.
+- Pinkie remains UI validation owner and should wait for network fix before rerunning `/api/options` and PDF-search validation; no DB cleanup or UI churn authorized.
+- Live delivery IDs: Pinkie tell 02e5f67c-7171-4e06-8523-8416f394ac62; AJ tell 930e0d6f-72e0-4218-9b6f-e966e2badb91.
+
+## 2026-08-20 13:55 EDT - Dirty preflight reconciled; AJ/Pinkie AWS network routing confirmed
+- Dirty preflight inspected first. Actual checkout is `pony/twi/main`; stale Twilight branch metadata drift to `main` was corrected.
+- Put away local generated/user artifacts via `.git/info/exclude` without deletion: `data/MICROCHIPS.CSV`, `data/Rabies.xlsx`, `data/eustisvet.com.har`, `deploy/evh-rag-ui.zip`, `deploy/evh_instinct_rag_search.zip`, `screenshot.bmp`, and `screenshot.png`.
+- AJ: authoritative durable state is `ROUTE_MODULE_READY_AWS_LAMBDA_RDS_NETWORK_BLOCKED`; older wiring-blocked note is superseded by live AWS RAG route evidence (`/health` 200, `/api/options` 500, Lambda timeout to RDS). Route next action to deployment/AWS network owner unless explicit narrow network-diagnosis assignment is given.
+- Pinkie: remains `pony/pinkie/main`, UI for PDF search, parked on AWS Lambda-to-RDS connectivity blocker; no new lane assignment.
+- No DB cleanup, UI churn, deployment, or secret changes authorized.
+- Live delivery IDs: AJ tell `ebdce417-fc28-4107-892f-5cfc235cda59`; Pinkie tell `3312bc57-102b-428c-a570-d48f715e763e`.

@@ -3,17 +3,13 @@
 Project: EVH
 Branch: pony/pinkie/main
 
-Status: PDF_SEARCH_VALIDATION_PAUSED_BACKEND_RDS_RECOVERY
+Status: AWS_RAG_LIVE_DB_NETWORK_BLOCKED -> Lambda timeout to RDS remains the active blocker
 Scope: UI for PDF search
 Permissions granted: none recorded
 Restart capsule:
-- task: none recorded
-- why: none recorded
-- next: none recorded
-- blocker: none recorded
+- task: wait for deployment/AWS network owner decision on Lambda-to-RDS access path, then rerun `/api/options` and live PDF-search UI validation
+- why: the UI page is live, but backend options/search cannot complete until Lambda can reach RDS
+- next: confirm NAT/private-subnet route or alternate approved DB access path, then validate source_page_url and canonical-hit behavior
+- blocker: AWS network path from Lambda `evh_instinct_rag_search` to `evh-vector-pg.c6hqq6a8ukmj.us-east-1.rds.amazonaws.com:5432`
 Notes:
-- Pinkie owns UI validation for PDF search; AJ owns backend GET /api/rag/documents/search
-- validate source_page_url, one canonical source of truth, and text-layer-vs-OCR navigation semantics once live
-
-- 2026-07-27 Pinkie endpoint validation pause refined: evh-vector-pg has storage-full / not-accepting-connections history after the pms_page_chunk export fallout; Pinkie will rerun UI validation only after backend health is confirmed, non-destructive SELECT/live endpoint checks pass, and AJ has a live endpoint. Pinkie performs no DB cleanup actions.
-- 2026-08-02 routing confirmed by Twilight: keep waiting on backend/RDS recovery, non-destructive SELECT/live endpoint checks, and AJ live endpoint; no new UI-only task assigned.
+- 2026-08-20 page health is good, but `/api/options` still 500s from Lambda timeouts; this is network/path, not UI code.

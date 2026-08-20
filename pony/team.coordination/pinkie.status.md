@@ -3,15 +3,15 @@ BRANCH: pony/pinkie/main
 WORKTREE: /home/ggb66/dev/EVH/pony/worktrees/pinkie
 WORKFILE: [pony/work/pinkie.md](../work/pinkie.md)
 BRANCH_VERIFIED: yes
-STATUS: PDF_SEARCH_VALIDATION_PAUSED_BACKEND_RDS_RECOVERY
+STATUS: AWS_RAG_LIVE_DB_NETWORK_BLOCKED
 PUSH_STATUS: prior_browser_commit_9deae36_pushed_new_rag_ui_adapter_local_uncommitted
 APPROVALS: none recorded
 FILES_PLANNED: final live validation after backend route implementation/ownership; commit/push Pinkie RAG UI adapter when ready
 FILES_TOUCHED: docs/handshake-pdf-browser/index.html, scripts/rag_ui/static/index.html, tests/test_rag_ui.py, pony/work/pinkie.md, pony/memory/pinkie.md, pony/team.coordination/pinkie.status.md
-BLOCKERS: Endpoint validation stays paused on RDS/backend recovery. evh-vector-pg has storage-full / not-accepting-connections history after the pms_page_chunk export fallout; Pinkie will rerun UI validation only after backend health is confirmed, non-destructive SELECT/live endpoint checks pass, and AJ has a live endpoint. Pinkie performs no DB cleanup actions.
-NEXT_STEP: wait for backend health confirmation, successful non-destructive SELECT/live endpoint checks, and AJ live endpoint report; then rerun PDF-search UI validation for source_page_url, one canonical source-of-truth, and text-layer-vs-OCR navigation semantics.
-QUESTIONS_FOR_TWI: answered 2026-07-27: Pinkie durable refinement recorded; endpoint validation paused until backend health, non-destructive SELECT/live endpoint checks, and AJ live endpoint are all confirmed. No DB cleanup actions from Pinkie.
-DECISION_NEEDED: none for Pinkie until RDS/backend health plus non-destructive SELECT/live endpoint checks pass and AJ has a live endpoint.
+BLOCKERS: AWS-hosted EVH RAG UI page is live and `/health` returns 200, but DB-backed `/api/options` still 500s because Lambda `evh_instinct_rag_search` cannot reach `evh-vector-pg.c6hqq6a8ukmj.us-east-1.rds.amazonaws.com:5432` from its VPC config; this is AWS network path, not UI code. Missing artifact: known NAT/private-subnet route to public RDS endpoint or different approved DB access path.
+NEXT_STEP: stay parked until deployment/AWS network owner provides or approves Lambda-to-RDS network path; then rerun `/api/options` and endpoint-backed PDF-search UI validation for source_page_url, one canonical source-of-truth, and text-layer-vs-OCR semantics. Do not perform DB cleanup or UI churn for this blocker.
+QUESTIONS_FOR_TWI: answered 2026-08-20: Pinkie remains on pony/pinkie/main, UI for PDF search, parked on AWS Lambda-to-RDS connectivity blocker; no new assignment changes her lane.
+DECISION_NEEDED: deployment/AWS network owner must choose/provide NAT/private-subnet route for Lambda subnets `subnet-00c33cb5e66426a06` and `subnet-07cbe1ff8bd7173ff` to reach the public RDS endpoint, or approve a different DB access path.
 NOTES: 2026-06-30 RAG pivot assignment - Pinkie was idle until the 2026-07-14 reassignment
 LAUNCH_CHECK: superseded on 2026-07-14; Pinkie is now assigned to UI for PDF search, not Weave Contacts
 LAUNCH_VERIFICATION: local state rechecked on 2026-05-07 and still points at the Weave Contacts slice; no new blocker appeared beyond the existing Weave access wait
@@ -63,3 +63,10 @@ NOTES_2026_07_22_AJ_ROUTE_FILE_AUTHORIZED: Twilight authorized AJ to create `/ho
 NOTES_2026_07_27_BACKEND_RDS_AVAILABILITY_BLOCKER: Pinkie confirmed local blocker shifted from route ownership to backend availability. evh-vector-pg/RDS is not accepting connections after the pms_page_chunk export attempt; hot standby is disabled. DB-backed route/live validation stays blocked until RDS recovery plus non-destructive connectivity verification. No truncate/import/rebuild attempts are authorized. Keep endpoint-validation expectations paused; Pinkie reruns UI validation only after DB/backend is healthy again.
 
 NOTES_2026_07_27_PINKIE_ENDPOINT_VALIDATION_PAUSED_REFINED: evh-vector-pg has storage-full / not-accepting-connections history after the pms_page_chunk export fallout; Pinkie will rerun UI validation only after backend health is confirmed, non-destructive SELECT/live endpoint checks pass, and AJ has a live endpoint. Pinkie performs no DB cleanup actions.
+
+NOTES_2026_08_06_ROUTING_CHECK: Twilight confirmed `pony/twi/main` is coordinator-only context, not a Pinkie retarget. Pinkie remains on `pony/pinkie/main`, `PDF_SEARCH_VALIDATION_PAUSED_BACKEND_RDS_RECOVERY`, and should stay parked until backend/RDS health, non-destructive SELECT/live endpoint checks, and AJ live endpoint are confirmed. If a Pinkie process is in coordinator-root context, do not implement there; use the Pinkie lane only after explicit assignment.
+NOTES_2026_08_06_ROUTING_ANSWER: Twilight confirmed current `pony/twi/main` session is coordinator-only, not Pinkie retarget. Pinkie remains in `pony/pinkie/main` UI PDF-search lane but parked until backend/RDS health, non-destructive SELECT/live endpoint checks, and AJ live endpoint are confirmed; no DB cleanup actions.
+
+NOTES_2026_08_19_ROUTING_CHECK: Twilight reconfirmed `pony/twi/main` is coordinator-only context, not a Pinkie retarget. Pinkie remains on `pony/pinkie/main`, parked until backend/RDS health, non-destructive SELECT/live endpoint checks, and AJ live endpoint are confirmed. No new UI task is assigned in the coordinator root; no DB cleanup actions.
+
+NOTES_2026_08_20_AWS_RAG_LIVE_DB_NETWORK_BLOCKED: Pinkie reports AWS-hosted EVH RAG page is live at https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com/ and `/health` returns 200; Twilight curl verified `/health` HTTP 200 with `{"ok": true}` and `/api/options` HTTP 500. Current Lambda `evh_instinct_rag_search` VpcConfig uses subnets `subnet-00c33cb5e66426a06` and `subnet-07cbe1ff8bd7173ff` with SG `sg-0def166ef7fcb218a`; RDS SG `sg-0d4114e2b4ab03378` allows that SG on TCP 5432. Lambda still logs `pg8000` timeout to `evh-vector-pg.c6hqq6a8ukmj.us-east-1.rds.amazonaws.com:5432`, so current blocker is AWS network path from Lambda to RDS, not UI code. Missing artifact/decision: deployment/AWS network owner must provide a known NAT/private-subnet route for Lambda to reach the public RDS endpoint or approve/provide a different DB access path. Pinkie remains UI validation owner and should not change UI code for this blocker.
