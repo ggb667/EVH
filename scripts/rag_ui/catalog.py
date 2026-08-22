@@ -88,16 +88,16 @@ def _pg_connect():
     if env is None:
         return None
     try:
-        import pg8000.dbapi as pg  # type: ignore
+        import psycopg
     except Exception as exc:  # pragma: no cover - only used in Lambda packaging
-        raise RuntimeError("pg8000 is required for live Postgres access") from exc
-    return pg.connect(
+        raise RuntimeError("psycopg is required for live Postgres access") from exc
+    return psycopg.connect(
         host=env["EVH_PGHOST"],
         port=int(env["EVH_PGPORT"]),
-        database=env["EVH_PGDATABASE"],
+        dbname=env["EVH_PGDATABASE"],
         user=env["EVH_PGUSER"],
         password=env["EVH_PGPASSWORD"],
-        timeout=10,
+        connect_timeout=10,
     )
 
 
@@ -722,6 +722,9 @@ def _load_pet_context_chunks_fresh(client_id: str, pet_id: str | None, limit: in
         if client_id:
             if "client_id" in columns:
                 where.append("client_id = %s")
+                params.append(client_id)
+            elif "client_instinct_uuid" in columns:
+                where.append("client_instinct_uuid = %s")
                 params.append(client_id)
             else:
                 where.append("(metadata->>'account_id' = %s or metadata->>'client_id' = %s)")
