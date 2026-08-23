@@ -14,7 +14,7 @@ from typing import Any, Iterable
 
 
 def _normalize(value: Any) -> str:
-    text = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())
+    text = re.sub(r"[^a-z]+", " ", str(value or "").lower())
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -89,16 +89,26 @@ def _pg_connect():
         return None
     try:
         import psycopg
-    except Exception as exc:  # pragma: no cover - only used in Lambda packaging
-        raise RuntimeError("psycopg is required for live Postgres access") from exc
-    return psycopg.connect(
-        host=env["EVH_PGHOST"],
-        port=int(env["EVH_PGPORT"]),
-        dbname=env["EVH_PGDATABASE"],
-        user=env["EVH_PGUSER"],
-        password=env["EVH_PGPASSWORD"],
-        connect_timeout=10,
-    )
+
+        return psycopg.connect(
+            host=env["EVH_PGHOST"],
+            port=int(env["EVH_PGPORT"]),
+            dbname=env["EVH_PGDATABASE"],
+            user=env["EVH_PGUSER"],
+            password=env["EVH_PGPASSWORD"],
+            connect_timeout=10,
+        )
+    except Exception:
+        import pg8000.dbapi as pg  # type: ignore
+
+        return pg.connect(
+            host=env["EVH_PGHOST"],
+            port=int(env["EVH_PGPORT"]),
+            database=env["EVH_PGDATABASE"],
+            user=env["EVH_PGUSER"],
+            password=env["EVH_PGPASSWORD"],
+            timeout=10,
+        )
 
 
 def _table_columns(cursor, table_name: str) -> set[str]:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -8,6 +10,21 @@ from scripts.rag_ui.catalog import load_catalog, load_pet_context_chunks, search
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_PATH = STATIC_DIR / "index.html"
+
+
+def _app_version() -> str:
+    env_version = os.environ.get("RAG_UI_VERSION", "").strip()
+    if env_version:
+      return env_version
+    try:
+        root = Path(__file__).resolve().parents[3]
+        return subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return "unknown"
 
 
 def _headers(content_type: str) -> dict[str, str]:
@@ -18,6 +35,10 @@ def _headers(content_type: str) -> dict[str, str]:
 
 
 def _json_response(status_code: int, payload: dict) -> dict:
+    payload = dict(payload)
+    metadata = dict(payload.get("metadata") or {})
+    metadata["version"] = _app_version()
+    payload["metadata"] = metadata
     return {
         "statusCode": status_code,
         "headers": _headers("application/json; charset=utf-8"),
@@ -58,6 +79,10 @@ def _query_params(event: dict) -> dict[str, str]:
 
 def _serve_index() -> dict:
     return _html_response(200, INDEX_PATH.read_text(encoding="utf-8"))
+
+
+def _serve_version() -> dict:
+    return _json_response(200, {"version": _app_version()})
 
 
 def _serve_options(event: dict) -> dict:
@@ -161,6 +186,9 @@ def lambda_handler(event: dict, context: object | None = None) -> dict:
 
     if path == "/api/options":
         return _serve_options(event)
+
+    if path == "/api/version":
+        return _serve_version()
 
     if path == "/api/rag/documents/search":
         return _serve_rag_search(event)

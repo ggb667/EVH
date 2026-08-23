@@ -129,7 +129,7 @@
       border:1px solid var(--line);
       border-radius:22px;
       box-shadow:var(--shadow);
-      overflow:hidden;
+      overflow:visible;
     }
     .panel-inner{padding:22px}
     h2{
@@ -151,6 +151,7 @@
       grid-template-columns:repeat(2, minmax(0, 1fr));
       gap:14px;
       margin-top:20px;
+      overflow:visible;
     }
     @media (max-width: 760px){
       .grid{grid-template-columns:1fr}
@@ -161,9 +162,16 @@
       background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
       border:1px solid var(--line);
       position:relative;
+      overflow:visible;
+    }
+    #pet-shell{
+      min-height: 520px;
+    }
+    #pet-shell .combo{
+      min-height: 54px;
     }
     .combo-shell[data-disabled="true"]{
-      opacity:.62;
+      opacity:.6;
     }
     .combo-top{
       display:flex;
@@ -225,12 +233,15 @@
       border:1px solid var(--line-strong);
       border-radius:16px;
       box-shadow:0 25px 60px rgba(0,0,0,.42);
-      overflow:hidden;
+      overflow:visible;
+      min-width:100%;
+      max-width:min(720px, 95vw);
     }
     .dropdown[data-open="true"]{display:block}
     .dropdown-inner{
-      max-height:344px;
+      max-height:min(72vh, 760px);
       overflow:auto;
+      overscroll-behavior:contain;
     }
     .dropdown-note{
       padding:10px 12px;
@@ -487,36 +498,27 @@
   </div>
 
   <script>
-    const demoData = {
-      clients: [
-        { id: "client-1", label: "Alpha Client", secondary: "AAA001", petCount: 2 },
-        { id: "client-2", label: "Bravo Clinic", secondary: "BRV002", petCount: 3 },
-        { id: "client-3", label: "Charlie Animal Care", secondary: "CHR003", petCount: 1 },
-        { id: "client-4", label: "Delta Veterinary", secondary: "DLT004", petCount: 4 },
-        { id: "client-5", label: "Echo Rescue", secondary: "ECO005", petCount: 5 },
-        { id: "client-6", label: "Foxtrot Family Pets", secondary: "FOX006", petCount: 2 },
-        { id: "client-7", label: "Gamma House", secondary: "GAM007", petCount: 1 },
-        { id: "client-8", label: "Harbor Vet", secondary: "HAR008", petCount: 6 },
-        { id: "client-9", label: "Island Animal", secondary: "ISL009", petCount: 2 },
-        { id: "client-10", label: "Juniper Pet", secondary: "JUN010", petCount: 3 },
-        { id: "client-11", label: "Kingfisher Clinic", secondary: "KIN011", petCount: 2 },
-        { id: "client-12", label: "Lighthouse Vet", secondary: "LIT012", petCount: 4 },
-      ],
-      petsByClient: {
-        "client-1": [
-          { id: "pet-1a", label: "Milo", secondary: "Canine | Golden Retriever | PET001" },
-          { id: "pet-1b", label: "Mika", secondary: "Feline | Domestic Shorthair | PET002" },
-          { id: "pet-1c", label: "Millie", secondary: "Canine | Mixed Breed | PET003" },
-        ],
-        "client-2": [
-          { id: "pet-2a", label: "Poppy", secondary: "Canine | Poodle | PET010" },
-          { id: "pet-2b", label: "Parker", secondary: "Feline | Tabby | PET011" },
-          { id: "pet-2c", label: "Pinto", secondary: "Canine | Shepherd Mix | PET012" },
-        ],
-        "client-3": [
-          { id: "pet-3a", label: "Ruby", secondary: "Feline | Siamese | PET020" },
-        ],
-      },
+    const API_BASE = window.__EVH_API_BASE__ || "https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
+    const apiUrl = (path, params = {}) => {
+      const url = new URL(path, API_BASE);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && String(value).length > 0) {
+          url.searchParams.set(key, value);
+        }
+      });
+      return url.toString();
+    };
+
+    const api = (path, params = {}, options = {}) => {
+      const url = apiUrl(path, params);
+      const { headers = {}, ...rest } = options;
+      return fetch(url, {
+        ...rest,
+        headers: { accept: "application/json", ...headers },
+      }).then((response) => {
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+        return response.json();
+      });
     };
 
     const state = {
@@ -550,7 +552,7 @@
     const clientStatus = document.getElementById("client-status");
     const petStatus = document.getElementById("pet-status");
 
-    const normalize = (value) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const normalize = (value) => String(value ?? "").toLowerCase().replace(/[^a-z]+/g, " ").replace(/\s+/g, " ").trim();
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
       "&": "&amp;",
       "<": "&lt;",
@@ -558,15 +560,6 @@
       '"': "&quot;",
       "'": "&#39;",
     })[char]);
-
-    const filterMatches = (items, query) => {
-      const normalized = normalize(query);
-      const ordered = [...items].sort((left, right) => left.label.localeCompare(right.label));
-      if (normalized.length < threshold) return ordered.slice(0, limit);
-      return ordered
-        .filter((item) => normalize(`${item.label} ${item.secondary}`).includes(normalized))
-        .slice(0, limit);
-    };
 
     const openDropdown = (dropdown) => {
       dropdown.dataset.open = "true";
@@ -616,7 +609,7 @@
       if (state.client) {
         setPill(clientPill, state.client.label, state.client.secondary);
         summaryClient.textContent = `${state.client.label} (${state.client.secondary || "no code"})`;
-        clientStatus.textContent = `Client selected. ${state.client.petCount} pets are available in this demo set.`;
+        clientStatus.textContent = `Client selected. ${state.client.petCount} pets are available in the current cache.`;
       } else {
         clientPill.innerHTML = "<strong>None selected</strong>";
         summaryClient.textContent = "No client selected yet.";
@@ -658,13 +651,15 @@
       state.contextLoading = true;
       setContextStatus(`Loading context for ${state.client.label} / ${state.pet.label}…`, true);
       petStatus.textContent = "Context is warming in the background while you type.";
+      pdfQuery.disabled = false;
+      pdfSearch.disabled = false;
 
       try {
         const params = new URLSearchParams({
           client_id: state.client.id,
           pet_id: state.pet.id,
         });
-        const response = await fetch(`/api/rag/context?${params.toString()}`, {
+        const response = await fetch(`${API_BASE}/api/rag/context?${params.toString()}`, {
           method: "GET",
           headers: { accept: "application/json" },
         });
@@ -695,7 +690,7 @@
         clientInput.value = item.label;
         clearPetSelection();
         setPetEnabled(true);
-        renderPetOptions("");
+        fetchPets("");
         closeDropdown(clientDropdown);
       } else {
         state.pet = item;
@@ -706,15 +701,13 @@
       updatePreview();
     };
 
-    const renderClientOptions = (query) => {
-      state.clientItems = filterMatches(demoData.clients, query);
+    const renderClientOptions = (items) => {
+      state.clientItems = items;
       renderOptions("client", state.clientItems);
     };
 
-    const renderPetOptions = (query) => {
-      const clientId = state.client ? state.client.id : null;
-      const source = clientId ? (demoData.petsByClient[clientId] || []) : Object.values(demoData.petsByClient).flat();
-      state.petItems = filterMatches(source, query);
+    const renderPetOptions = (items) => {
+      state.petItems = items;
       renderOptions("pet", state.petItems);
     };
 
@@ -727,13 +720,13 @@
     };
 
     const onClientInput = debounce(() => {
-      renderClientOptions(clientInput.value.trim());
+      fetchClients(clientInput.value.trim());
       clientStatus.textContent = clientInput.value.trim().length >= threshold ? "Filtering client matches..." : "Showing the default client set...";
     }, 150);
 
     const onPetInput = debounce(() => {
       if (!state.client) return;
-      renderPetOptions(petInput.value.trim());
+      fetchPets(petInput.value.trim());
       petStatus.textContent = petInput.value.trim().length >= threshold ? "Filtering pet matches..." : "Showing the default pets for this client...";
     }, 150);
 
@@ -757,8 +750,37 @@
       if (event.key === "Escape") closeDropdown(petDropdown);
     });
 
+    async function fetchClients(query = "") {
+      if (state.clientController) state.clientController.abort();
+      state.clientController = new AbortController();
+      clientStatus.textContent = query.length >= threshold ? "Filtering client matches..." : "Showing the default client set...";
+      const payload = await api("/api/options", { kind: "client", q: query, limit }, { signal: state.clientController.signal });
+      renderClientOptions(payload.items || []);
+    }
+
+    async function fetchPets(query = "") {
+      if (!state.client) {
+        renderPetOptions([]);
+        return;
+      }
+      if (state.petController) state.petController.abort();
+      state.petController = new AbortController();
+      petStatus.textContent = query.length >= threshold ? "Filtering pet matches..." : "Loading all pets for this client...";
+      const payload = await api("/api/options", {
+        kind: "pet",
+        clientId: state.client.id,
+        q: query,
+        limit,
+      }, {
+        signal: state.petController.signal,
+      });
+      renderPetOptions(payload.items || []);
+    }
+
     setPetEnabled(false);
-    renderClientOptions("");
+    fetchClients("").catch(() => {
+      clientStatus.textContent = "Client search is unavailable right now.";
+    });
     updatePreview();
   </script>
 </body>
