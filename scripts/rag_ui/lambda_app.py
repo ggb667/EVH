@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
+import traceback
+from urllib.parse import parse_qs, urlencode
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib import request as urllib_request
 
-from scripts.rag_ui.catalog import load_catalog, load_pet_context_chunks, search_document_hits
+import boto3
+
+from scripts.rag_ui.catalog import load_catalog, load_patient_documents, query_options_from_postgres, search_pet_chunks_by_embedding
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-INDEX_PATH = STATIC_DIR / "index.html"
+INDEX_PATH = Path(__file__).resolve().parents[2] / "website" / "EVHInstinctPDFRAG" / "index.html"
 
 
 def _app_version() -> str:
@@ -32,6 +37,272 @@ def _headers(content_type: str) -> dict[str, str]:
         "content-type": content_type,
         "cache-control": "no-store",
     }
+
+
+def _openai_api_key() -> str:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if api_key:
+        return api_key
+
+    secret_arn = os.environ.get("OPENAI_API_KEY_SECRET_ARN", "").strip()
+    if not secret_arn:
+        raise RuntimeError("OPENAI_API_KEY_SECRET_ARN is required for LLM answer generation.")
+
+    client = boto3.client("secretsmanager")
+    response = client.get_secret_value(SecretId=secret_arn)
+    secret = str(response.get("SecretString") or "").strip()
+    if not secret:
+        raise RuntimeError("Secrets Manager returned an empty OpenAI API key.")
+    return secret
+
+
+def _llm_model() -> str:
+    return os.environ.get("RAG_UI_LLM_MODEL", "gpt-5.1").strip() or "gpt-5.1"
+
+
+def _instinct_base_url() -> str:
+    return os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip().rstrip("/")
+
+
+def _instinct_graphql_url() -> str:
+    return os.environ.get("INSTINCT_GRAPHQL_URL", "https://evh.api.instinctvet.com").strip().rstrip("/")
+
+
+def _instinct_token() -> str:
+    token = os.environ.get("TOKEN", "").strip()
+    if token:
+        return token
+    client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise RuntimeError("Instinct client credentials are required for document URLs.")
+    token_url = f"{_instinct_base_url()}/v1/auth/token"
+    payload = urlencode({
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }).encode("utf-8")
+    request = urllib_request.Request(
+        token_url,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=30) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    token = str(data.get("access_token") or data.get("token") or data.get("jwt") or "").strip()
+    if not token:
+        raise RuntimeError(f"Instinct token response missing access token field: {data}")
+    return token
+
+
+def _create_chart_file_url(chart_id: str, inline: bool = True) -> str:
+    query = """
+query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
+  patient(id: $patientId) { id }
+}
+""".strip()
+    mutation = """
+mutation createChartFileUrl($id: ID!, $inline: Boolean) {
+  createChartFileUrl(id: $id, inline: $inline)
+}
+""".strip()
+    payload = {
+        "query": mutation,
+        "variables": {"id": chart_id, "inline": inline},
+    }
+    request = urllib_request.Request(
+        _instinct_graphql_url(),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {_instinct_token()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=30) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if "errors" in data:
+        raise RuntimeError(json.dumps(data["errors"], indent=2, sort_keys=True))
+    url = (((data.get("data") or {}).get("createChartFileUrl")) or "").strip()
+    if not url:
+        raise RuntimeError(f"No download URL returned for chart file id={chart_id!r}")
+    return url
+
+
+def _summarize_context_chunks(chunks: list[dict]) -> str:
+    lines: list[str] = []
+    for idx, item in enumerate(chunks[:8], start=1):
+        lines.append(
+            "\n".join(
+                [
+                    f"[{idx}] {item.get('document_title', 'Source PDF')} — {item.get('page_label', 'Page')}",
+                    f"Source: {item.get('source_page_url', '')}",
+                    f"Text: {item.get('snippet', '')}",
+                ]
+            )
+        )
+    return "\n\n".join(lines)
+
+
+def _extract_citations(chunks: list[dict]) -> list[dict]:
+    return [
+        {
+            "document_id": hit["document_id"],
+            "page_number": hit["page_number"],
+            "source_page_url": hit["source_page_url"],
+            "instinct_url": f"{_create_chart_file_url(hit['document_id'], inline=True)}{'&' if '?' in _create_chart_file_url(hit['document_id'], inline=True) else '?'}page={hit['page_number']}",
+            "snippet": hit["snippet"],
+            "confidence": hit.get("confidence", 0.0),
+        }
+        for hit in chunks
+    ]
+
+
+def _build_document_url_map(chunks: list[dict]) -> list[dict]:
+    seen: set[tuple[str, int, str]] = set()
+    urls: list[dict] = []
+    for hit in chunks:
+        document_id = str(hit.get("document_id") or "").strip()
+        page_number = int(hit.get("page_number") or 1)
+        source_page_url = str(hit.get("source_page_url") or "").strip()
+        key = (document_id, page_number, source_page_url)
+        if not document_id or key in seen:
+            continue
+        seen.add(key)
+        instinct_url = _create_chart_file_url(document_id, inline=True)
+        separator = "&" if "?" in instinct_url else "?"
+        instinct_url = f"{instinct_url}{separator}page={page_number}"
+        urls.append(
+            {
+                "document_id": document_id,
+                "page_number": page_number,
+                "source_page_url": source_page_url,
+                "instinct_url": instinct_url,
+                "document_title": hit.get("document_title"),
+            }
+        )
+    return urls
+
+
+def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict]:
+    by_id = {str(doc.get("document_id") or ""): doc for doc in documents}
+    seen: set[tuple[str, int]] = set()
+    references: list[dict] = []
+    for hit in chunks:
+        document_id = str(hit.get("document_id") or "").strip()
+        page_number = int(hit.get("page_number") or 0)
+        key = (document_id, page_number)
+        if not document_id or key in seen:
+            continue
+        seen.add(key)
+        doc = by_id.get(document_id, {})
+        instinct_url = _create_chart_file_url(document_id, inline=True)
+        separator = "&" if "?" in instinct_url else "?"
+        instinct_url = f"{instinct_url}{separator}page={page_number}"
+        references.append(
+            {
+                "document_id": document_id,
+                "page_number": page_number,
+                "document_title": doc.get("document_title") or hit.get("document_title"),
+                "source_uri": doc.get("source_uri") or hit.get("source_page_url"),
+                "instinct_url": instinct_url,
+            }
+        )
+    return references
+
+
+def _extract_output_text(payload: dict) -> str:
+    text = payload.get("output_text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    output = payload.get("output") or []
+    parts: list[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content") or []:
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") in {"output_text", "text"}:
+                value = content.get("text") or content.get("value")
+                if isinstance(value, str) and value.strip():
+                    parts.append(value.strip())
+    return "\n".join(parts).strip()
+
+
+def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
+    context_text = _summarize_context_chunks(context_chunks)
+    prompt = (
+        "You answer questions using only the provided context. "
+        "If the context does not contain the answer, say you cannot find it in the retrieved documents. "
+        "Return a concise answer and mention source page numbers in parentheses.\n\n"
+        f"Question: {question}\n\nRetrieved context:\n{context_text}"
+    )
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(
+            model=_llm_model(),
+            temperature=0.2,
+            api_key=_openai_api_key(),
+        )
+        response = model.invoke([
+            SystemMessage(content="You are a precise RAG assistant."),
+            HumanMessage(content=prompt),
+        ])
+        text = getattr(response, "content", "")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    except Exception:
+        pass
+
+    payload = {
+        "model": _llm_model(),
+        "input": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "You answer questions using only the provided context. "
+                            "If the context does not contain the answer, say you cannot find it in the retrieved documents. "
+                            "Be concise and cite the most relevant source page numbers in parentheses."
+                        ),
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": f"Question: {question}\n\nRetrieved context:\n{context_text}",
+                    }
+                ],
+            },
+        ],
+        "temperature": 0.2,
+        "max_output_tokens": 400,
+    }
+    request = urllib_request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {_openai_api_key()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=90) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    text = _extract_output_text(data)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    raise RuntimeError(f"OpenAI response did not include output text: {json.dumps(data)[:500]}")
 
 
 def _json_response(status_code: int, payload: dict) -> dict:
@@ -90,29 +361,55 @@ def _serve_options(event: dict) -> dict:
     kind = (params.get("kind") or "client").strip().lower()
     query = params.get("q") or ""
     client_id = params.get("clientId") or params.get("client_id") or ""
-    limit_text = params.get("limit") or "10"
-    try:
-        limit = max(1, min(200, int(limit_text)))
-    except ValueError:
-        limit = 10
 
-    catalog = load_catalog()
-    if kind == "pet":
-        items = catalog.search_pets(client_id or None, query, limit=limit)
+    started = time.perf_counter()
+    items: list[dict]
+    if os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip():
+        catalog_started = time.perf_counter()
+        catalog = load_catalog()
+        catalog_elapsed = time.perf_counter() - catalog_started
+        print(f"[RAG_TIMING] options_catalog_seconds={catalog_elapsed:.3f}", flush=True)
+
+        search_started = time.perf_counter()
+        if kind == "pet":
+            items = catalog.search_pets(client_id or None, query)
+        else:
+            items = catalog.search_clients(query)
+        search_elapsed = time.perf_counter() - search_started
+        print(f"[RAG_TIMING] options_search_seconds={search_elapsed:.3f} count={len(items)}", flush=True)
+    elif os.environ.get("EVH_PGHOST", "").strip():
+        search_started = time.perf_counter()
+        items = query_options_from_postgres(kind, query, client_id or None)
+        search_elapsed = time.perf_counter() - search_started
+        print(f"[RAG_TIMING] options_search_seconds={search_elapsed:.3f} count={len(items)}", flush=True)
     else:
-        items = catalog.search_clients(query, limit=limit)
+        catalog_started = time.perf_counter()
+        catalog = load_catalog()
+        catalog_elapsed = time.perf_counter() - catalog_started
+        print(f"[RAG_TIMING] options_catalog_seconds={catalog_elapsed:.3f}", flush=True)
 
-    return _json_response(
-        200,
-        {
-            "kind": kind,
-            "query": query,
-            "clientId": client_id or None,
-            "threshold": 3,
-            "count": len(items),
-            "items": items,
-        },
-    )
+        search_started = time.perf_counter()
+        if kind == "pet":
+            items = catalog.search_pets(client_id or None, query)
+        else:
+            items = catalog.search_clients(query)
+        search_elapsed = time.perf_counter() - search_started
+        print(f"[RAG_TIMING] options_search_seconds={search_elapsed:.3f} count={len(items)}", flush=True)
+
+    response_started = time.perf_counter()
+    payload = {
+        "kind": kind,
+        "query": query,
+        "clientId": client_id or None,
+        "threshold": 3,
+        "count": len(items),
+        "items": items,
+    }
+    response_elapsed = time.perf_counter() - response_started
+    total_elapsed = time.perf_counter() - started
+    print(f"[RAG_TIMING] options_response_seconds={response_elapsed:.3f} total_seconds={total_elapsed:.3f}", flush=True)
+
+    return _json_response(200, payload)
 
 
 def _serve_rag_search(event: dict) -> dict:
@@ -120,9 +417,8 @@ def _serve_rag_search(event: dict) -> dict:
     client_id = params.get("client_id") or params.get("clientId") or ""
     pet_id = params.get("pet_id") or params.get("petId") or ""
     question = params.get("q") or params.get("question") or ""
-    page = int(params.get("page") or "1")
-    page_size = int(params.get("page_size") or params.get("pageSize") or "8")
-    hits = search_document_hits(client_id, pet_id or None, question, limit=max(1, min(20, page_size)))
+    hits, retrieval_timing = search_pet_chunks_by_embedding(client_id, pet_id or None, question)
+    patient_documents = load_patient_documents(client_id, pet_id or None)
     return _json_response(
         200,
         {
@@ -131,47 +427,165 @@ def _serve_rag_search(event: dict) -> dict:
             "question": question,
             "answer": hits[0]["snippet"] if hits else "I couldn't find a matching PDF hit in the available documents.",
             "items": hits,
+            "patient_documents": patient_documents,
+            "document_urls": _build_document_url_map(patient_documents or hits),
             "citations": [
                 {
                     "document_id": hit["document_id"],
                     "page_number": hit["page_number"],
                     "source_page_url": hit["source_page_url"],
                     "snippet": hit["snippet"],
+                    "confidence": hit.get("confidence", 0.0),
                 }
                 for hit in hits
             ],
             "retrieval": {
                 "matched_documents": len({hit["document_id"] for hit in hits}),
                 "matched_pages": len(hits),
+                "timing": {name: round(value, 3) for name, value in retrieval_timing.items()},
             },
         },
     )
 
 
+def _serve_rag_answer(event: dict) -> dict:
+    params = _query_params(event)
+    client_id = params.get("client_id") or params.get("clientId") or ""
+    pet_id = params.get("pet_id") or params.get("petId") or ""
+    question = params.get("q") or params.get("question") or ""
+    if not client_id or not pet_id:
+        return _json_response(400, {"error": "client_id and pet_id are required"})
+    if not question.strip():
+        return _json_response(400, {"error": "question is required"})
+    started = time.perf_counter()
+    print(f"[RAG_TIMING] answer_start client_id={client_id} pet_id={pet_id} qlen={len(question)}")
+    try:
+        patient_documents = load_patient_documents(client_id, pet_id or None)
+        retrieval_started = time.perf_counter()
+        context_chunks, retrieval_timing = search_pet_chunks_by_embedding(client_id, pet_id or None, question)
+        retrieval_elapsed = time.perf_counter() - retrieval_started
+        print(f"[RAG_TIMING] retrieval_seconds={retrieval_elapsed:.3f} chunks={len(context_chunks)}")
+        llm_started = time.perf_counter()
+        answer = _call_openai_answer(question, context_chunks)
+        llm_elapsed = time.perf_counter() - llm_started
+        total_elapsed = time.perf_counter() - started
+        print(f"[RAG_TIMING] llm_seconds={llm_elapsed:.3f} total_seconds={total_elapsed:.3f}")
+        payload = {
+            "answer": answer,
+            "context": context_chunks,
+            "patient_documents": patient_documents,
+            "document_urls": _build_document_url_map(patient_documents or context_chunks),
+            "references": _build_reference_map(patient_documents, context_chunks),
+            "citations": _extract_citations(context_chunks),
+            "retrieval": {
+                "matched_documents": len({hit["document_id"] for hit in context_chunks}),
+                "matched_pages": len(context_chunks),
+            },
+            "timing": {
+                "retrieval_seconds": round(retrieval_elapsed, 3),
+                "llm_seconds": round(llm_elapsed, 3),
+                "total_seconds": round(total_elapsed, 3),
+                "retrieval_detail": {name: round(value, 3) for name, value in retrieval_timing.items()},
+            },
+        }
+        payload.update({
+            "client_id": client_id or None,
+            "pet_id": pet_id or None,
+            "question": question,
+        })
+        return _json_response(200, payload)
+    except Exception as exc:
+        print(
+            "[RAG_TIMING] answer_error "
+            f"type={type(exc).__name__} message={exc} traceback={traceback.format_exc()}",
+            flush=True,
+        )
+        return _json_response(
+            500,
+            {
+                "error": "rag_answer_failed",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "client_id": client_id or None,
+                "pet_id": pet_id or None,
+                "question": question,
+            },
+        )
+
+
 def _serve_context(event: dict) -> dict:
+    started = time.perf_counter()
     params = _query_params(event)
     client_id = params.get("client_id") or params.get("clientId") or ""
     pet_id = params.get("pet_id") or params.get("petId") or ""
     if not client_id or not pet_id:
+        elapsed = time.perf_counter() - started
+        print(f"[RAG_TIMING] context_seconds={elapsed:.3f} status=400", flush=True)
         return _json_response(400, {"error": "client_id and pet_id are required"})
-    chunks = load_pet_context_chunks(client_id, pet_id, limit=None)
+    documents = load_patient_documents(client_id, pet_id)
+    elapsed = time.perf_counter() - started
+    print(f"[RAG_TIMING] context_seconds={elapsed:.3f} count={len(documents)}", flush=True)
     return _json_response(
         200,
         {
             "client_id": client_id,
             "pet_id": pet_id,
-            "count": len(chunks),
-            "items": chunks,
+            "count": len(documents),
+            "items": documents,
         },
     )
 
 
+def _serve_document_page(event: dict) -> dict:
+    started = time.perf_counter()
+    params = _query_params(event)
+    path = _path(event)
+    parts = [part for part in path.split("/") if part]
+    if len(parts) < 5:
+        elapsed = time.perf_counter() - started
+        print(f"[RAG_TIMING] document_page_seconds={elapsed:.3f} status=404 path={path}", flush=True)
+        return _json_response(404, {"error": "not_found", "path": path})
+    document_id = parts[3]
+    page_text = parts[5] if len(parts) > 5 else ""
+    try:
+        page_number = int(params.get("page") or page_text or parts[-1])
+    except ValueError:
+        page_number = 1
+    try:
+        target = _create_chart_file_url(document_id, inline=True)
+    except Exception as exc:
+        elapsed = time.perf_counter() - started
+        print(
+            "[RAG_TIMING] document_page_seconds="
+            f"{elapsed:.3f} status=500 document_id={document_id} page_number={page_number}",
+            flush=True,
+        )
+        return _json_response(500, {"error": "document_url_unavailable", "document_id": document_id, "page_number": page_number, "detail": str(exc)})
+    separator = "&" if "?" in target else "?"
+    location = f"{target}{separator}page={page_number}"
+    elapsed = time.perf_counter() - started
+    print(
+        f"[RAG_TIMING] document_page_seconds={elapsed:.3f} status=302 document_id={document_id} page_number={page_number}",
+        flush=True,
+    )
+    return {
+        "statusCode": 302,
+        "headers": {
+            "location": location,
+            "cache-control": "no-store",
+        },
+        "body": "",
+    }
+
+
 def lambda_handler(event: dict, context: object | None = None) -> dict:
+    started = time.perf_counter()
     method = _method(event)
     path = _path(event)
+    print(f"[RAG_TIMING] request_start method={method} path={path}", flush=True)
 
     if method == "OPTIONS":
-        return {
+        response = {
             "statusCode": 204,
             "headers": {
                 "access-control-allow-origin": "*",
@@ -180,26 +594,52 @@ def lambda_handler(event: dict, context: object | None = None) -> dict:
             },
             "body": "",
         }
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status=204 path={path}", flush=True)
+        return response
 
     if path in {"/", "/index.html"}:
-        return _serve_index()
+        response = _serve_index()
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
 
     if path == "/api/options":
-        return _serve_options(event)
+        response = _serve_options(event)
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
 
     if path == "/api/version":
-        return _serve_version()
+        response = _serve_version()
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
 
     if path == "/api/rag/documents/search":
-        return _serve_rag_search(event)
+        response = _serve_rag_search(event)
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
+
+    if path == "/api/rag/answer":
+        response = _serve_rag_answer(event)
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
 
     if path == "/api/rag/context":
-        return _serve_context(event)
+        response = _serve_context(event)
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
+
+    if path.startswith("/api/rag/documents/") and "/pages/" in path:
+        response = _serve_document_page(event)
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
 
     if path == "/health":
-        return _json_response(200, {"ok": True})
+        response = _json_response(200, {"ok": True})
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status=200 path={path}", flush=True)
+        return response
 
-    return _json_response(404, {"error": "not_found", "path": path})
+    response = _json_response(404, {"error": "not_found", "path": path})
+    print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status=404 path={path}", flush=True)
+    return response
 
 
 if __name__ == "__main__":

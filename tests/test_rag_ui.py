@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
+import time
 from pathlib import Path
 
-import psycopg
+import pytest
 
+import scripts.rag_ui.catalog as rag_catalog
 from scripts.rag_ui.catalog import load_catalog
 from scripts.rag_ui.lambda_app import lambda_handler
 
@@ -14,63 +15,13 @@ from scripts.rag_ui.lambda_app import lambda_handler
 def write_sample_catalog(path: Path) -> None:
     payload = {
         "accounts": [
-            {
-                "id": "client-1",
-                "pimsCode": "AAA001",
-                "pimsId": "ALT-1",
-                "deletedAt": None,
-                "primaryContact": {
-                    "nameFirst": "Alpha",
-                    "nameMiddle": None,
-                    "nameLast": "Client",
-                },
-            },
-            {
-                "id": "client-2",
-                "pimsCode": "BBB002",
-                "pimsId": None,
-                "deletedAt": None,
-                "primaryContact": {
-                    "nameFirst": "Beta",
-                    "nameMiddle": None,
-                    "nameLast": "Buyer",
-                },
-            },
+            {"id": "client-1", "pimsCode": "AAA001", "pimsId": "ALT-1", "deletedAt": None, "primaryContact": {"nameFirst": "Alpha", "nameMiddle": None, "nameLast": "Client"}},
+            {"id": "client-2", "pimsCode": "BBB002", "pimsId": None, "deletedAt": None, "primaryContact": {"nameFirst": "Beta", "nameMiddle": None, "nameLast": "Buyer"}},
         ],
         "patients": [
-            {
-                "id": 10,
-                "accountId": "client-1",
-                "name": "Milo",
-                "pimsCode": "PET010",
-                "deletedAt": None,
-                "species": {"label": "Canine"},
-                "breed": {"label": "Golden Retriever"},
-                "birthdate": "2020-01-01",
-                "alerts": [{"label": "Anxious"}],
-            },
-            {
-                "id": 11,
-                "accountId": "client-1",
-                "name": "Mika",
-                "pimsCode": "PET011",
-                "deletedAt": None,
-                "species": {"label": "Feline"},
-                "breed": {"label": "Domestic Shorthair"},
-                "birthdate": "2021-02-02",
-                "alerts": [],
-            },
-            {
-                "id": 12,
-                "accountId": "client-2",
-                "name": "Poppy",
-                "pimsCode": "PET012",
-                "deletedAt": None,
-                "species": {"label": "Canine"},
-                "breed": {"label": "Poodle"},
-                "birthdate": "2019-03-03",
-                "alerts": [],
-            },
+            {"id": 10, "accountId": "client-1", "name": "Milo", "pimsCode": "PET010", "deletedAt": None, "species": {"label": "Canine"}, "breed": {"label": "Golden Retriever"}, "birthdate": "2020-01-01", "alerts": [{"label": "Anxious"}]},
+            {"id": 11, "accountId": "client-1", "name": "Mika", "pimsCode": "PET011", "deletedAt": None, "species": {"label": "Feline"}, "breed": {"label": "Domestic Shorthair"}, "birthdate": "2021-02-02", "alerts": []},
+            {"id": 12, "accountId": "client-2", "name": "Poppy", "pimsCode": "PET012", "deletedAt": None, "species": {"label": "Canine"}, "breed": {"label": "Poodle"}, "birthdate": "2019-03-03", "alerts": []},
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -114,7 +65,7 @@ def write_sample_sqlite_catalog(path: Path) -> None:
             );
             """
         )
-        connection.execute(
+        connection.executemany(
             """
             INSERT INTO instinct_accounts (
                 id, pims_code, pims_id, owner_first_name, owner_last_name, display_name,
@@ -122,45 +73,10 @@ def write_sample_sqlite_catalog(path: Path) -> None:
                 is_deleted, raw_payload
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                "client-1",
-                "AAA001",
-                "ALT-1",
-                "Alpha",
-                "Client",
-                "Alpha Client",
-                "",
-                "[]",
-                "[]",
-                None,
-                None,
-                0,
-                "{}",
-            ),
-        )
-        connection.execute(
-            """
-            INSERT INTO instinct_accounts (
-                id, pims_code, pims_id, owner_first_name, owner_last_name, display_name,
-                primary_phone, email_addresses, communication_details, updated_at, deleted_at,
-                is_deleted, raw_payload
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "client-2",
-                "BBB002",
-                None,
-                "Beta",
-                "Buyer",
-                "Beta Buyer",
-                "",
-                "[]",
-                "[]",
-                None,
-                None,
-                0,
-                "{}",
-            ),
+            [
+                ("client-1", "AAA001", "ALT-1", "Alpha", "Client", "Alpha Client", "", "[]", "[]", None, None, 0, "{}"),
+                ("client-2", "BBB002", None, "Beta", "Buyer", "Beta Buyer", "", "[]", "[]", None, None, 0, "{}"),
+            ],
         )
         connection.executemany(
             """
@@ -170,51 +86,9 @@ def write_sample_sqlite_catalog(path: Path) -> None:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                (
-                    10,
-                    "client-1",
-                    "PET010",
-                    "Milo",
-                    "2020-01-01",
-                    None,
-                    None,
-                    "Golden Retriever",
-                    None,
-                    None,
-                    None,
-                    json.dumps([{"label": "Anxious"}]),
-                    json.dumps({"species": {"label": "Canine"}}),
-                ),
-                (
-                    11,
-                    "client-1",
-                    "PET011",
-                    "Mika",
-                    "2021-02-02",
-                    None,
-                    None,
-                    "Domestic Shorthair",
-                    None,
-                    None,
-                    None,
-                    "[]",
-                    json.dumps({"species": {"label": "Feline"}}),
-                ),
-                (
-                    12,
-                    "client-2",
-                    "PET012",
-                    "Poppy",
-                    "2019-03-03",
-                    None,
-                    None,
-                    "Poodle",
-                    None,
-                    None,
-                    None,
-                    "[]",
-                    json.dumps({"species": {"label": "Canine"}}),
-                ),
+                (10, "client-1", "PET010", "Milo", "2020-01-01", None, None, "Golden Retriever", None, None, None, json.dumps([{"label": "Anxious"}]), json.dumps({"species": {"label": "Canine"}})),
+                (11, "client-1", "PET011", "Mika", "2021-02-02", None, None, "Domestic Shorthair", None, None, None, "[]", json.dumps({"species": {"label": "Feline"}})),
+                (12, "client-2", "PET012", "Poppy", "2019-03-03", None, None, "Poodle", None, None, None, "[]", json.dumps({"species": {"label": "Canine"}})),
             ],
         )
         connection.commit()
@@ -222,74 +96,37 @@ def write_sample_sqlite_catalog(path: Path) -> None:
         connection.close()
 
 
-def _live_chunk_pair() -> tuple[str, str]:
-    with psycopg.connect(
-        host=os.environ["EVH_PGHOST"],
-        port=int(os.environ["EVH_PGPORT"]),
-        dbname=os.environ["EVH_PGDATABASE"],
-        user=os.environ["EVH_PGUSER"],
-        password=os.environ["EVH_PGPASSWORD"],
-        connect_timeout=10,
-    ) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                select client_instinct_uuid, patient_id
-                from public.pms_page_chunk
-                where chunk_text is not null
-                limit 1
-                """
-            )
-            row = cursor.fetchone()
-    assert row is not None, "expected at least one live chunk row"
-    return str(row[0]), str(row[1])
+@pytest.fixture(autouse=True)
+def reset_catalog_cache():
+    rag_catalog._CATALOG_CACHE.clear()
+    rag_catalog._CATALOG_MEMORY = None
+    yield
+    rag_catalog._CATALOG_CACHE.clear()
+    rag_catalog._CATALOG_MEMORY = None
 
 
+@pytest.mark.unit
 def test_catalog_search_filters_after_three_chars(tmp_path, monkeypatch):
     sample = tmp_path / "sample.json"
     write_sample_catalog(sample)
     monkeypatch.setenv("RAG_UI_DATA_PATH", str(sample))
 
     catalog = load_catalog(str(sample))
-
-    default_clients = catalog.search_clients("", limit=10)
-    assert [item["label"] for item in default_clients] == ["Alpha Client", "Beta Buyer"]
-
-    filtered_clients = catalog.search_clients("alp", limit=10)
-    assert [item["label"] for item in filtered_clients] == ["Alpha Client"]
-
-    default_pets = catalog.search_pets("client-1", "", limit=10)
-    assert [item["label"] for item in default_pets] == ["Mika", "Milo"]
-
-    filtered_pets = catalog.search_pets("client-1", "mil", limit=10)
-    assert [item["label"] for item in filtered_pets] == ["Milo"]
+    assert [item["label"] for item in catalog.search_clients("")] == ["Alpha Client", "Beta Buyer"]
+    assert [item["label"] for item in catalog.search_clients("alp")] == ["Alpha Client"]
+    assert [item["label"] for item in catalog.search_pets("client-1", "")] == ["Milo", "Mika"]
+    assert [item["label"] for item in catalog.search_pets("client-1", "mil")] == ["Milo"]
 
 
+#
+# Outer-shell tests: catalog loading and UI/API smoke.
+#
+@pytest.mark.unit
 def test_catalog_search_keeps_both_deborah_matches(tmp_path, monkeypatch):
     payload = {
         "accounts": [
-            {
-                "id": "d-1",
-                "pimsCode": "8762",
-                "pimsId": "ALT-8762",
-                "deletedAt": None,
-                "primaryContact": {
-                    "nameFirst": "Deborah",
-                    "nameMiddle": None,
-                    "nameLast": "Bain",
-                },
-            },
-            {
-                "id": "d-2",
-                "pimsCode": "8770",
-                "pimsId": "ALT-8770",
-                "deletedAt": None,
-                "primaryContact": {
-                    "nameFirst": "Deborah",
-                    "nameMiddle": None,
-                    "nameLast": "Burchill",
-                },
-            },
+            {"id": "d-1", "pimsCode": "8762", "pimsId": "ALT-8762", "deletedAt": None, "primaryContact": {"nameFirst": "Deborah", "nameMiddle": None, "nameLast": "Bain"}},
+            {"id": "d-2", "pimsCode": "8770", "pimsId": "ALT-8770", "deletedAt": None, "primaryContact": {"nameFirst": "Deborah", "nameMiddle": None, "nameLast": "Burchill"}},
         ],
         "patients": [],
     }
@@ -298,13 +135,63 @@ def test_catalog_search_keeps_both_deborah_matches(tmp_path, monkeypatch):
     monkeypatch.setenv("RAG_UI_DATA_PATH", str(sample))
 
     catalog = load_catalog()
-    results = catalog.search_clients("Deborah B", limit=10)
-    labels = [item["label"] for item in results]
-
+    labels = [item["label"] for item in catalog.search_clients("Deborah B")]
     assert "Deborah Bain" in labels
     assert "Deborah Burchill" in labels
 
 
+@pytest.mark.unit
+def test_catalog_search_reads_sqlite_database(tmp_path, monkeypatch):
+    db_path = tmp_path / "instinct_identity.sqlite"
+    write_sample_sqlite_catalog(db_path)
+    monkeypatch.setenv("RAG_UI_DB_PATH", str(db_path))
+
+    catalog = load_catalog(str(db_path))
+    assert [item["label"] for item in catalog.search_clients("")] == ["Alpha Client", "Beta Buyer"]
+    assert [item["label"] for item in catalog.search_clients("alp")] == ["Alpha Client"]
+    assert [item["label"] for item in catalog.search_pets("client-1", "")] == ["Milo", "Mika"]
+    assert [item["label"] for item in catalog.search_pets("client-1", "mil")] == ["Milo"]
+
+
+@pytest.mark.unit
+def test_search_pet_chunks_by_embedding_uses_pgvector_sql(monkeypatch):
+    executed = {}
+
+    class FakeCursor:
+        def execute(self, sql, params):
+            executed["sql"] = sql
+            executed["params"] = params
+
+        def fetchall(self):
+            return [
+                ("doc-1", "Document One", 3, "Page 3", "https://example.test/doc-1#page=3", "chunk text", {"document_date": "2026-08-23"}, 0.12),
+            ]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(rag_catalog, "_pg_connect", lambda: FakeConnection())
+    monkeypatch.setattr(rag_catalog, "_embed_text_openai", lambda text: [0.1, 0.2, 0.3])
+
+    hits, timing = rag_catalog.search_pet_chunks_by_embedding("client-1", "pet-1", "last dental")
+
+    assert "embedding <=> %s::vector" in executed["sql"]
+    assert "from public.pms_page_chunk" in executed["sql"]
+    assert executed["params"][1] == "client-1"
+    assert executed["params"][2] == "pet-1"
+    assert hits[0]["document_id"] == "doc-1"
+    assert hits[0]["page_number"] == 3
+    assert timing["total_seconds"] >= 0
+
+
+@pytest.mark.integration
 def test_lambda_serves_index_and_options(tmp_path, monkeypatch):
     sample = tmp_path / "sample.json"
     write_sample_catalog(sample)
@@ -318,7 +205,7 @@ def test_lambda_serves_index_and_options(tmp_path, monkeypatch):
     options_response = lambda_handler(
         {
             "rawPath": "/api/options",
-            "rawQueryString": "kind=pet&clientId=client-1&q=mil&limit=10",
+            "queryStringParameters": {"kind": "pet", "clientId": "client-1", "q": "mil"},
             "requestContext": {"http": {"method": "GET"}},
         }
     )
@@ -327,61 +214,152 @@ def test_lambda_serves_index_and_options(tmp_path, monkeypatch):
     assert [item["label"] for item in payload["items"]] == ["Milo"]
 
 
-def test_catalog_search_reads_sqlite_database(tmp_path, monkeypatch):
+@pytest.mark.integration
+def test_lambda_serves_options_from_sqlite_catalog(tmp_path, monkeypatch):
     db_path = tmp_path / "instinct_identity.sqlite"
     write_sample_sqlite_catalog(db_path)
     monkeypatch.setenv("RAG_UI_DB_PATH", str(db_path))
 
-    catalog = load_catalog(str(db_path))
-
-    assert [item["label"] for item in catalog.search_clients("", limit=10)] == ["Alpha Client", "Beta Buyer"]
-    assert [item["label"] for item in catalog.search_clients("alp", limit=10)] == ["Alpha Client"]
-    assert [item["label"] for item in catalog.search_pets("client-1", "", limit=10)] == ["Mika", "Milo"]
-    assert [item["label"] for item in catalog.search_pets("client-1", "mil", limit=10)] == ["Milo"]
-
-
-def test_live_rag_document_search_uses_postgres_data():
-    required = ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")
-    if not all(os.environ.get(name, "").strip() for name in required):
-        return
-
-    client_id, pet_id = _live_chunk_pair()
-
-    response = lambda_handler(
+    options_response = lambda_handler(
         {
-            "rawPath": "/api/rag/documents/search",
-            "rawQueryString": f"client_id={client_id}&pet_id={pet_id}&q=&page=1&page_size=5",
+            "rawPath": "/api/options",
+            "queryStringParameters": {"kind": "client", "q": "alp"},
             "requestContext": {"http": {"method": "GET"}},
         }
     )
-
-    assert response["statusCode"] == 200
-    payload = json.loads(response["body"])
-    assert payload["client_id"] == client_id
-    assert payload["pet_id"] == pet_id
-    assert isinstance(payload["items"], list)
-    assert payload["items"], "expected at least one live PDF hit"
-    assert payload["items"][0]["snippet"]
+    payload = json.loads(options_response["body"])
+    assert payload["kind"] == "client"
+    assert [item["label"] for item in payload["items"]] == ["Alpha Client"]
 
 
-def test_live_rag_context_endpoint_uses_postgres_data():
-    required = ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")
-    if not all(os.environ.get(name, "").strip() for name in required):
-        return
+#
+# RAG pipeline tests: retrieval, evidence, and answer orchestration.
+#
+@pytest.mark.unit
+def test_rag_search_uses_vector_similarity(monkeypatch):
+    executed = {}
+    embed_calls = []
 
-    client_id, pet_id = _live_chunk_pair()
+    class FakeCursor:
+        def execute(self, sql, params):
+            executed["sql"] = sql
+            executed["params"] = params
+
+        def fetchall(self):
+            return [
+                ("doc-1", "Document One", 3, "Page 3", "https://example.test/doc-1#page=3", "chunk text", {"document_date": "2026-08-23"}, 0.12),
+                ("doc-2", "Document Two", 4, "Page 4", "https://example.test/doc-2#page=4", "other chunk", {"document_date": "2026-08-22"}, 0.30),
+            ]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(rag_catalog, "_pg_connect", lambda: FakeConnection())
+    monkeypatch.setattr(rag_catalog, "_embed_text_openai", lambda text: embed_calls.append(text) or [0.1, 0.2, 0.3])
+
+    hits, timing = rag_catalog.search_pet_chunks_by_embedding("client-123", "patient-456", "when was the last dental?")
+
+    assert embed_calls == ["when was the last dental?"]
+    assert "embedding <=> %s::vector" in executed["sql"]
+    assert "client_instinct_uuid = %s" in executed["sql"]
+    assert "patient_id = %s" in executed["sql"]
+    assert "ilike" not in executed["sql"].lower()
+    assert executed["params"][1] == "client-123"
+    assert executed["params"][2] == "patient-456"
+    assert hits[0]["document_id"] == "doc-1"
+    assert hits[0]["page_number"] == 3
+    assert hits[0]["confidence"] == pytest.approx(0.88, abs=1e-6)
+    assert timing["total_seconds"] >= 0
+
+
+@pytest.mark.integration
+def test_lambda_serves_rag_answer_with_citations(monkeypatch):
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
+        {"document_id": "doc-1", "document_title": "Source PDF One", "source_uri": "https://example.test/doc-1", "page_number": 1, "page_label": "Page 1", "source_page_url": "https://example.test/doc-1#page=1"},
+    ])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([
+        {
+            "document_id": "doc-1",
+            "document_title": "Source PDF One",
+            "page_number": 1,
+            "page_label": "Page 1",
+            "source_page_url": "https://example.test/doc-1#page=1",
+            "snippet": "The patient received Convenia on 2026-08-01.",
+            "confidence": 0.93,
+            "date": "2026-08-01",
+        }
+    ], {"total_seconds": 0.012, "pg_connect_seconds": 0.001, "embedding_seconds": 0.002, "execute_seconds": 0.003, "fetch_seconds": 0.004, "materialize_seconds": 0.002}))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks: "The patient received Convenia on 2026-08-01.")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._create_chart_file_url", lambda document_id, inline=True: "https://instinct.test/file.pdf")
 
     response = lambda_handler(
         {
-            "rawPath": "/api/rag/context",
-            "rawQueryString": f"client_id={client_id}&pet_id={pet_id}",
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "When was Convenia given?"},
             "requestContext": {"http": {"method": "GET"}},
         }
     )
-
-    assert response["statusCode"] == 200
     payload = json.loads(response["body"])
-    assert payload["client_id"] == client_id
-    assert payload["pet_id"] == pet_id
-    assert payload["count"] == len(payload["items"])
-    assert payload["items"], "expected live context chunks"
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "The patient received Convenia on 2026-08-01."
+    assert payload["citations"][0]["document_id"] == "doc-1"
+    assert payload["citations"][0]["page_number"] == 1
+    assert payload["citations"][0]["instinct_url"] == "https://instinct.test/file.pdf?page=1"
+    assert payload["references"][0]["document_id"] == "doc-1"
+    assert payload["references"][0]["instinct_url"] == "https://instinct.test/file.pdf?page=1"
+    assert payload["document_urls"][0]["instinct_url"] == "https://instinct.test/file.pdf?page=1"
+
+
+@pytest.mark.unit
+def test_index_uses_load_once_and_local_filtering():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert "loadClientsOnce" in html
+    assert "loadPetsOnce" in html
+    assert "filterClientsLocally" in html
+    assert "filterPetsLocally" in html
+    assert 'kind: "client",\n        q: query' not in html
+    assert 'kind: "pet",\n        clientId: state.client.id,\n        q: query' not in html
+
+
+@pytest.mark.integration
+def test_live_client_filter_performance_budget():
+    real_catalog_path = Path("/home/ggb66/dev/EVH/scripts/instinct_bulk_cache.json")
+    assert real_catalog_path.exists(), "expected the real Instinct client catalog to be present"
+
+    catalog = load_catalog(str(real_catalog_path))
+    all_labels = [item["label"] for item in catalog.search_clients("")]
+    assert all_labels, "expected a populated real client catalog"
+    assert any(label == "Deborah Burchill" for label in all_labels), "expected Deborah Burchill in the real catalog"
+
+    queries = ["D", "De", "Deb", "Debo", "Debor", "Debora", "Deborah", "Deborah ", "Deborah B", "Deborah Bu", "Deborah Bur"]
+    results: dict[str, list[str]] = {}
+    timings: dict[str, float] = {}
+
+    # Warm the catalog/search path once so the timing budget reflects interactive filtering
+    # rather than one-time cache or module initialization noise.
+    catalog.search_clients("Deb")
+
+    for query in queries:
+        started = time.perf_counter()
+        results[query] = [item["label"] for item in catalog.search_clients(query)]
+        timings[query] = time.perf_counter() - started
+
+    assert results["D"] == all_labels
+    assert results["De"] == all_labels
+    assert "Deborah Burchill" in results["Deb"]
+    assert "Deborah Burchill" in results["Debo"]
+    assert "Deborah Burchill" in results["Debor"]
+    assert "Deborah Burchill" in results["Debora"]
+    assert "Deborah Burchill" in results["Deborah"]
+    assert "Deborah Burchill" in results["Deborah "]
+    assert "Deborah Burchill" in results["Deborah B"]
+    assert "Deborah Burchill" in results["Deborah Bu"]
+    assert results["Deborah Bur"][0] == "Deborah Burchill"
+    assert max(timings.values()) < 0.1

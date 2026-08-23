@@ -3,22 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EVH Instinct PDF RAG</title>
-  <meta name="description" content="EVH RAG prototype page for selecting a client and pet before showing timeline evidence." />
+  <title>EVH Instinct PDF RAG | Pinkie</title>
+  <meta name="description" content="Pinkie PDF search prototype with client and pet combo boxes plus a document intent panel." />
   <style>
     :root{
-      --bg:#081018;
-      --card:#11192a;
-      --card-strong:#16213a;
+      --bg:#0c0f1d;
+      --card:#121732;
+      --card2:#171d3b;
       --line:rgba(255,255,255,.10);
-      --line-strong:rgba(255,255,255,.18);
-      --text:#f6f7ff;
-      --muted:#b0b8d9;
-      --accent:#ff6ba6;
-      --accent2:#ffd36b;
-      --accent3:#7ce8ff;
-      --ok:#7bf0c2;
-      --shadow:0 24px 72px rgba(0,0,0,.38);
+      --line-strong:rgba(255,255,255,.16);
+      --text:#f7f8ff;
+      --muted:#a6b0d6;
+      --accent:#ff6fae;
+      --accent2:#ffcf6f;
+      --accent3:#7ce5ff;
+      --good:#7ef0b8;
+      --shadow:0 24px 70px rgba(0,0,0,.35);
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -27,10 +27,11 @@
       color:var(--text);
       font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;
       background:
-        radial-gradient(1000px 520px at 12% 0%, rgba(255,107,166,.24), transparent 55%),
-        radial-gradient(820px 480px at 88% 8%, rgba(124,232,255,.18), transparent 58%),
-        radial-gradient(760px 520px at 50% 100%, rgba(255,211,107,.14), transparent 60%),
-        linear-gradient(180deg, #051018, var(--bg) 45%, #07111a);
+        radial-gradient(900px 500px at 15% 0%, rgba(255,111,174,.24), transparent 55%),
+        radial-gradient(900px 500px at 85% 10%, rgba(124,229,255,.18), transparent 55%),
+        radial-gradient(700px 500px at 50% 100%, rgba(255,207,111,.12), transparent 60%),
+        linear-gradient(180deg, #070914, var(--bg) 42%, #090b14);
+      overflow-x:hidden;
     }
     body:before{
       content:"";
@@ -38,10 +39,10 @@
       inset:0;
       pointer-events:none;
       background:
-        linear-gradient(120deg, transparent 0 48%, rgba(255,255,255,.04) 49%, transparent 50%) 0 0/220px 220px,
-        linear-gradient(60deg, transparent 0 48%, rgba(255,255,255,.03) 49%, transparent 50%) 0 0/180px 180px;
-      opacity:.35;
+        linear-gradient(120deg, transparent 0 48%, rgba(255,255,255,.05) 49%, transparent 50%) 0 0/220px 220px,
+        linear-gradient(60deg, transparent 0 48%, rgba(255,255,255,.04) 49%, transparent 50%) 0 0/180px 180px;
       mix-blend-mode:screen;
+      opacity:.35;
     }
     .wrap{
       max-width:1280px;
@@ -59,8 +60,8 @@
     }
     header{padding-bottom:18px}
     footer{
-      margin-top:22px;
       padding-top:18px;
+      margin-top:22px;
       border-top:1px solid var(--line);
       color:var(--muted);
       font-size:13px;
@@ -74,8 +75,8 @@
       width:40px;
       height:40px;
       border-radius:14px;
-      background:linear-gradient(135deg, rgba(255,107,166,.95), rgba(255,211,107,.9));
-      box-shadow:0 10px 30px rgba(255,107,166,.18);
+      background:linear-gradient(135deg, rgba(255,111,174,.95), rgba(255,207,111,.9));
+      box-shadow:0 10px 30px rgba(255,111,174,.18);
       position:relative;
     }
     .orb:after{
@@ -83,36 +84,18 @@
       position:absolute;
       inset:9px;
       border-radius:11px;
-      border:1px solid rgba(255,255,255,.42);
+      border:1px solid rgba(255,255,255,.4);
+      opacity:.8;
     }
     .brand h1{
-      margin:0;
       font-size:20px;
+      margin:0;
       letter-spacing:.3px;
     }
     .brand p{
       margin:2px 0 0;
       color:var(--muted);
       font-size:13px;
-    }
-    .eyebrow{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:7px 10px;
-      border-radius:999px;
-      background:rgba(255,255,255,.05);
-      border:1px solid var(--line);
-      color:var(--muted);
-      font-size:12px;
-    }
-    .eyebrow i{
-      width:8px;
-      height:8px;
-      border-radius:999px;
-      background:var(--accent);
-      box-shadow:0 0 0 5px rgba(255,107,166,.12);
-      display:inline-block;
     }
     .hero{
       display:grid;
@@ -125,13 +108,33 @@
       .hero{grid-template-columns:1fr}
     }
     .panel{
-      background:linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+      background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.03));
       border:1px solid var(--line);
       border-radius:22px;
       box-shadow:var(--shadow);
       overflow:visible;
     }
     .panel-inner{padding:22px}
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:7px 10px;
+      border-radius:999px;
+      background:rgba(255,255,255,.05);
+      border:1px solid var(--line);
+      color:var(--muted);
+      font-size:12px;
+      margin-bottom:14px;
+    }
+    .eyebrow i{
+      width:8px;
+      height:8px;
+      border-radius:999px;
+      background:var(--accent);
+      box-shadow:0 0 0 5px rgba(255,111,174,.12);
+      display:inline-block;
+    }
     h2{
       margin:0 0 10px;
       font-size:clamp(34px, 4.8vw, 58px);
@@ -142,9 +145,8 @@
     .lede{
       margin:0;
       color:var(--muted);
-      max-width:70ch;
+      max-width:68ch;
       font-size:16px;
-      line-height:1.6;
     }
     .grid{
       display:grid;
@@ -176,8 +178,8 @@
     .combo-top{
       display:flex;
       justify-content:space-between;
-      gap:10px;
       align-items:flex-start;
+      gap:10px;
       margin-bottom:10px;
     }
     .combo-top h3{
@@ -190,25 +192,27 @@
       text-align:right;
       max-width:18ch;
     }
-    .combo{position:relative}
+    .combo{
+      position:relative;
+    }
     .combo input{
       width:100%;
       border:1px solid var(--line-strong);
       background:rgba(10,13,25,.72);
       color:var(--text);
-      padding:14px;
+      padding:14px 14px;
       border-radius:14px;
       font:inherit;
       outline:none;
       box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
     }
     .combo input:focus{
-      border-color:rgba(255,107,166,.55);
-      box-shadow:0 0 0 4px rgba(255,107,166,.12);
+      border-color:rgba(255,111,174,.55);
+      box-shadow:0 0 0 4px rgba(255,111,174,.12);
     }
     .combo input:disabled{
       cursor:not-allowed;
-      color:rgba(246,247,255,.55);
+      color:rgba(247,248,255,.55);
     }
     .selected-pill{
       display:inline-flex;
@@ -255,7 +259,7 @@
       display:flex;
       flex-direction:column;
       gap:4px;
-      padding:12px;
+      padding:12px 12px;
       border:0;
       border-bottom:1px solid rgba(255,255,255,.05);
       text-align:left;
@@ -264,7 +268,7 @@
       cursor:pointer;
     }
     .option:hover, .option[aria-selected="true"]{
-      background:rgba(255,107,166,.12);
+      background:rgba(255,111,174,.12);
     }
     .option:last-child{border-bottom:0}
     .option .primary{
@@ -287,7 +291,7 @@
       align-items:center;
       padding:5px 8px;
       border-radius:999px;
-      background:rgba(255,211,107,.14);
+      background:rgba(255,207,111,.14);
       color:var(--accent2);
       font-size:11px;
       white-space:nowrap;
@@ -304,8 +308,8 @@
       width:8px;
       height:8px;
       border-radius:999px;
-      background:var(--ok);
-      box-shadow:0 0 0 5px rgba(123,240,194,.12);
+      background:var(--good);
+      box-shadow:0 0 0 5px rgba(126,240,184,.12);
     }
     .side{
       display:grid;
@@ -371,20 +375,22 @@
       font-size:13px;
       max-width:72ch;
     }
-    .loading-pill{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:9px 11px;
-      border-radius:999px;
-      background:rgba(124,232,255,.10);
-      border:1px solid rgba(124,232,255,.25);
-      color:var(--accent3);
-      font-size:12px;
-      min-height:36px;
+    .pop{
+      animation: rise .45s ease-out both;
     }
-    .loading-pill[data-active="false"]{
-      display:none;
+    @keyframes rise{
+      from{transform:translateY(10px); opacity:0}
+      to{transform:translateY(0); opacity:1}
+    }
+    .shake{
+      animation: wobble .5s ease-out both;
+    }
+    @keyframes wobble{
+      0%{transform:translateX(0)}
+      25%{transform:translateX(-2px)}
+      50%{transform:translateX(2px)}
+      75%{transform:translateX(-1px)}
+      100%{transform:translateX(0)}
     }
   </style>
 </head>
@@ -394,22 +400,24 @@
       <div class="brand">
         <div class="orb" aria-hidden="true"></div>
         <div>
-          <h1>EVH Instinct PDF RAG</h1>
-          <p>CloudFront page shell for client and pet selection</p>
+          <h1>EVH RAG Picker</h1>
+          <p>Pinkie combo-box prototype for client and pet lookup</p>
         </div>
       </div>
-      <div class="eyebrow"><i></i> unique path: /EVHInstinctPDFRAG</div>
+      <div class="eyebrow"><i></i> Lambda backed, static page first</div>
+      <div class="footer-note" style="margin-top:10px;text-align:right">
+        Build: __EVH_BUILD_STAMP__
+      </div>
     </header>
 
     <main class="hero">
       <section class="panel">
         <div class="panel-inner">
-          <div class="eyebrow"><i></i> search after 3 characters</div>
+          <div class="eyebrow"><i></i> Search after 3 characters</div>
           <h2>Select the client, then the pet.</h2>
           <p class="lede">
-            This page is intentionally self-contained so it can live behind CloudFront without depending on
-            the data service yet. Once you type three characters, each combo box narrows to matching items,
-            shows the top 10, and keeps the rest in a scrollable list.
+            The dropdowns stay broad until you type three characters. Once the threshold is reached,
+            the suggestions narrow to matching items from the cached catalog. The list stays scrollable. This slice is wired to the future PDF search flow.
           </p>
 
           <div class="grid">
@@ -461,30 +469,55 @@
               <span class="v" id="summary-pet">No pet selected yet.</span>
             </div>
             <div class="line">
-              <span class="k">Context</span>
-              <span class="v"><span id="context-pill" class="loading-pill" data-active="false">Waiting for a client and pet selection…</span></span>
+              <span class="k">Pet ID</span>
+              <span class="v" id="summary-pet-id">No pet ID selected yet.</span>
             </div>
             <div class="line">
-              <span class="k">Next panel</span>
-              <span class="v">The timeline and source PDF links can slot in below this shell once AJ's data work is ready.</span>
+              <span class="k">Preview intent</span>
+              <span class="v">This shell is ready for the RAG timeline pane and source PDF links once the backend contract lands.</span>
             </div>
           </div>
         </section>
 
         <section class="summary-card">
-          <h3>What this page is for</h3>
+          <h3>What the page does</h3>
           <div class="timeline">
             <div class="timeline-item">
               <div class="title"><span>Typeahead</span><span class="badge">3 char gate</span></div>
-              <div class="body">The list stays broad until three typed characters are present, then narrows to matching items only.</div>
+              <div class="body">The list does not narrow until the query reaches three characters. After that, the API returns matches containing the typed text.</div>
             </div>
             <div class="timeline-item">
               <div class="title"><span>Visible list</span><span class="badge">10 rows</span></div>
-              <div class="body">Only the top 10 matches are shown at once, with a scrollbar if the list is longer.</div>
+              <div class="body">The dropdown keeps the first ten options in view and uses a scrollbar for anything beyond that.</div>
             </div>
             <div class="timeline-item">
-              <div class="title"><span>Dependent pickers</span><span class="badge">client -> pet</span></div>
-              <div class="body">Choosing a client unlocks the pet selector and scopes the pet list to that client.</div>
+              <div class="title"><span>Two-stage selection</span><span class="badge">client -> pet</span></div>
+              <div class="body">Choosing a client unlocks the pet picker and scopes the pet search to that client only.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="summary-card">
+          <h3>PDF search intent</h3>
+          <div class="summary-lines">
+            <div class="line">
+              <span class="k">Search query</span>
+              <span class="v" id="summary-query">No PDF query entered yet.</span>
+            </div>
+            <div class="line">
+              <span class="k">Next UI slice</span>
+              <span class="v">Swap this intent panel for source PDF hits and snippets once the document search endpoint lands.</span>
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <label for="pdf-query" class="k" style="display:block;color:var(--muted);font-size:12px;margin-bottom:6px;">PDF search query</label>
+            <div style="display:flex;gap:8px">
+              <input id="pdf-query" type="text" placeholder="Describe the record or phrase you want to find" style="flex:1;min-width:0;border:1px solid var(--line-strong);background:rgba(10,13,25,.72);color:var(--text);padding:14px;border-radius:14px;font:inherit;outline:none;" />
+              <button id="pdf-search" type="button" class="primary-button">Search</button>
+            </div>
+            <div class="status" style="margin-top:10px"><i></i><span id="pdf-search-status">Choose a client, enter a query, and search.</span></div>
+            <div id="pdf-results" class="timeline" style="margin-top:14px" aria-live="polite">
+              <div class="hint">Source PDF hits will appear here.</div>
             </div>
           </div>
         </section>
@@ -492,13 +525,14 @@
     </main>
 
     <footer>
-      <div class="footer-note">Pinkie static page for CloudFront: self-contained and path-isolated.</div>
-      <div class="footer-note">Build: 2026-08-22 17:44 EDT Commit d231758 · Use this as the page shell while the data service is built separately.</div>
+      <div class="footer-note">
+        Pinkie prototype: lambda-served HTML plus server-side suggestions from the Instinct cache.
+      </div>
     </footer>
   </div>
 
   <script>
-    const API_BASE = window.__EVH_API_BASE__ || "https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
+    const API_BASE = window.__EVH_API_BASE__ || new URL("/", window.location.href).origin;
     const apiUrl = (path, params = {}) => {
       const url = new URL(path, API_BASE);
       Object.entries(params).forEach(([key, value]) => {
@@ -524,15 +558,20 @@
     const state = {
       client: null,
       pet: null,
+      clientQuery: "",
+      petQuery: "",
+      clientController: null,
+      petController: null,
       clientItems: [],
+      allClients: [],
       petItems: [],
-      contextLoading: false,
-      contextLoadedAt: null,
-      contextRequestId: 0,
+      allPets: [],
+      clientActiveIndex: -1,
+      petActiveIndex: -1,
+      pdfQuery: "",
+      pdfController: null,
+      pdfPage: 1,
     };
-
-    const threshold = 3;
-    const limit = 10;
 
     const clientInput = document.getElementById("client-input");
     const petInput = document.getElementById("pet-input");
@@ -546,171 +585,18 @@
     const petPill = document.getElementById("pet-pill");
     const summaryClient = document.getElementById("summary-client");
     const summaryPet = document.getElementById("summary-pet");
-    const contextPill = document.getElementById("context-pill");
+    const summaryPetId = document.getElementById("summary-pet-id");
+    const summaryQuery = document.getElementById("summary-query");
+    const pdfQuery = document.getElementById("pdf-query");
+    const pdfSearch = document.getElementById("pdf-search");
+    const pdfSearchStatus = document.getElementById("pdf-search-status");
+    const pdfResults = document.getElementById("pdf-results");
     const clientShell = document.getElementById("client-shell");
     const petShell = document.getElementById("pet-shell");
     const clientStatus = document.getElementById("client-status");
     const petStatus = document.getElementById("pet-status");
 
-    const normalize = (value) => String(value ?? "").toLowerCase().replace(/[^a-z]+/g, " ").replace(/\s+/g, " ").trim();
-    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    })[char]);
-
-    const openDropdown = (dropdown) => {
-      dropdown.dataset.open = "true";
-    };
-
-    const closeDropdown = (dropdown) => {
-      dropdown.dataset.open = "false";
-    };
-
-    const setPill = (node, label, secondary) => {
-      node.innerHTML = `<strong>${escapeHtml(label)}</strong>${secondary ? ` <span>• ${escapeHtml(secondary)}</span>` : ""}`;
-    };
-
-    const renderOptions = (kind, items) => {
-      const list = kind === "client" ? clientList : petList;
-      const note = kind === "client" ? clientNote : petNote;
-      const dropdown = kind === "client" ? clientDropdown : petDropdown;
-
-      list.innerHTML = "";
-      if (!items.length) {
-        list.innerHTML = '<div class="option" style="cursor:default"><span class="name">No matches</span><span class="meta">Try a different search term.</span></div>';
-        note.textContent = "Nothing matched this search.";
-        openDropdown(dropdown);
-        return;
-      }
-
-      note.textContent = items.length === limit ? "Top 10 shown. Scroll for more matches." : "Top matches shown.";
-      openDropdown(dropdown);
-      items.forEach((item) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "option";
-        button.setAttribute("role", "option");
-        button.innerHTML = `
-          <div class="primary">
-            <span class="name">${escapeHtml(item.label)}</span>
-            <span class="badge">${escapeHtml(kind === "client" ? `${item.petCount} pets` : item.secondary.split("|")[0].trim())}</span>
-          </div>
-          <div class="meta">${escapeHtml(item.secondary || "")}</div>
-        `;
-        button.addEventListener("click", () => selectItem(kind, item));
-        list.appendChild(button);
-      });
-    };
-
-    const updatePreview = () => {
-      if (state.client) {
-        setPill(clientPill, state.client.label, state.client.secondary);
-        summaryClient.textContent = `${state.client.label} (${state.client.secondary || "no code"})`;
-        clientStatus.textContent = `Client selected. ${state.client.petCount} pets are available in the current cache.`;
-      } else {
-        clientPill.innerHTML = "<strong>None selected</strong>";
-        summaryClient.textContent = "No client selected yet.";
-        clientStatus.textContent = "Top 10 client choices are visible with scrolling for the rest.";
-      }
-
-      if (state.pet) {
-        setPill(petPill, state.pet.label, state.pet.secondary);
-        summaryPet.textContent = `${state.pet.label} (${state.pet.secondary || "no details"})`;
-        petStatus.textContent = `Pet selected for ${state.client ? state.client.label : "the current client"}.`;
-      } else {
-        petPill.innerHTML = "<strong>None selected</strong>";
-        summaryPet.textContent = "No pet selected yet.";
-        petStatus.textContent = state.client ? "Pick a pet from the selected client." : "Pet search is scoped to the selected client.";
-        setContextStatus("Waiting for a client and pet selection…", false);
-      }
-    };
-
-    const setPetEnabled = (enabled) => {
-      petInput.disabled = !enabled;
-      petShell.dataset.disabled = enabled ? "false" : "true";
-      petInput.placeholder = enabled ? "Search pets by name or code" : "Select a client first";
-      if (!enabled) closeDropdown(petDropdown);
-    };
-
-    const setContextStatus = (text, active = false) => {
-      contextPill.textContent = text;
-      contextPill.dataset.active = active ? "true" : "false";
-    };
-
-    const warmContext = async () => {
-      if (!state.client || !state.pet) {
-        state.contextLoading = false;
-        setContextStatus("Waiting for a client and pet selection…", false);
-        return;
-      }
-
-      const requestId = ++state.contextRequestId;
-      state.contextLoading = true;
-      setContextStatus(`Loading context for ${state.client.label} / ${state.pet.label}…`, true);
-      petStatus.textContent = "Context is warming in the background while you type.";
-      pdfQuery.disabled = false;
-      pdfSearch.disabled = false;
-
-      try {
-        const params = new URLSearchParams({
-          client_id: state.client.id,
-          pet_id: state.pet.id,
-        });
-        const response = await fetch(`${API_BASE}/api/rag/context?${params.toString()}`, {
-          method: "GET",
-          headers: { accept: "application/json" },
-        });
-        if (requestId !== state.contextRequestId) return;
-        if (!response.ok) throw new Error(`Context load failed with ${response.status}`);
-        const payload = await response.json();
-        if (requestId !== state.contextRequestId) return;
-        state.contextLoading = false;
-        state.contextLoadedAt = new Date().toISOString();
-        setContextStatus(`Context hot: ${payload.count ?? 0} chunks ready.`, false);
-        petStatus.textContent = "Context loaded and ready for follow-up questions.";
-      } catch (error) {
-        if (requestId !== state.contextRequestId) return;
-        state.contextLoading = false;
-        setContextStatus("Context warm-up is in progress…", true);
-        petStatus.textContent = `Context warm-up is in progress: ${error.message || error}`;
-      }
-    };
-
-    const clearPetSelection = () => {
-      state.pet = null;
-      petInput.value = "";
-    };
-
-    const selectItem = (kind, item) => {
-      if (kind === "client") {
-        state.client = item;
-        clientInput.value = item.label;
-        clearPetSelection();
-        setPetEnabled(true);
-        fetchPets("");
-        closeDropdown(clientDropdown);
-      } else {
-        state.pet = item;
-        petInput.value = item.label;
-        closeDropdown(petDropdown);
-        warmContext();
-      }
-      updatePreview();
-    };
-
-    const renderClientOptions = (items) => {
-      state.clientItems = items;
-      renderOptions("client", state.clientItems);
-    };
-
-    const renderPetOptions = (items) => {
-      state.petItems = items;
-      renderOptions("pet", state.petItems);
-    };
-
+    const threshold = 3;
     const debounce = (fn, wait = 150) => {
       let timer = null;
       return (...args) => {
@@ -719,23 +605,316 @@
       };
     };
 
+    function closeDropdown(dropdown) {
+      dropdown.dataset.open = "false";
+    }
+
+    function openDropdown(dropdown) {
+      dropdown.dataset.open = "true";
+    }
+
+    function setPill(node, label, secondary) {
+      node.innerHTML = `<strong>${escapeHtml(label)}</strong>${secondary ? ` <span>• ${escapeHtml(secondary)}</span>` : ""}`;
+    }
+
+    function formatPetLabel(item) {
+      return item?.label || "";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[char]);
+    }
+
+    function renderOptions(kind, items) {
+      const list = kind === "client" ? clientList : petList;
+      const note = kind === "client" ? clientNote : petNote;
+      const dropdown = kind === "client" ? clientDropdown : petDropdown;
+      const activeIndexKey = kind === "client" ? "clientActiveIndex" : "petActiveIndex";
+      const shell = kind === "client" ? clientShell : petShell;
+
+      list.innerHTML = "";
+      if (!items.length) {
+        list.innerHTML = '<div class="option" style="cursor:default"><span class="name">No matches</span><span class="meta">Try a different search term.</span></div>';
+        note.textContent = "Nothing matched this search.";
+        openDropdown(dropdown);
+        shell.classList.remove("shake");
+        void shell.offsetWidth;
+        shell.classList.add("shake");
+        state[activeIndexKey] = -1;
+        return;
+      }
+
+      note.textContent = items.length ? `${items.length} matches loaded.` : "No matches loaded.";
+      openDropdown(dropdown);
+      items.forEach((item, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "option";
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", "false");
+        button.innerHTML = `
+          <div class="primary">
+            <span class="name">${escapeHtml(kind === "pet" ? formatPetLabel(item) : item.label)}</span>
+            <span class="badge">${escapeHtml(kind === "client" ? `${item.petCount} pets` : item.breed || item.species || "pet")}</span>
+          </div>
+          <div class="meta">${escapeHtml(kind === "pet" ? [item.clientLabel, `ID #${item.id}`, item.secondary].filter(Boolean).join(" • ") : item.secondary || "")}</div>
+        `;
+        button.addEventListener("click", () => selectItem(kind, item));
+        list.appendChild(button);
+      });
+
+      state[activeIndexKey] = 0;
+    }
+
+    function updateSelectedPreview() {
+      if (state.client) {
+        setPill(clientPill, state.client.label, state.client.secondary);
+        summaryClient.textContent = `${state.client.label} (${state.client.secondary || "no code"})`;
+        clientStatus.textContent = `Client selected. ${state.client.petCount} pets available in the current cache.`;
+      } else {
+        clientPill.innerHTML = "<strong>None selected</strong>";
+        summaryClient.textContent = "No client selected yet.";
+        clientStatus.textContent = "Client choices are visible from the cached list with scrolling for the rest.";
+      }
+
+      if (state.pet) {
+        const petBits = [state.pet.species, state.pet.breed, state.pet.birthdate].filter(Boolean).join(" | ");
+        setPill(petPill, formatPetLabel(state.pet), petBits || state.pet.secondary);
+        summaryPet.textContent = `${formatPetLabel(state.pet)} (${petBits || state.pet.secondary || "no details"})`;
+        summaryPetId.textContent = `#${state.pet.id}`;
+        petStatus.textContent = `Pet selected for ${state.pet.clientLabel}.`;
+      } else {
+        petPill.innerHTML = "<strong>None selected</strong>";
+        summaryPet.textContent = "No pet selected yet.";
+        summaryPetId.textContent = "No pet ID selected yet.";
+        petStatus.textContent = state.client ? "Pick a pet from the selected client." : "Pet search is scoped to the selected client.";
+      }
+    }
+
+    function updatePdfQueryPreview() {
+      summaryQuery.textContent = state.pdfQuery ? state.pdfQuery : "No PDF query entered yet.";
+    }
+
+    function filterClientsLocally(query) {
+      const normalized = query.trim().toLowerCase();
+      if (normalized.length < threshold) {
+        return state.allClients;
+      }
+      return state.allClients.filter((item) => {
+        const haystack = [item.label, item.secondary, item.id].filter(Boolean).join(" ").toLowerCase();
+        return haystack.includes(normalized);
+      });
+    }
+
+    function filterPetsLocally(query) {
+      const normalized = query.trim().toLowerCase();
+      if (normalized.length < threshold) {
+        return state.allPets;
+      }
+      return state.allPets.filter((item) => {
+        const haystack = [item.label, item.secondary, item.clientLabel, item.id, item.species, item.breed].filter(Boolean).join(" ").toLowerCase();
+        return haystack.includes(normalized);
+      });
+    }
+
+    function renderPdfResults(items) {
+      pdfResults.innerHTML = "";
+      if (!items.length) {
+        pdfResults.innerHTML = '<div class="hint">No matching source PDF pages were found.</div>';
+        return;
+      }
+      items.forEach((item) => {
+        const documentNode = document.createElement("div");
+        documentNode.className = "timeline-item";
+        const pages = (item.pages || []).map((page) => {
+          const pageLabel = page.page_label || `Page ${page.page_number ?? "?"}`;
+          const target = page.instinct_url || item.instinct_url || page.source_page_url || item.source_uri || "#";
+          const snippet = page.snippet || (page.chunks || []).map((chunk) => chunk.snippet).filter(Boolean).join(" ");
+          return `<div style="margin-top:8px"><a href="${escapeHtml(target)}" target="_blank" rel="noopener">${escapeHtml(pageLabel)}</a>${snippet ? `<div class="body">${escapeHtml(snippet)}</div>` : ""}</div>`;
+        }).join("");
+        documentNode.innerHTML = `<div class="title"><span>${escapeHtml(item.filename || item.source_name || item.document_id || "Source PDF")}</span><span class="badge">${item.score == null ? "match" : escapeHtml(Number(item.score).toFixed(2))}</span></div>${pages || `<div class="body">${escapeHtml(item.summary || "No page preview available.")}</div>`}`;
+        pdfResults.appendChild(documentNode);
+      });
+    }
+
+    async function searchPdf() {
+      if (!state.client) {
+        pdfSearchStatus.textContent = "Choose a client before searching PDFs.";
+        return;
+      }
+      state.pdfQuery = pdfQuery.value.trim();
+      updatePdfQueryPreview();
+      if (!state.pdfQuery) {
+        pdfSearchStatus.textContent = "Enter a phrase or record detail to search.";
+        return;
+      }
+      if (state.pdfController) state.pdfController.abort();
+      state.pdfController = new AbortController();
+      pdfSearch.disabled = true;
+      pdfSearchStatus.textContent = "Searching indexed source PDFs...";
+      try {
+        const payload = await api("/api/rag/documents/search", {
+          client_id: state.client.id,
+          pet_id: state.pet ? state.pet.id : undefined,
+          q: state.pdfQuery,
+          page: state.pdfPage,
+          page_size: 20,
+          sort: "relevance",
+        }, { signal: state.pdfController.signal });
+        renderPdfResults(payload.items || []);
+        const pagination = payload.pagination || {};
+        pdfSearchStatus.textContent = `${payload.items?.length || 0} source PDF result${payload.items?.length === 1 ? "" : "s"}${pagination.total == null ? "" : ` of ${pagination.total}`}.`;
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          pdfResults.innerHTML = '<div class="hint">PDF search is unavailable right now.</div>';
+          pdfSearchStatus.textContent = "PDF search is unavailable right now.";
+        }
+      } finally {
+        pdfSearch.disabled = false;
+      }
+    }
+
+    async function warmPetContext() {
+      if (!state.client || !state.pet) return;
+      try {
+        pdfQuery.disabled = false;
+        pdfSearch.disabled = false;
+        petStatus.textContent = "Context is warming in the background while you type.";
+        await api("/api/rag/context", {
+          client_id: state.client.id,
+          pet_id: state.pet.id,
+        });
+      } catch (error) {
+        console.warn("context prefetch failed", error);
+      }
+    }
+
+    async function loadClientsOnce() {
+      if (state.clientController) state.clientController.abort();
+      state.clientController = new AbortController();
+      clientStatus.textContent = "Loading full client catalog...";
+      const payload = await api("/api/options", { kind: "client" }, {
+        signal: state.clientController.signal,
+      });
+      state.allClients = payload.items || [];
+      state.clientItems = state.allClients.slice();
+      renderOptions("client", state.clientItems);
+    }
+
+    async function loadPetsOnce(clientId) {
+      if (!clientId) return;
+      if (state.petController) state.petController.abort();
+      state.petController = new AbortController();
+      petStatus.textContent = "Loading all pets for this client...";
+      const payload = await api("/api/options", {
+        kind: "pet",
+        clientId,
+      }, {
+        signal: state.petController.signal,
+      });
+      state.allPets = payload.items || [];
+      state.petItems = state.allPets.slice();
+      renderOptions("pet", state.petItems);
+    }
+
+    function setPetEnabled(enabled) {
+      petInput.disabled = !enabled;
+      petShell.dataset.disabled = enabled ? "false" : "true";
+      petInput.placeholder = enabled ? "Search pets by name or code" : "Select a client first";
+      if (!enabled) {
+        closeDropdown(petDropdown);
+      }
+    }
+
+    function clearPetSelection() {
+      state.pet = null;
+      petInput.value = "";
+      state.petQuery = "";
+      updateSelectedPreview();
+    }
+
+    function selectItem(kind, item) {
+      if (kind === "client") {
+        state.client = item;
+        clientInput.value = item.label;
+        clearPetSelection();
+        setPetEnabled(true);
+        closeDropdown(clientDropdown);
+        updateSelectedPreview();
+        loadPetsOnce(item.id).catch(() => {
+          petStatus.textContent = "Pet search is unavailable right now.";
+        });
+      } else {
+        state.pet = item;
+        petInput.value = item.label;
+        closeDropdown(petDropdown);
+        updateSelectedPreview();
+        warmPetContext();
+      }
+    }
+
+    async function fetchClients(query = "") {
+      state.clientItems = filterClientsLocally(query);
+      clientStatus.textContent = query.length >= threshold ? "Filtering loaded client catalog..." : "Showing the full client catalog...";
+      renderOptions("client", state.clientItems);
+    }
+
+    async function fetchPets(query = "") {
+      if (!state.client) {
+        renderOptions("pet", []);
+        return;
+      }
+      state.petItems = filterPetsLocally(query);
+      petStatus.textContent = query.length >= threshold ? "Filtering loaded pet list..." : "Showing the full pet list for this client...";
+      renderOptions("pet", state.petItems);
+    }
+
     const onClientInput = debounce(() => {
-      fetchClients(clientInput.value.trim());
-      clientStatus.textContent = clientInput.value.trim().length >= threshold ? "Filtering client matches..." : "Showing the default client set...";
+      state.clientQuery = clientInput.value.trim();
+      fetchClients(state.clientQuery).catch(() => {
+        clientStatus.textContent = "Client search is unavailable right now.";
+      });
     }, 150);
 
     const onPetInput = debounce(() => {
       if (!state.client) return;
-      fetchPets(petInput.value.trim());
-      petStatus.textContent = petInput.value.trim().length >= threshold ? "Filtering pet matches..." : "Showing the default pets for this client...";
+      state.petQuery = petInput.value.trim();
+      fetchPets(state.petQuery).catch(() => {
+        petStatus.textContent = "Pet search is unavailable right now.";
+      });
     }, 150);
 
     clientInput.addEventListener("input", onClientInput);
     petInput.addEventListener("input", onPetInput);
+    pdfQuery.addEventListener("input", () => {
+      state.pdfQuery = pdfQuery.value.trim();
+      updatePdfQueryPreview();
+    });
+    pdfSearch.addEventListener("click", searchPdf);
+    pdfQuery.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") searchPdf();
+    });
 
-    clientInput.addEventListener("focus", () => openDropdown(clientDropdown));
+    clientInput.addEventListener("focus", () => {
+      openDropdown(clientDropdown);
+      if (!state.clientItems.length) {
+        fetchClients(clientInput.value.trim()).catch(() => {});
+      }
+    });
     petInput.addEventListener("focus", () => {
-      if (state.client) openDropdown(petDropdown);
+      if (!state.client) return;
+      openDropdown(petDropdown);
+      if (!state.allPets.length) {
+        loadPetsOnce(state.client.id).catch(() => {});
+      } else {
+        fetchPets(petInput.value.trim()).catch(() => {});
+      }
     });
 
     document.addEventListener("click", (event) => {
@@ -750,38 +929,12 @@
       if (event.key === "Escape") closeDropdown(petDropdown);
     });
 
-    async function fetchClients(query = "") {
-      if (state.clientController) state.clientController.abort();
-      state.clientController = new AbortController();
-      clientStatus.textContent = query.length >= threshold ? "Filtering client matches..." : "Showing the default client set...";
-      const payload = await api("/api/options", { kind: "client", q: query, limit }, { signal: state.clientController.signal });
-      renderClientOptions(payload.items || []);
-    }
-
-    async function fetchPets(query = "") {
-      if (!state.client) {
-        renderPetOptions([]);
-        return;
-      }
-      if (state.petController) state.petController.abort();
-      state.petController = new AbortController();
-      petStatus.textContent = query.length >= threshold ? "Filtering pet matches..." : "Loading all pets for this client...";
-      const payload = await api("/api/options", {
-        kind: "pet",
-        clientId: state.client.id,
-        q: query,
-        limit,
-      }, {
-        signal: state.petController.signal,
-      });
-      renderPetOptions(payload.items || []);
-    }
-
     setPetEnabled(false);
-    fetchClients("").catch(() => {
+    updateSelectedPreview();
+    updatePdfQueryPreview();
+    loadClientsOnce().catch(() => {
       clientStatus.textContent = "Client search is unavailable right now.";
     });
-    updatePreview();
   </script>
 </body>
 </html>
