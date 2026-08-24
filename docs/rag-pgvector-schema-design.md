@@ -15,6 +15,10 @@ This is an MVP design for the EVH RAG track. It assumes a separate PostgreSQL da
 
 The EVH RAG vector database is separate from any operational identity store. Keep the client/patient tables out of the vector database and load them through a separate migration path.
 
+For the MariaDB-side ingestion tracker used to avoid re-pulling already handled PDFs, see:
+
+- `db/rag_document_ingestion_schema.sql`
+
 ## Design principles
 
 1. Keep the original PDF as the source of truth.
@@ -45,6 +49,7 @@ Recommended fields:
 - `ingest_status`
 - `ingest_error_code`
 - `ingest_error_detail`
+- `clinical_summary`
 
 The source row should point to the canonical PDF location and act as the parent for page, term, grouping, and summary records.
 
@@ -91,7 +96,7 @@ Recommended fields:
 - `char_end`
 - `chunk_status`
 
-This keeps vector search stable even when a page contains multiple clinically relevant sections.
+This keeps vector search stable even when a page contains multiple clinically relevant sections. The chunk rows should stay focused on searchable text and embeddings; the per-PDF `clinical_summary` belongs on the source-document row.
 
 ### 4. Term dictionary layer
 
@@ -198,11 +203,31 @@ Suggested columns:
 - `ingest_status` text not null
 - `ingest_error_code` text null
 - `ingest_error_detail` text null
+- `clinical_summary` text not null default ''
 - `created_at`, `updated_at`
 
 Unique constraint recommendation:
 
 - `unique(source_system, source_reference_id)`
+
+### MariaDB ingestion tracker
+
+The MariaDB-backed dedupe ledger uses `rag_source_document` with these key fields:
+
+- `source_system`
+- `source_reference_id`
+- `clinic_id`
+- `client_id`
+- `pet_id`
+- `source_checksum`
+- `ingest_status`
+- `pulled_at`
+- `chunked_at`
+
+Unique constraints:
+
+- `unique(source_system, source_reference_id)`
+- `unique(client_id, pet_id, source_checksum)`
 
 ### `pms_document_page`
 
