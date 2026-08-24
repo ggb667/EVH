@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS pms_source_document (
     ingest_status text NOT NULL,
     ingest_error_code text NULL,
     ingest_error_detail text NULL,
+    clinical_summary text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pms_source_document_uniq UNIQUE (source_system, source_reference_id),
@@ -208,3 +209,38 @@ CREATE INDEX IF NOT EXISTS rag_ingestion_run_source_system_idx
 
 CREATE INDEX IF NOT EXISTS rag_ingestion_run_run_status_idx
     ON rag_ingestion_run (run_status);
+
+CREATE TABLE IF NOT EXISTS rag_source_document (
+    id BIGSERIAL PRIMARY KEY,
+    source_name TEXT NOT NULL,
+    source_uri TEXT,
+    content_hash TEXT NOT NULL UNIQUE,
+    content_length INTEGER NOT NULL,
+    page_count INTEGER NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS rag_source_document_source_idx
+    ON rag_source_document (source_name, source_uri);
+
+CREATE TABLE IF NOT EXISTS rag_deferred_ocr_document (
+    id BIGSERIAL PRIMARY KEY,
+    source_name TEXT NOT NULL,
+    source_uri TEXT,
+    patient_id TEXT,
+    patient_name TEXT,
+    pdf_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    page_count INTEGER,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS rag_deferred_ocr_document_pdf_id_idx
+    ON rag_deferred_ocr_document (pdf_id);

@@ -177,6 +177,11 @@ def main() -> int:
         type=Path,
     )
     parser.add_argument(
+        "--document-schema",
+        default=Path("db/rag_document_ingestion_schema.sql"),
+        type=Path,
+    )
+    parser.add_argument(
         "--dictionary-csv",
         default=Path("db/rag_dictionary_term_seed_merged.csv"),
         type=Path,
@@ -187,14 +192,18 @@ def main() -> int:
     secret_arn = args.secret_arn
     database = args.database
     schema_path = args.schema
+    document_schema_path = args.document_schema
     dictionary_csv = args.dictionary_csv
 
     if not schema_path.exists():
         raise SystemExit(f"Schema file not found: {schema_path}")
+    if not document_schema_path.exists():
+        raise SystemExit(f"Document schema file not found: {document_schema_path}")
     if not dictionary_csv.exists():
         raise SystemExit(f"Dictionary CSV not found: {dictionary_csv}")
 
     load_schema(cluster_arn, secret_arn, database, schema_path)
+    load_schema(cluster_arn, secret_arn, database, document_schema_path)
     loaded = load_dictionary(cluster_arn, secret_arn, database, dictionary_csv)
     count = count_rows(cluster_arn, secret_arn, database, "rag_dictionary_term")
     print(f"loaded {loaded} dictionary rows")
