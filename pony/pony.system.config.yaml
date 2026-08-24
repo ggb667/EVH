@@ -1,0 +1,7 @@
+project_name: EVH
+project_root: /home/ggb66/dev/EVH
+branch: main
+launcher_prefix: EVH Pony
+agenic_system_root: /home/ggb66/dev/agenic-pony-system
+agenic_system_repo: https://github.com/ggb667/agenic-pony-system.git
+agenic_system_ref: main

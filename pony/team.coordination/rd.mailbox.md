@@ -1,0 +1,116 @@
+# RD MAILBOX
+
+## Pending Items
+- AJ update, 2026-07-01:
+  - Build the PDF/document pipeline in the separate EVH RAG Postgres schema, not the identity DB.
+  - The shared dictionary schema is already defined in `db/rag_dictionary_schema.sql`.
+  - Use the merged dictionary seed at `db/rag_dictionary_term_seed_merged.csv` for the initial dictionary load.
+  - Use the source files below for the dictionary seed inputs:
+    - Fluttershy vet taxonomy: `/home/ggb66/dev/EVH/pony/worktrees/fs/docs/instinct-vet-term-taxonomy.md`
+    - Rarity Stockroom seed: `/home/ggb66/dev/EVH/pony/worktrees/rarity/docs/aj-rag-dictionary-term-seed.csv`
+  - Recommended shared dictionary table layout:
+    - `rag_dictionary_term`
+      - `id` bigint auto-increment primary key
+      - `term_type` varchar not null, values like `medication`, `treatment`, `vet_term`, `product`
+      - `canonical_name` varchar not null
+      - `aliases` JSON not null
+      - `category` varchar null
+      - `active` boolean not null default true
+      - `priority_score` int not null default 100
+      - `confidence_score` decimal not null default 1.0000
+      - `metadata_json` JSON not null
+      - `created_at` datetime not null
+      - `updated_at` datetime not null
+      - unique key on `(term_type, canonical_name)`
+    - `rag_dictionary_term_alias`
+      - `id` bigint auto-increment primary key
+      - `dictionary_term_id` bigint not null foreign key to `rag_dictionary_term.id`
+      - `alias_text` varchar not null
+      - `alias_kind` varchar null
+      - `confidence_score` decimal not null default 1.0000
+      - `source_note` varchar null
+      - `created_at` datetime not null
+      - `updated_at` datetime not null
+      - unique key on `(dictionary_term_id, alias_text)`
+  - Suggested document and ingestion tables for the RAG pipeline:
+    - `pms_source_document`
+      - `id` uuid primary key
+      - `source_system` text not null
+      - `source_reference_id` text not null
+      - `clinic_id` text not null
+      - `client_id` text null
+      - `pet_id` text null
+      - `filename` text not null
+      - `source_uri` text not null
+      - `source_checksum` text not null
+      - `mime_type` text not null
+      - `page_count` integer not null
+      - `ingest_status` text not null
+      - `ingest_error_code` text null
+      - `ingest_error_detail` text null
+      - `created_at` timestamptz not null
+      - `updated_at` timestamptz not null
+    - `pms_document_page`
+      - `id` uuid primary key
+      - `document_id` uuid not null foreign key to `pms_source_document.id`
+      - `page_number` integer not null
+      - `page_label` text null
+      - `extracted_text` text not null
+      - `text_search` tsvector generated from `extracted_text`
+      - `extraction_method` text not null
+      - `text_quality_score` numeric null
+      - `has_ocr` boolean not null default false
+      - `source_page_link` text not null
+      - `page_status` text not null
+      - `page_error_code` text null
+      - `page_error_detail` text null
+      - `created_at` timestamptz not null
+      - `updated_at` timestamptz not null
+      - unique key on `(document_id, page_number)`
+    - `pms_page_chunk`
+      - `id` uuid primary key
+      - `page_id` uuid not null foreign key to `pms_document_page.id`
+      - `chunk_index` integer not null
+      - `chunk_text` text not null
+      - `chunk_search` tsvector generated from `chunk_text`
+      - `embedding_model` text not null
+      - `embedding` vector not null
+      - `char_start` integer not null
+      - `char_end` integer not null
+      - `chunk_status` text not null
+      - `created_at` timestamptz not null
+      - `updated_at` timestamptz not null
+      - unique key on `(page_id, chunk_index)`
+    - `rag_detected_term`
+      - `id` uuid primary key
+      - `chunk_id` uuid null foreign key to `pms_page_chunk.id`
+      - `page_id` uuid null foreign key to `pms_document_page.id`
+      - `dictionary_term_id` bigint not null foreign key to `rag_dictionary_term.id`
+      - `matched_text` text not null
+      - `normalized_text` text not null
+      - `confidence` numeric not null
+      - `location_json` jsonb not null
+      - `snippet` text null
+      - `context_classification` text null
+      - `detection_status` text not null
+      - `created_at` timestamptz not null
+      - `updated_at` timestamptz not null
+  - Search and ingestion responsibilities:
+    - PDF ingestion owns source file tracking, page extraction, chunking, and status updates.
+    - Dictionary loading owns the initial rows from the merged CSV and vet taxonomy source.
+  - Search owns exact matching, prefix matching, fragment matching, and ranking.
+  - Summary generation can consume page chunks and detected terms once ingestion is in place.
+- AJ update, 2026-07-02:
+  - Benchmark PDF chunking and embedding on demand so we can tell whether lazy vectorization is acceptable.
+  - Measure extraction time, chunk count, chunking time, embedding time, and first-search latency on a representative PDF sample.
+  - Keep PDFs in S3 and use the benchmark to decide how much of the pipeline should be precomputed versus deferred.
+- AJ update, 2026-07-02:
+  - Use managed Postgres with stop/start for the vector store.
+  - Precompute only hot documents for now until the benchmark proves on-demand chunking is acceptable.
+- AJ update, 2026-07-02:
+  - Managed Postgres instance `evh-vector-pg` is now created in AWS and provisioning.
+  - Master secret ARN: `arn:aws:secretsmanager:us-east-1:274530612068:secret:rds!db-c16642bd-0562-45c7-8e06-6ba3f39fd7fe-2PM8Uo`
+- AJ update, 2026-07-02:
+  - Managed Postgres instance `evh-vector-pg` is now available.
+  - Endpoint: `evh-vector-pg.c6hqq6a8ukmj.us-east-1.rds.amazonaws.com:5432`
+- /tell RD Managed Postgres `evh-vector-pg` is available. Endpoint: `evh-vector-pg.c6hqq6a8ukmj.us-east-1.rds.amazonaws.com:5432`. Proceed with the vector DB loading step.

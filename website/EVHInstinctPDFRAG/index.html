@@ -375,6 +375,261 @@
       font-size:13px;
       max-width:72ch;
     }
+    .chat-card{
+      display:grid;
+      gap:14px;
+      padding:18px;
+      border-radius:20px;
+      background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
+      border:1px solid var(--line);
+      box-shadow:var(--shadow);
+    }
+    .chat-head{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .chat-head h3{
+      margin:0;
+      font-size:18px;
+    }
+    .chat-head .small{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+      max-width:42ch;
+    }
+    .composer{
+      display:grid;
+      gap:10px;
+      padding:14px;
+      border-radius:18px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .composer textarea{
+      width:100%;
+      min-height:54px;
+      max-height:180px;
+      resize:none;
+      border:1px solid var(--line-strong);
+      background:rgba(10,13,25,.72);
+      color:var(--text);
+      padding:14px;
+      border-radius:14px;
+      font:inherit;
+      outline:none;
+      line-height:1.45;
+      overflow:auto;
+    }
+    .composer-actions{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .primary-button{
+      appearance:none;
+      border:0;
+      background:linear-gradient(135deg, var(--accent), #ff8fc0);
+      color:#fff;
+      font-weight:700;
+      padding:12px 18px;
+      border-radius:14px;
+      cursor:pointer;
+      box-shadow:0 10px 24px rgba(255,111,174,.22);
+    }
+    .primary-button:disabled{
+      opacity:.45;
+      cursor:not-allowed;
+      box-shadow:none;
+    }
+    .composer-hint{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+    .transcript{
+      display:grid;
+      gap:14px;
+    }
+    .turn{
+      padding:16px;
+      border-radius:18px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .turn + .turn{
+      margin-top:0;
+    }
+    .speaker{
+      color:var(--accent2);
+      font-size:11px;
+      font-weight:800;
+      letter-spacing:.14em;
+      text-transform:uppercase;
+      margin-bottom:10px;
+    }
+    .question-text,.answer-text{
+      margin:0;
+      white-space:pre-wrap;
+      line-height:1.6;
+      font-size:16px;
+    }
+    .answer-text{font-size:17px}
+    .answer-shell{
+      margin-top:12px;
+    }
+    .source-rail-wrap{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin:10px 0 12px;
+    }
+    .source-scroll-btn{
+      width:34px;
+      height:34px;
+      border-radius:999px;
+      border:1px solid var(--line-strong);
+      background:rgba(10,13,25,.72);
+      color:var(--text);
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+      flex:0 0 auto;
+    }
+    .source-scroll-btn:disabled{
+      opacity:.25;
+      cursor:not-allowed;
+    }
+    .source-rail{
+      display:flex;
+      gap:8px;
+      overflow-x:auto;
+      flex:1;
+      padding:4px 2px;
+      scroll-behavior:smooth;
+      scrollbar-width:thin;
+    }
+    .source-chip{
+      position:relative;
+      flex:0 0 auto;
+      width:42px;
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line-strong);
+      background:rgba(10,13,25,.8);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+      overflow:hidden;
+      cursor:pointer;
+    }
+    .source-chip:hover,.source-chip:focus-visible{
+      border-color:rgba(255,111,174,.6);
+      box-shadow:0 0 0 3px rgba(255,111,174,.12);
+      outline:none;
+    }
+    .source-chip img{
+      display:block;
+      width:576px;
+      height:64px;
+      transform:scale(.25);
+      transform-origin:0 0;
+      image-rendering:auto;
+      pointer-events:none;
+    }
+    .source-count{
+      position:absolute;
+      right:-6px;
+      bottom:-6px;
+      min-width:18px;
+      height:18px;
+      padding:0 4px;
+      border-radius:999px;
+      background:var(--accent2);
+      color:#111;
+      border:2px solid var(--bg);
+      font-size:10px;
+      display:grid;
+      place-items:center;
+      font-weight:700;
+    }
+    .evidence-toggle{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      border:1px solid var(--line-strong);
+      background:rgba(10,13,25,.72);
+      color:var(--text);
+      border-radius:999px;
+      padding:9px 12px;
+      cursor:pointer;
+      font:inherit;
+      margin-top:12px;
+    }
+    .evidence-panel{
+      margin-top:12px;
+      display:none;
+      border-top:1px solid rgba(255,255,255,.08);
+      padding-top:12px;
+    }
+    .evidence-panel[data-open="true"]{display:grid;gap:12px}
+    .doc-block{
+      display:grid;
+      gap:8px;
+      padding:12px;
+      border-radius:14px;
+      background:rgba(10,13,25,.58);
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .doc-title{
+      font-weight:700;
+      font-size:14px;
+      line-height:1.35;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .doc-badge{
+      color:var(--muted);
+      font-size:11px;
+      white-space:nowrap;
+    }
+    .passage{
+      padding:10px 11px;
+      border-left:3px solid rgba(124,229,255,.55);
+      background:rgba(255,255,255,.04);
+      border-radius:10px;
+      line-height:1.45;
+      font-size:14px;
+    }
+    .passage .muted{
+      display:block;
+      color:var(--muted);
+      font-size:11px;
+      margin-top:6px;
+    }
+    .term-date{color:#7ce5ff;font-weight:700}
+    .term-med{color:#ffcf6f;font-weight:700}
+    .term-proc{color:#7ef0b8;font-weight:700}
+    .term-lab{color:#ff8fc0;font-weight:700}
+    .term-anat{color:#b6a7ff;font-weight:700}
+    .turn-meta{
+      color:var(--muted);
+      font-size:12px;
+      margin-top:8px;
+    }
+    .chat-empty{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.45;
+      padding:14px;
+      border-radius:14px;
+      border:1px dashed rgba(255,255,255,.12);
+      background:rgba(255,255,255,.03);
+    }
     .pop{
       animation: rise .45s ease-out both;
     }
@@ -497,28 +752,26 @@
           </div>
         </section>
 
-        <section class="summary-card">
-          <h3>PDF search intent</h3>
-          <div class="summary-lines">
-            <div class="line">
-              <span class="k">Search query</span>
-              <span class="v" id="summary-query">No PDF query entered yet.</span>
+        <section class="chat-card">
+          <div class="chat-head">
+            <div>
+              <h3>Patient conversation</h3>
+              <div class="small">Each assistant reply gets its own source rail. Older turns stay put; new turns append below like ChatGPT.</div>
             </div>
-            <div class="line">
-              <span class="k">Next UI slice</span>
-              <span class="v">Swap this intent panel for source PDF hits and snippets once the document search endpoint lands.</span>
-            </div>
+            <div class="small" id="conversation-status">Ready for a first question.</div>
           </div>
-          <div style="margin-top:14px">
-            <label for="pdf-query" class="k" style="display:block;color:var(--muted);font-size:12px;margin-bottom:6px;">PDF search query</label>
-            <div style="display:flex;gap:8px">
-              <input id="pdf-query" type="text" placeholder="Describe the record or phrase you want to find" style="flex:1;min-width:0;border:1px solid var(--line-strong);background:rgba(10,13,25,.72);color:var(--text);padding:14px;border-radius:14px;font:inherit;outline:none;" />
-              <button id="pdf-search" type="button" class="primary-button">Search</button>
+
+          <div class="composer">
+            <textarea id="question" placeholder="Ask about this patient's records..." aria-label="Question"></textarea>
+            <div class="composer-actions">
+              <div class="composer-hint">Enter submits • Ctrl+Enter inserts a newline • Shift+Enter can insert a newline too</div>
+              <button id="ask-button" type="button" class="primary-button" disabled>Ask</button>
             </div>
-            <div class="status" style="margin-top:10px"><i></i><span id="pdf-search-status">Choose a client, enter a query, and search.</span></div>
-            <div id="pdf-results" class="timeline" style="margin-top:14px" aria-live="polite">
-              <div class="hint">Source PDF hits will appear here.</div>
-            </div>
+            <div class="status"><i></i><span id="ask-status">Select a client and patient to begin.</span></div>
+          </div>
+
+          <div id="transcript" class="transcript" aria-live="polite">
+            <div class="chat-empty">Your conversation will appear here as alternating USER and ASSISTANT turns.</div>
           </div>
         </section>
       </aside>
@@ -568,9 +821,10 @@
       allPets: [],
       clientActiveIndex: -1,
       petActiveIndex: -1,
-      pdfQuery: "",
-      pdfController: null,
-      pdfPage: 1,
+      transcript: [],
+      question: "",
+      asking: false,
+      hoverTimer: null,
     };
 
     const clientInput = document.getElementById("client-input");
@@ -586,15 +840,15 @@
     const summaryClient = document.getElementById("summary-client");
     const summaryPet = document.getElementById("summary-pet");
     const summaryPetId = document.getElementById("summary-pet-id");
-    const summaryQuery = document.getElementById("summary-query");
-    const pdfQuery = document.getElementById("pdf-query");
-    const pdfSearch = document.getElementById("pdf-search");
-    const pdfSearchStatus = document.getElementById("pdf-search-status");
-    const pdfResults = document.getElementById("pdf-results");
     const clientShell = document.getElementById("client-shell");
     const petShell = document.getElementById("pet-shell");
     const clientStatus = document.getElementById("client-status");
     const petStatus = document.getElementById("pet-status");
+    const questionBox = document.getElementById("question");
+    const askButton = document.getElementById("ask-button");
+    const askStatus = document.getElementById("ask-status");
+    const conversationStatus = document.getElementById("conversation-status");
+    const transcript = document.getElementById("transcript");
 
     const threshold = 3;
     const debounce = (fn, wait = 150) => {
@@ -631,45 +885,229 @@
       })[char]);
     }
 
-    function renderOptions(kind, items) {
-      const list = kind === "client" ? clientList : petList;
-      const note = kind === "client" ? clientNote : petNote;
-      const dropdown = kind === "client" ? clientDropdown : petDropdown;
-      const activeIndexKey = kind === "client" ? "clientActiveIndex" : "petActiveIndex";
-      const shell = kind === "client" ? clientShell : petShell;
-
-      list.innerHTML = "";
-      if (!items.length) {
-        list.innerHTML = '<div class="option" style="cursor:default"><span class="name">No matches</span><span class="meta">Try a different search term.</span></div>';
-        note.textContent = "Nothing matched this search.";
-        openDropdown(dropdown);
-        shell.classList.remove("shake");
-        void shell.offsetWidth;
-        shell.classList.add("shake");
-        state[activeIndexKey] = -1;
-        return;
-      }
-
-      note.textContent = items.length ? `${items.length} matches loaded.` : "No matches loaded.";
-      openDropdown(dropdown);
-      items.forEach((item, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "option";
-        button.setAttribute("role", "option");
-        button.setAttribute("aria-selected", "false");
-        button.innerHTML = `
-          <div class="primary">
-            <span class="name">${escapeHtml(kind === "pet" ? formatPetLabel(item) : item.label)}</span>
-            <span class="badge">${escapeHtml(kind === "client" ? `${item.petCount} pets` : item.breed || item.species || "pet")}</span>
-          </div>
-          <div class="meta">${escapeHtml(kind === "pet" ? [item.clientLabel, `ID #${item.id}`, item.secondary].filter(Boolean).join(" • ") : item.secondary || "")}</div>
-        `;
-        button.addEventListener("click", () => selectItem(kind, item));
-        list.appendChild(button);
+    function highlightTerms(text, terms = []) {
+      let out = escapeHtml(text);
+      const patterns = [
+        { re: /\b\d{1,2}\/\d{1,2}\/\d{2,4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?)?\b/gi, cls: "term-date" },
+        { re: /\b\d{4}-\d{2}-\d{2}\b/g, cls: "term-date" },
+        { re: /\b(?:dental|cleaning|extraction|procedure|surgery|vaccine|vaccination|lab|cbc|x-ray|diagnos(?:is|es)|medication|prescription|anesthesia)\b/gi, cls: "term-proc" },
+        { re: /\b(?:mg|mcg|ml|g|units?|bpm|mmhg|%|hgb|wbc|rbc|platelets?)\b/gi, cls: "term-lab" },
+        { re: /\b(?:pain|swelling|fever|cough|nausea|rash|infection|fracture|tooth|jaw|gum|mouth)\b/gi, cls: "term-med" },
+      ];
+      patterns.forEach(({ re, cls }) => {
+        out = out.replace(re, (match) => `<span class="${cls}">${match}</span>`);
       });
+      for (const term of terms) {
+        const safe = String(term || "").trim();
+        if (!safe) continue;
+        const re = new RegExp(`(${safe.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+        out = out.replace(re, `<span class="term-anat">$1</span>`);
+      }
+      return out;
+    }
 
-      state[activeIndexKey] = 0;
+    function iconIndexFor(documentType) {
+      const type = String(documentType || "other").toLowerCase();
+      const map = {
+        medical_notes: 0,
+        antech_lab: 1,
+        labs: 1,
+        prescriptions: 2,
+        vaccine_history: 3,
+        communications: 4,
+        transaction_history: 5,
+        diagnoses: 6,
+        wellness: 7,
+        other: 8,
+      };
+      return map[type] ?? 8;
+    }
+
+    function documentUrlFor(doc) {
+      return doc.source_page_url || doc.document_url || "";
+    }
+
+    function normalizeSources(data) {
+      const sources = Array.isArray(data?.sources) ? data.sources : [];
+      return sources.map((source, sourceIndex) => {
+        const evidence = Array.isArray(source.evidence) ? source.evidence : [];
+        const grouped = evidence.map((item, evidenceIndex) => ({
+          text: String(item?.text || ""),
+          confidence: item?.confidence,
+          source_page_url: item?.source_page_url || source.source_page_url || source.document_url || "",
+          terms: Array.isArray(item?.terms) ? item.terms : [],
+          page_number: item?.page_number,
+          _key: `${source.document_id || sourceIndex}:${evidenceIndex}`,
+        }));
+        return {
+          document_id: String(source.document_id || `doc-${sourceIndex}`),
+          document_name: String(source.document_name || source.document_title || "Unknown document"),
+          document_type: String(source.document_type || "other"),
+          document_url: String(source.document_url || ""),
+          evidence: grouped,
+        };
+      });
+    }
+
+    function missingContractFields(data) {
+      const missing = [];
+      if (!Array.isArray(data?.sources)) missing.push("sources[]");
+      for (const [index, source] of (Array.isArray(data?.sources) ? data.sources : []).entries()) {
+        if (!source.document_id) missing.push(`sources[${index}].document_id`);
+        if (!source.document_name) missing.push(`sources[${index}].document_name`);
+        if (!source.document_type) missing.push(`sources[${index}].document_type`);
+        if (!source.document_url) missing.push(`sources[${index}].document_url`);
+        if (!Array.isArray(source.evidence)) missing.push(`sources[${index}].evidence[]`);
+        for (const [eIndex, evidence] of (Array.isArray(source.evidence) ? source.evidence : []).entries()) {
+          if (!evidence.text) missing.push(`sources[${index}].evidence[${eIndex}].text`);
+          if (evidence.confidence == null) missing.push(`sources[${index}].evidence[${eIndex}].confidence`);
+          if (!evidence.source_page_url) missing.push(`sources[${index}].evidence[${eIndex}].source_page_url`);
+          if (!Array.isArray(evidence.terms)) missing.push(`sources[${index}].evidence[${eIndex}].terms[]`);
+        }
+      }
+      return [...new Set(missing)];
+    }
+
+    function renderSourceRail(turn, turnIndex) {
+      const wrap = document.createElement("div");
+      wrap.className = "source-rail-wrap";
+      const prev = document.createElement("button");
+      prev.type = "button";
+      prev.className = "source-scroll-btn";
+      prev.textContent = "‹";
+      prev.setAttribute("aria-label", "Scroll sources left");
+      const next = document.createElement("button");
+      next.type = "button";
+      next.className = "source-scroll-btn";
+      next.textContent = "›";
+      next.setAttribute("aria-label", "Scroll sources right");
+      const rail = document.createElement("div");
+      rail.className = "source-rail";
+      rail.tabIndex = 0;
+      rail.setAttribute("aria-label", "Source documents");
+      const docs = turn.sources || [];
+      docs.forEach((doc, docIndex) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "source-chip";
+        chip.title = doc.document_name;
+        chip.__doc = doc;
+        const img = document.createElement("img");
+        img.alt = doc.document_name;
+        img.src = "./PDFIcons.png";
+        img.style.objectFit = "none";
+        img.style.objectPosition = `${-(iconIndexFor(doc.document_type) * 64)}px 0px`;
+        chip.appendChild(img);
+        if ((doc.evidence || []).length > 1) {
+          const count = document.createElement("span");
+          count.className = "source-count";
+          count.textContent = doc.evidence.length;
+          chip.appendChild(count);
+        }
+        chip.addEventListener("mouseenter", () => showPopover(chip, doc, turnIndex));
+        chip.addEventListener("mouseleave", scheduleHidePopover);
+        chip.addEventListener("focus", () => showPopover(chip, doc, turnIndex));
+        chip.addEventListener("click", () => openSource(doc));
+        rail.appendChild(chip);
+      });
+      const updateButtons = () => {
+        prev.disabled = rail.scrollLeft <= 0;
+        next.disabled = rail.scrollLeft + rail.clientWidth >= rail.scrollWidth - 1;
+      };
+      prev.addEventListener("click", () => rail.scrollBy({ left: -260, behavior: "smooth" }));
+      next.addEventListener("click", () => rail.scrollBy({ left: 260, behavior: "smooth" }));
+      rail.addEventListener("scroll", updateButtons);
+      rail.addEventListener("wheel", (event) => {
+        if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+          rail.scrollLeft += event.deltaY;
+          event.preventDefault();
+          updateButtons();
+        }
+      }, { passive: false });
+      requestAnimationFrame(updateButtons);
+      wrap.append(prev, rail, next);
+      return wrap;
+    }
+
+    function renderEvidencePanel(turn) {
+      const panel = document.createElement("div");
+      panel.className = "evidence-panel";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "evidence-toggle";
+      toggle.textContent = "Show evidence ▾";
+      toggle.addEventListener("click", () => {
+        const open = panel.dataset.open === "true";
+        panel.dataset.open = open ? "false" : "true";
+        toggle.textContent = open ? "Show evidence ▾" : "Hide evidence ▴";
+      });
+      const docs = turn.sources || [];
+      docs.forEach((doc) => {
+        const block = document.createElement("div");
+        block.className = "doc-block";
+        const header = document.createElement("div");
+        header.className = "doc-title";
+        header.innerHTML = `<span>${escapeHtml(doc.document_name)}</span><span class="doc-badge">${escapeHtml(doc.document_type)}</span>`;
+        block.appendChild(header);
+        (doc.evidence || []).forEach((evidence) => {
+          const passage = document.createElement("div");
+          passage.className = "passage";
+          passage.innerHTML = `${highlightTerms(evidence.text, evidence.terms)}${isFinite(evidence.confidence) ? `<span class="muted">Relevance: ${(Number(evidence.confidence) * 100).toFixed(1)}%</span>` : ""}`;
+          block.appendChild(passage);
+        });
+        const meta = document.createElement("div");
+        meta.className = "turn-meta";
+        meta.textContent = doc.document_url ? "Click the icon to open the source document." : "No document URL provided; click-through uses the page URL when available.";
+        block.appendChild(meta);
+        panel.appendChild(block);
+      });
+      panel.dataset.open = "false";
+      return { toggle, panel };
+    }
+
+    function showPopover(anchor, doc) {
+      clearTimeout(state.hoverTimer);
+      let pop = document.getElementById("popover");
+      if (!pop) {
+        pop = document.createElement("div");
+        pop.id = "popover";
+        pop.className = "summary-card pop";
+        pop.style.position = "fixed";
+        pop.style.zIndex = "1000";
+        pop.style.maxWidth = "460px";
+        document.body.appendChild(pop);
+      }
+      pop.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "doc-title";
+      title.style.marginBottom = "8px";
+      title.innerHTML = `<span>${escapeHtml(doc.document_name)}</span><span class="doc-badge">${escapeHtml(doc.document_type)}</span>`;
+      pop.appendChild(title);
+      (doc.evidence || []).forEach((evidence) => {
+        const passage = document.createElement("div");
+        passage.className = "passage";
+        passage.innerHTML = `${highlightTerms(evidence.text, evidence.terms)}${isFinite(evidence.confidence) ? `<span class="muted">Relevance: ${(Number(evidence.confidence) * 100).toFixed(1)}%</span>` : ""}`;
+        pop.appendChild(passage);
+      });
+      const rect = anchor.getBoundingClientRect();
+      pop.style.left = `${Math.min(window.innerWidth - 20, rect.left)}px`;
+      pop.style.top = `${Math.min(window.innerHeight - 20, rect.bottom + 10)}px`;
+      pop.dataset.open = "true";
+      pop.onmouseenter = () => clearTimeout(state.hoverTimer);
+      pop.onmouseleave = scheduleHidePopover;
+    }
+
+    function scheduleHidePopover() {
+      clearTimeout(state.hoverTimer);
+      state.hoverTimer = window.setTimeout(() => {
+        const pop = document.getElementById("popover");
+        if (pop) pop.remove();
+      }, 100);
+    }
+
+    function openSource(doc) {
+      const target = documentUrlFor(doc);
+      if (target) window.open(target, "_blank", "noopener");
     }
 
     function updateSelectedPreview() {
@@ -695,10 +1133,7 @@
         summaryPetId.textContent = "No pet ID selected yet.";
         petStatus.textContent = state.client ? "Pick a pet from the selected client." : "Pet search is scoped to the selected client.";
       }
-    }
-
-    function updatePdfQueryPreview() {
-      summaryQuery.textContent = state.pdfQuery ? state.pdfQuery : "No PDF query entered yet.";
+      updateAskButton();
     }
 
     function filterClientsLocally(query) {
@@ -723,113 +1158,90 @@
       });
     }
 
-    function renderPdfResults(items) {
-      pdfResults.innerHTML = "";
+    function renderOptions(kind, items) {
+      const list = kind === "client" ? clientList : petList;
+      const note = kind === "client" ? clientNote : petNote;
+      const dropdown = kind === "client" ? clientDropdown : petDropdown;
+      const activeIndexKey = kind === "client" ? "clientActiveIndex" : "petActiveIndex";
+      const shell = kind === "client" ? clientShell : petShell;
+      list.innerHTML = "";
       if (!items.length) {
-        pdfResults.innerHTML = '<div class="hint">No matching source PDF pages were found.</div>';
+        list.innerHTML = '<div class="option" style="cursor:default"><span class="name">No matches</span><span class="meta">Try a different search term.</span></div>';
+        note.textContent = "Nothing matched this search.";
+        openDropdown(dropdown);
+        shell.classList.remove("shake");
+        void shell.offsetWidth;
+        shell.classList.add("shake");
+        state[activeIndexKey] = -1;
         return;
       }
+      note.textContent = `${items.length} matches loaded.`;
+      openDropdown(dropdown);
       items.forEach((item) => {
-        const documentNode = document.createElement("div");
-        documentNode.className = "timeline-item";
-        const pages = (item.pages || []).map((page) => {
-          const pageLabel = page.page_label || `Page ${page.page_number ?? "?"}`;
-          const target = page.instinct_url || item.instinct_url || page.source_page_url || item.source_uri || "#";
-          const snippet = page.snippet || (page.chunks || []).map((chunk) => chunk.snippet).filter(Boolean).join(" ");
-          return `<div style="margin-top:8px"><a href="${escapeHtml(target)}" target="_blank" rel="noopener">${escapeHtml(pageLabel)}</a>${snippet ? `<div class="body">${escapeHtml(snippet)}</div>` : ""}</div>`;
-        }).join("");
-        documentNode.innerHTML = `<div class="title"><span>${escapeHtml(item.filename || item.source_name || item.document_id || "Source PDF")}</span><span class="badge">${item.score == null ? "match" : escapeHtml(Number(item.score).toFixed(2))}</span></div>${pages || `<div class="body">${escapeHtml(item.summary || "No page preview available.")}</div>`}`;
-        pdfResults.appendChild(documentNode);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "option";
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", "false");
+        button.innerHTML = `
+          <div class="primary">
+            <span class="name">${escapeHtml(kind === "pet" ? formatPetLabel(item) : item.label)}</span>
+            <span class="badge">${escapeHtml(kind === "client" ? `${item.petCount} pets` : item.breed || item.species || "pet")}</span>
+          </div>
+          <div class="meta">${escapeHtml(kind === "pet" ? [item.clientLabel, `ID #${item.id}`, item.secondary].filter(Boolean).join(" • ") : item.secondary || "")}</div>
+        `;
+        button.addEventListener("click", () => selectItem(kind, item));
+        list.appendChild(button);
       });
+      state[activeIndexKey] = 0;
     }
 
-    async function searchPdf() {
-      if (!state.client) {
-        pdfSearchStatus.textContent = "Choose a client before searching PDFs.";
+    function renderTranscript() {
+      transcript.innerHTML = "";
+      if (!state.transcript.length) {
+        transcript.innerHTML = '<div class="chat-empty">Your conversation will appear here as alternating USER and ASSISTANT turns.</div>';
+        conversationStatus.textContent = "Ready for a first question.";
         return;
       }
-      state.pdfQuery = pdfQuery.value.trim();
-      updatePdfQueryPreview();
-      if (!state.pdfQuery) {
-        pdfSearchStatus.textContent = "Enter a phrase or record detail to search.";
-        return;
-      }
-      if (state.pdfController) state.pdfController.abort();
-      state.pdfController = new AbortController();
-      pdfSearch.disabled = true;
-      pdfSearchStatus.textContent = "Searching indexed source PDFs...";
-      try {
-        const payload = await api("/api/rag/documents/search", {
-          client_id: state.client.id,
-          pet_id: state.pet ? state.pet.id : undefined,
-          q: state.pdfQuery,
-          page: state.pdfPage,
-          page_size: 20,
-          sort: "relevance",
-        }, { signal: state.pdfController.signal });
-        renderPdfResults(payload.items || []);
-        const pagination = payload.pagination || {};
-        pdfSearchStatus.textContent = `${payload.items?.length || 0} source PDF result${payload.items?.length === 1 ? "" : "s"}${pagination.total == null ? "" : ` of ${pagination.total}`}.`;
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          pdfResults.innerHTML = '<div class="hint">PDF search is unavailable right now.</div>';
-          pdfSearchStatus.textContent = "PDF search is unavailable right now.";
+      state.transcript.forEach((turn, index) => {
+        const turnNode = document.createElement("section");
+        turnNode.className = "turn";
+        if (turn.role === "user") {
+          turnNode.innerHTML = `<div class="speaker">USER</div><p class="question-text">${escapeHtml(turn.text)}</p>`;
+        } else {
+          const sourceRail = renderSourceRail(turn, index);
+          const evidenceUI = renderEvidencePanel(turn);
+          turnNode.innerHTML = `<div class="speaker">ASSISTANT</div><p class="answer-text">${escapeHtml(turn.text)}</p>`;
+          turnNode.appendChild(sourceRail);
+          turnNode.appendChild(evidenceUI.toggle);
+          turnNode.appendChild(evidenceUI.panel);
+          if (turn.elapsed_seconds != null) {
+            const meta = document.createElement("div");
+            meta.className = "turn-meta";
+            meta.textContent = `Completed in ${turn.elapsed_seconds}s`;
+            turnNode.appendChild(meta);
+          }
+          if (turn.missing?.length) {
+            const missing = document.createElement("div");
+            missing.className = "turn-meta";
+            missing.textContent = `Missing contract fields: ${turn.missing.join(", ")}`;
+            turnNode.appendChild(missing);
+          }
         }
-      } finally {
-        pdfSearch.disabled = false;
-      }
-    }
-
-    async function warmPetContext() {
-      if (!state.client || !state.pet) return;
-      try {
-        pdfQuery.disabled = false;
-        pdfSearch.disabled = false;
-        petStatus.textContent = "Context is warming in the background while you type.";
-        await api("/api/rag/context", {
-          client_id: state.client.id,
-          pet_id: state.pet.id,
-        });
-      } catch (error) {
-        console.warn("context prefetch failed", error);
-      }
-    }
-
-    async function loadClientsOnce() {
-      if (state.clientController) state.clientController.abort();
-      state.clientController = new AbortController();
-      clientStatus.textContent = "Loading full client catalog...";
-      const payload = await api("/api/options", { kind: "client" }, {
-        signal: state.clientController.signal,
+        transcript.appendChild(turnNode);
       });
-      state.allClients = payload.items || [];
-      state.clientItems = state.allClients.slice();
-      renderOptions("client", state.clientItems);
+      conversationStatus.textContent = `${state.transcript.filter((turn) => turn.role === "assistant").length} assistant reply${state.transcript.filter((turn) => turn.role === "assistant").length === 1 ? "" : "s"} in this conversation.`;
+      transcript.scrollTop = transcript.scrollHeight;
     }
 
-    async function loadPetsOnce(clientId) {
-      if (!clientId) return;
-      if (state.petController) state.petController.abort();
-      state.petController = new AbortController();
-      petStatus.textContent = "Loading all pets for this client...";
-      const payload = await api("/api/options", {
-        kind: "pet",
-        clientId,
-      }, {
-        signal: state.petController.signal,
-      });
-      state.allPets = payload.items || [];
-      state.petItems = state.allPets.slice();
-      renderOptions("pet", state.petItems);
+    function updateAskButton() {
+      askButton.disabled = !state.client || !state.pet || !questionBox.value.trim() || state.asking;
     }
 
-    function setPetEnabled(enabled) {
-      petInput.disabled = !enabled;
-      petShell.dataset.disabled = enabled ? "false" : "true";
-      petInput.placeholder = enabled ? "Search pets by name or code" : "Select a client first";
-      if (!enabled) {
-        closeDropdown(petDropdown);
-      }
+    function resetConversation() {
+      state.transcript = [];
+      renderTranscript();
+      updateAskButton();
     }
 
     function clearPetSelection() {
@@ -837,6 +1249,7 @@
       petInput.value = "";
       state.petQuery = "";
       updateSelectedPreview();
+      resetConversation();
     }
 
     function selectItem(kind, item) {
@@ -855,7 +1268,7 @@
         petInput.value = item.label;
         closeDropdown(petDropdown);
         updateSelectedPreview();
-        warmPetContext();
+        resetConversation();
       }
     }
 
@@ -875,6 +1288,83 @@
       renderOptions("pet", state.petItems);
     }
 
+    async function loadClientsOnce() {
+      if (state.clientController) state.clientController.abort();
+      state.clientController = new AbortController();
+      clientStatus.textContent = "Loading full client catalog...";
+      const payload = await api("/api/options", { kind: "client" }, { signal: state.clientController.signal });
+      state.allClients = payload.items || [];
+      state.clientItems = state.allClients.slice();
+      renderOptions("client", state.clientItems);
+    }
+
+    async function loadPetsOnce(clientId) {
+      if (!clientId) return;
+      if (state.petController) state.petController.abort();
+      state.petController = new AbortController();
+      petStatus.textContent = "Loading all pets for this client...";
+      const payload = await api("/api/options", { kind: "pet", clientId }, { signal: state.petController.signal });
+      state.allPets = payload.items || [];
+      state.petItems = state.allPets.slice();
+      renderOptions("pet", state.petItems);
+    }
+
+    function setPetEnabled(enabled) {
+      petInput.disabled = !enabled;
+      petShell.dataset.disabled = enabled ? "false" : "true";
+      petInput.placeholder = enabled ? "Search pets by name or code" : "Select a client first";
+      if (!enabled) closeDropdown(petDropdown);
+    }
+
+    async function askQuestion() {
+      const text = questionBox.value.trim();
+      if (!state.client || !state.pet || !text || state.asking) return;
+      state.asking = true;
+      askButton.disabled = true;
+      askStatus.textContent = "Searching records and preparing the reply...";
+      state.transcript.push({ role: "user", text });
+      renderTranscript();
+      try {
+        const payload = await api("/api/rag/answer", {}, {
+          method: "POST",
+          body: JSON.stringify({
+            client_id: state.client.id,
+            pet_id: state.pet.id,
+            question: text,
+          }),
+        });
+        const assistant = {
+          role: "assistant",
+          text: payload.answer || "",
+          elapsed_seconds: payload.elapsed_seconds,
+          sources: normalizeSources(payload),
+          missing: missingContractFields(payload),
+        };
+        state.transcript.push(assistant);
+        questionBox.value = "";
+        autoGrow(questionBox);
+        askStatus.textContent = "Answer added to the conversation.";
+      } catch (error) {
+        state.transcript.push({
+          role: "assistant",
+          text: `I couldn’t fetch an answer right now: ${error.message}`,
+          elapsed_seconds: null,
+          sources: [],
+          missing: [],
+        });
+        askStatus.textContent = "The request failed.";
+      } finally {
+        state.asking = false;
+        renderTranscript();
+        updateAskButton();
+      }
+    }
+
+    function autoGrow(el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    }
+
     const onClientInput = debounce(() => {
       state.clientQuery = clientInput.value.trim();
       fetchClients(state.clientQuery).catch(() => {
@@ -892,46 +1382,49 @@
 
     clientInput.addEventListener("input", onClientInput);
     petInput.addEventListener("input", onPetInput);
-    pdfQuery.addEventListener("input", () => {
-      state.pdfQuery = pdfQuery.value.trim();
-      updatePdfQueryPreview();
-    });
-    pdfSearch.addEventListener("click", searchPdf);
-    pdfQuery.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") searchPdf();
-    });
-
     clientInput.addEventListener("focus", () => {
       openDropdown(clientDropdown);
-      if (!state.clientItems.length) {
-        fetchClients(clientInput.value.trim()).catch(() => {});
-      }
+      if (!state.clientItems.length) fetchClients(clientInput.value.trim()).catch(() => {});
     });
     petInput.addEventListener("focus", () => {
       if (!state.client) return;
       openDropdown(petDropdown);
-      if (!state.allPets.length) {
-        loadPetsOnce(state.client.id).catch(() => {});
-      } else {
-        fetchPets(petInput.value.trim()).catch(() => {});
-      }
+      if (!state.allPets.length) loadPetsOnce(state.client.id).catch(() => {});
+      else fetchPets(petInput.value.trim()).catch(() => {});
     });
-
     document.addEventListener("click", (event) => {
       if (!clientShell.contains(event.target)) closeDropdown(clientDropdown);
       if (!petShell.contains(event.target)) closeDropdown(petDropdown);
     });
-
     clientInput.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeDropdown(clientDropdown);
     });
     petInput.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeDropdown(petDropdown);
     });
+    questionBox.addEventListener("input", () => {
+      autoGrow(questionBox);
+      updateAskButton();
+    });
+    questionBox.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.ctrlKey) {
+        event.preventDefault();
+        const start = questionBox.selectionStart;
+        const end = questionBox.selectionEnd;
+        questionBox.value = `${questionBox.value.slice(0, start)}\n${questionBox.value.slice(end)}`;
+        questionBox.selectionStart = questionBox.selectionEnd = start + 1;
+        autoGrow(questionBox);
+        updateAskButton();
+      } else if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey) {
+        event.preventDefault();
+        askQuestion();
+      }
+    });
+    askButton.addEventListener("click", askQuestion);
 
     setPetEnabled(false);
     updateSelectedPreview();
-    updatePdfQueryPreview();
+    renderTranscript();
     loadClientsOnce().catch(() => {
       clientStatus.textContent = "Client search is unavailable right now.";
     });

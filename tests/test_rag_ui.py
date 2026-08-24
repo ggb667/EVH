@@ -4,12 +4,20 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+import sys
 
 import pytest
 
 import scripts.rag_ui.catalog as rag_catalog
 from scripts.rag_ui.catalog import load_catalog
-from scripts.rag_ui.lambda_app import lambda_handler
+from scripts.rag_ui.lambda_app import (
+    _answer_prompt,
+    _execute_planned_retrieval,
+    _parse_planner_json,
+    _plan_retrieval,
+    _retrieval_planner_prompt,
+    lambda_handler,
+)
 
 
 def write_sample_catalog(path: Path) -> None:
@@ -318,6 +326,147 @@ def test_lambda_serves_rag_answer_with_citations(monkeypatch):
 
 
 @pytest.mark.unit
+def test_retrieval_planner_prompt_includes_all_intents_and_rules():
+    prompt = _retrieval_planner_prompt("When was the last dental?")
+    text = prompt["content"][0]["text"]
+    assert "SEMANTIC" in text
+    assert "RECENT" in text
+    assert "TIMELINE" in text
+    assert "EXHAUSTIVE" in text
+    assert "DOCUMENT" in text
+    assert "Do not answer the question" in text
+    assert "Return only JSON" in text
+
+
+@pytest.mark.unit
+def test_answer_prompt_is_evidence_only_and_mentions_grouping():
+    prompt = _answer_prompt("What happened at the last visit?", sources=[{"document_id": "doc-1"}])
+    text = prompt["content"][0]["text"]
+    assert "careful patient-record assistant" in text
+    assert "Use only the provided retrieved evidence" in text
+    assert "If the retrieved evidence is grouped by document" in text
+    assert "Do not invent facts" in text
+
+
+@pytest.mark.unit
+def test_parse_planner_json_handles_single_and_multi_requests():
+    single = _parse_planner_json('{"retrieval":"RECENT","query":"last dental"}')
+    multi = _parse_planner_json('{"requests":[{"retrieval":"RECENT","query":"last dental"},{"retrieval":"TIMELINE","query":"dental history"}]}')
+    assert single == {"retrieval": "RECENT", "query": "last dental"}
+    assert multi == {
+        "requests": [
+            {"retrieval": "RECENT", "query": "last dental"},
+            {"retrieval": "TIMELINE", "query": "dental history"},
+        ]
+    }
+
+
+@pytest.mark.unit
+def test_plan_retrieval_uses_langchain_planner_json(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        content = '{"retrieval":"DOCUMENT","query":"March lab report"}'
+
+    class FakeChat:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return FakeResponse()
+
+    class FakeHuman:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeSystem:
+        def __init__(self, content):
+            self.content = content
+
+    fake_openai = __import__("types").SimpleNamespace(ChatOpenAI=FakeChat)
+    fake_messages = __import__("types").SimpleNamespace(HumanMessage=FakeHuman, SystemMessage=FakeSystem)
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_messages)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._openai_api_key", lambda: "test-key")
+
+    plan = _plan_retrieval("What does the March lab report say?")
+
+    assert plan == {"retrieval": "DOCUMENT", "query": "March lab report"}
+    assert captured["kwargs"]["temperature"] == 0
+    assert any("strict retrieval planner" in getattr(msg, "content", "") for msg in captured["messages"])
+    assert any("What does the March lab report say?" in getattr(msg, "content", "") for msg in captured["messages"])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,expected_intent",
+    [
+        ("When was the last dental?", "RECENT"),
+        ("What happened at the last visit?", "RECENT"),
+        ("What dates did we see him?", "TIMELINE"),
+        ("Has he ever had seizures?", "EXHAUSTIVE"),
+        ("What does the March lab report say?", "DOCUMENT"),
+        ("Find the most relevant record about allergies.", "SEMANTIC"),
+    ],
+)
+def test_planner_prompt_covers_question_to_intent_examples(question, expected_intent):
+    prompt = _retrieval_planner_prompt(question)
+    text = prompt["content"][0]["text"]
+    assert expected_intent in text
+
+
+@pytest.mark.unit
+def test_execute_planned_retrieval_routes_single_and_multi_requests(monkeypatch):
+    planned = {}
+
+    def fake_plan(question, sources=None):
+        planned["question"] = question
+        return {
+            "requests": [
+                {"retrieval": "RECENT", "query": "recent dental"},
+                {"retrieval": "TIMELINE", "query": "dental history"},
+            ]
+        }
+
+    def fake_retrieve(intent, query, client_id, pet_id):
+        return (
+            [{"document_id": f"{intent}:{query}", "page_number": 1, "snippet": query}],
+            {f"{intent.lower()}_seconds": 0.01},
+        )
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fake_plan)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
+
+    hits, timing, plan = _execute_planned_retrieval("Compare his last dental with the previous one.", "client-1", "pet-1")
+    assert planned["question"] == "Compare his last dental with the previous one."
+    assert plan["requests"][0]["retrieval"] == "RECENT"
+    assert plan["requests"][1]["retrieval"] == "TIMELINE"
+    assert [hit["document_id"] for hit in hits] == ["RECENT:recent dental", "TIMELINE:dental history"]
+    assert timing["recent_seconds"] == 0.01
+    assert timing["timeline_seconds"] == 0.01
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,expected_rule",
+    [
+        ("When was the last dental?", "latest / last / most recent"),
+        ("What happened at the last visit?", "latest / last / most recent"),
+        ("What dates did we see him?", "dates / timeline / history over time"),
+        ("Has he ever had seizures?", "ever / all / every / complete history / list all"),
+        ("What does the March lab report say?", "specific report / date / document type"),
+        ("Find the most relevant record about allergies.", "most relevant record"),
+    ],
+)
+def test_question_intent_matrix_is_represented(question, expected_rule):
+    # This is a planner contract smoke test: the examples in the prompt
+    # must keep the intent labels visible to the model.
+    prompt = _retrieval_planner_prompt(question)["content"][0]["text"]
+    assert expected_rule in prompt
+
+
+@pytest.mark.unit
 def test_index_uses_load_once_and_local_filtering():
     html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
     assert "loadClientsOnce" in html
@@ -330,10 +479,11 @@ def test_index_uses_load_once_and_local_filtering():
 
 @pytest.mark.integration
 def test_live_client_filter_performance_budget():
-    real_catalog_path = Path("/home/ggb66/dev/EVH/scripts/instinct_bulk_cache.json")
-    assert real_catalog_path.exists(), "expected the real Instinct client catalog to be present"
+    required = ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")
+    missing = [name for name in required if not __import__("os").environ.get(name)]
+    assert not missing, f"live PostgreSQL credentials are required for this integration test: {', '.join(missing)}"
 
-    catalog = load_catalog(str(real_catalog_path))
+    catalog = load_catalog()
     all_labels = [item["label"] for item in catalog.search_clients("")]
     assert all_labels, "expected a populated real client catalog"
     assert any(label == "Deborah Burchill" for label in all_labels), "expected Deborah Burchill in the real catalog"

@@ -232,6 +232,178 @@ def _extract_output_text(payload: dict) -> str:
     return "\n".join(parts).strip()
 
 
+def _retrieval_planner_prompt(question: str) -> dict:
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "input_text",
+                "text": (
+                    "You are a strict retrieval planner for a patient-record RAG system.\n"
+                    "Choose the smallest sufficient retrieval intent from this menu:\n"
+                    "- SEMANTIC — retrieve the most relevant chunks by meaning\n"
+                    "- RECENT — retrieve the newest relevant chunks first\n"
+                    "- TIMELINE — retrieve date-bearing records in chronological order\n"
+                    "- EXHAUSTIVE — retrieve broadly and completely when completeness matters\n"
+                    "- DOCUMENT — retrieve a specific document, date, or document type\n\n"
+                    "Rules:\n"
+                    "- Do not invent SQL, table names, indexes, limits, or implementation details.\n"
+                    "- Do not answer the question.\n"
+                    "- Choose the retrieval intent based on the user's information need.\n"
+                    "- If the user asks for ever / all / every / complete history / list all, use EXHAUSTIVE.\n"
+                    "- If the user asks for the latest / last / most recent, use RECENT.\n"
+                    "- If the user asks for dates / timeline / history over time, use TIMELINE.\n"
+                    "- If the user points to a specific report / date / document type, use DOCUMENT.\n"
+                    "- If the user asks for the most relevant record without requiring completeness or chronology, use SEMANTIC.\n"
+                    "- If one intent is not enough, return multiple requests.\n\n"
+                    "Return only JSON. The output shape must be either:\n"
+                    '{"retrieval":"SEMANTIC","query":"..."}\n'
+                    "or:\n"
+                    '{"requests":[{"retrieval":"RECENT","query":"..."},{"retrieval":"TIMELINE","query":"..."}]}\n'
+                ),
+            }
+        ],
+    }
+
+
+def _answer_prompt(question: str, sources: list[dict]) -> dict:
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "input_text",
+                "text": (
+                    "You are a careful patient-record assistant.\n"
+                    "Use only the provided retrieved evidence to answer the user's question.\n"
+                    "Do not invent facts. Do not use outside knowledge if the evidence does not support it.\n"
+                    "If the evidence does not contain the answer, say so plainly.\n"
+                    "Prefer the retrieved evidence over memory or guessin'.\n"
+                    "When useful, mention the source document(s) and page number(s).\n"
+                    "Keep the answer concise and clinically useful.\n"
+                    "If the retrieved evidence is grouped by document, respect that grouping.\n"
+                    "If multiple documents support the answer, synthesize them clearly.\n\n"
+                    "Return JSON with answer text only, not markdown."
+                ),
+            }
+        ],
+    }
+
+
+def _parse_planner_json(payload_text: str) -> dict:
+    data = json.loads(payload_text)
+    if isinstance(data, dict) and "requests" in data:
+        requests = []
+        for req in data.get("requests") or []:
+            if not isinstance(req, dict):
+                continue
+            retrieval = str(req.get("retrieval") or "").strip().upper()
+            query = str(req.get("query") or "").strip()
+            if retrieval and query:
+                requests.append({"retrieval": retrieval, "query": query})
+        return {"requests": requests}
+    retrieval = str(data.get("retrieval") or "").strip().upper()
+    query = str(data.get("query") or "").strip()
+    if not retrieval or not query:
+        raise ValueError("planner output missing retrieval or query")
+    return {"retrieval": retrieval, "query": query}
+
+
+def _plan_retrieval(question: str, sources: list[dict] | None = None) -> dict:
+    prompt = _retrieval_planner_prompt(question)
+    prompt["content"][0]["text"] += f"\n\nUser question: {question}\n"
+    if sources:
+        prompt["content"][0]["text"] += f"Retrieved source count hint: {len(sources)}\n"
+    payload = {
+        "model": _llm_model(),
+        "input": [prompt],
+        "temperature": 0,
+        "max_output_tokens": 300,
+        "text": {"format": {"type": "json_object"}},
+    }
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(
+            model=_llm_model(),
+            temperature=0,
+            api_key=_openai_api_key(),
+        )
+        response = model.invoke([
+            SystemMessage(content=prompt["content"][0]["text"]),
+            HumanMessage(content=question),
+        ])
+        text = getattr(response, "content", "")
+        if isinstance(text, str) and text.strip():
+            return _parse_planner_json(text.strip())
+    except Exception:
+        pass
+
+    request = urllib_request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {_openai_api_key()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=90) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    text = _extract_output_text(data)
+    if not text:
+        raise RuntimeError(f"OpenAI planner response missing text: {json.dumps(data)[:500]}")
+    return _parse_planner_json(text)
+
+
+def _retrieve_with_intent(intent: str, query: str, client_id: str, pet_id: str | None) -> tuple[list[dict], dict[str, float]]:
+    intent = str(intent or "").strip().upper()
+    handlers = {
+        "SEMANTIC": _retrieve_semantic,
+        "RECENT": _retrieve_recent,
+        "TIMELINE": _retrieve_timeline,
+        "EXHAUSTIVE": _retrieve_exhaustive,
+        "DOCUMENT": _retrieve_document,
+    }
+    handler = handlers.get(intent, _retrieve_semantic)
+    return handler(query, client_id, pet_id)
+
+
+def _retrieve_semantic(query: str, client_id: str, pet_id: str | None) -> tuple[list[dict], dict[str, float]]:
+    return search_pet_chunks_by_embedding(client_id, pet_id, query)
+
+
+def _retrieve_recent(query: str, client_id: str, pet_id: str | None) -> tuple[list[dict], dict[str, float]]:
+    return search_pet_chunks_by_embedding(client_id, pet_id, query)
+
+
+def _retrieve_timeline(query: str, client_id: str, pet_id: str | None) -> tuple[list[dict], dict[str, float]]:
+    return search_pet_chunks_by_embedding(client_id, pet_id, query)
+
+
+def _retrieve_exhaustive(query: str, client_id: str, pet_id: str | None) -> tuple[list[dict], dict[str, float]]:
+    return search_pet_chunks_by_embedding(client_id, pet_id, query)
+
+
+def _retrieve_document(query: str, client_id: str, pet_id: str | None) -> tuple[list[dict], dict[str, float]]:
+    return search_pet_chunks_by_embedding(client_id, pet_id, query)
+
+
+def _execute_planned_retrieval(question: str, client_id: str, pet_id: str) -> tuple[list[dict], dict[str, float], dict]:
+    plan = _plan_retrieval(question, sources=[])
+    if "requests" in plan:
+        merged_hits: list[dict] = []
+        merged_timing: dict[str, float] = {}
+        for request in plan.get("requests") or []:
+            hits, timing = _retrieve_with_intent(request["retrieval"], request["query"], client_id, pet_id or None)
+            merged_hits.extend(hits)
+            for key, value in timing.items():
+                merged_timing[key] = max(merged_timing.get(key, 0.0), float(value))
+        return merged_hits, merged_timing, plan
+    hits, timing = _retrieve_with_intent(plan["retrieval"], plan["query"], client_id, pet_id or None)
+    return hits, timing, plan
+
+
 def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
     context_text = _summarize_context_chunks(context_chunks)
     prompt = (
@@ -462,7 +634,7 @@ def _serve_rag_answer(event: dict) -> dict:
     try:
         patient_documents = load_patient_documents(client_id, pet_id or None)
         retrieval_started = time.perf_counter()
-        context_chunks, retrieval_timing = search_pet_chunks_by_embedding(client_id, pet_id or None, question)
+        context_chunks, retrieval_timing, retrieval_plan = _execute_planned_retrieval(question, client_id, pet_id)
         retrieval_elapsed = time.perf_counter() - retrieval_started
         print(f"[RAG_TIMING] retrieval_seconds={retrieval_elapsed:.3f} chunks={len(context_chunks)}")
         llm_started = time.perf_counter()
@@ -480,6 +652,7 @@ def _serve_rag_answer(event: dict) -> dict:
             "retrieval": {
                 "matched_documents": len({hit["document_id"] for hit in context_chunks}),
                 "matched_pages": len(context_chunks),
+                "plan": retrieval_plan,
             },
             "timing": {
                 "retrieval_seconds": round(retrieval_elapsed, 3),
