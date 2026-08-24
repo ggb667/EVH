@@ -77,6 +77,28 @@ def test_llm_cannot_invent_reference(monkeypatch):
     assert result["retrieval"]["evidence_chunks"] == 1
 
 
+def test_answer_instructions_require_clinical_procedure_distinction(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(app, "load_patient_documents", lambda c, p: [{"document_id": "doc1", "title": "record.pdf", "source_uri": "https://example.test/r.pdf"}])
+    monkeypatch.setattr(app, "search_patient_chunks", lambda c, p, q: [{"document_id":"doc1","document_title":"record.pdf","page_number":3,"page_label":"Page 3","source_page_url":"https://example.test/r.pdf#page=3","snippet":"evidence"}])
+
+    def fake_openai(path, payload):
+        captured["payload"] = payload
+        return {"output_text": json.dumps({"answer": "plain answer", "references": [{"document_id": "doc1", "page_number": 3}]})}
+
+    monkeypatch.setattr(app, "_openai_json", fake_openai)
+    result = app.answer_question("c", "p", "When was the last dental cleaning?")
+    prompt = json.loads(captured["payload"]["input"][0]["content"][0]["text"])
+    instructions = prompt["instructions"]
+    assert "plain answer text only" in instructions
+    assert "completed/performed clinical procedures" in instructions
+    assert "scheduled/planned procedures" in instructions
+    assert "client communications" in instructions
+    assert "later communication mentioning a dental procedure" in instructions
+    assert result["answer"] == "plain answer"
+    assert result["references"] == [{"document_id":"doc1","document_title":"record.pdf","page_number":3,"page_label":"Page 3","source_page_url":"https://example.test/r.pdf#page=3"}]
+
+
 def test_answer_question_sends_only_first_50_unique_chunks_and_preserves_urls(monkeypatch):
     captured = {}
     monkeypatch.setattr(app, "load_patient_documents", lambda c, p: [{"document_id": "doc0", "title": "record.pdf", "source_uri": "https://example.test/r.pdf"}])
@@ -125,6 +147,7 @@ def test_answer_question_sends_only_first_50_unique_chunks_and_preserves_urls(mo
     evidence = json.loads(captured["payload"]["input"][0]["content"][0]["text"])["retrieved_evidence"]
     assert len(evidence) == 50
     assert "doc51" not in {e["document_id"] for e in evidence}
+    assert "source_page_url" in evidence[0]
 
 
 def test_api_ask_requires_selection_and_question():

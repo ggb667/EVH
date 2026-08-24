@@ -170,6 +170,7 @@ def _openai_json(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 def _openai_responses_with_retry(payload: dict[str, Any], *, initial_max_output_tokens: int, retry_max_output_tokens: int) -> dict[str, Any]:
     payload1 = dict(payload)
     payload1["max_output_tokens"] = initial_max_output_tokens
+    print("openai.responses.start", flush=True)
     data = _openai_json("responses", payload1)
     if data.get("status") == "incomplete":
         details = data.get("incomplete_details") or {}
@@ -183,6 +184,7 @@ def _openai_responses_with_retry(payload: dict[str, Any], *, initial_max_output_
                     raise RuntimeError(
                         "OpenAI Responses API returned incomplete output twice due to max_output_tokens"
                     )
+    print("openai.responses.done", flush=True)
     return data
 
 
@@ -378,8 +380,12 @@ def answer_question(client_id: str, patient_id: str, question: str) -> dict[str,
         "retrieved_evidence": evidence,
         "instructions": (
             "Answer only from retrieved_evidence. Return JSON with keys answer and references. "
+            "The answer field must contain plain answer text only: no Markdown links, no citations, no source names, and no page references. "
             "references must be an array of objects containing document_id and page_number, and may only cite evidence actually used. "
-            "Do not invent URLs or document IDs. If evidence is insufficient, say so in answer."
+            "Do not invent URLs or document IDs. If evidence is insufficient, say so in answer. "
+            "When asked when something occurred, distinguish completed/performed clinical procedures from scheduled/planned procedures, recommendations, reminders, estimates, and client communications. "
+            "A completed procedure must be supported by clinical evidence that it was actually performed. "
+            "Do not treat a later communication mentioning a dental procedure as evidence that the procedure itself was completed later."
         ),
     }
     data = _openai_responses_with_retry({
