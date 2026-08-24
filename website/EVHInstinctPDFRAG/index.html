@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVH Patient Record Assistant</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color:#18212b;background:#f5f7f9}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1050px;margin:36px auto;padding:0 20px}h1{margin:0 0 6px}.sub{color:#66717d;margin:0 0 26px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:white;border:1px solid #dfe4e8;border-radius:12px;padding:18px;box-shadow:0 2px 10px #0000000a}.field{position:relative}label{display:block;font-weight:650;margin-bottom:7px}input,textarea,button{font:inherit}input,textarea{width:100%;padding:11px 12px;border:1px solid #bdc6ce;border-radius:8px;background:white}textarea{min-height:110px;resize:vertical}.menu{position:absolute;z-index:5;top:100%;left:0;right:0;max-height:320px;overflow:auto;background:white;border:1px solid #cfd6dc;border-radius:8px;box-shadow:0 8px 24px #0002;display:none}.option{padding:9px 11px;cursor:pointer;border-bottom:1px solid #eef1f3}.option:hover{background:#f0f4f7}.secondary{font-size:12px;color:#6b7580}.status{font-size:13px;color:#68737e;margin-top:6px}.ask{margin-top:18px}button{padding:10px 16px;border:0;border-radius:8px;background:#263746;color:white;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.answer{white-space:pre-wrap;line-height:1.5}.refs a{display:block;margin:8px 0;color:#285f8f}.hidden{display:none}@media(max-width:700px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><main class="wrap">
+<div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">
+<h1>Patient Record Assistant</h1>
+<div class="status" style="margin:0;font-size:12px;line-height:1.2;color:#7a8490">Build: __EVH_BUILD_STAMP__</div>
+</div><p class="sub">Select a client and patient, then ask a question about the patient's indexed records.</p>
+<div class="grid">
+ <section class="card field"><label for="client-input">Client</label><input id="client-input" autocomplete="off" placeholder="Type a client name"><div id="client-menu" class="menu"></div><div id="client-status" class="status">Loading clients…</div></section>
+ <section class="card field"><label for="pet-input">Patient</label><input id="pet-input" autocomplete="off" disabled placeholder="Select a client first"><div id="pet-menu" class="menu"></div><div id="pet-status" class="status"></div></section>
+</div>
+<section class="card ask"><label for="question">Question</label><textarea id="question" placeholder="Example: When was the last dental cleaning?"></textarea><button id="ask" disabled>Ask</button><span id="ask-status" class="status"></span></section>
+<section id="result" class="card ask hidden"><h2>Answer</h2><div id="answer" class="answer"></div><div id="refs" class="refs"></div></section>
+</main>
+<script>
+const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
+const threshold=3;
+const state={clients:[],pets:[],client:null,pet:null};
+const $=id=>document.getElementById(id);
+const normalize=v=>String(v??"").toLowerCase().trim();
+function localFilter(items,query,fields){const q=normalize(query);if(q.length<threshold)return items;return items.filter(item=>fields.some(f=>normalize(item[f]).includes(q))||normalize(fields.map(f=>item[f]).join(" ")).includes(q));}
+function render(menu,items,onPick){menu.innerHTML="";items.slice(0,100).forEach(item=>{const el=document.createElement("div");el.className="option";el.innerHTML=`<div>${escapeHtml(item.label)}</div><div class="secondary">${escapeHtml(item.secondary||"")}</div>`;el.onclick=()=>onPick(item);menu.appendChild(el)});menu.style.display=items.length?"block":"none";}
+function escapeHtml(v){const d=document.createElement("div");d.textContent=String(v??"");return d.innerHTML;}
+async function api(path,options={}){const url=path.startsWith("http")?path:`${API_BASE}${path}`;const r=await fetch(url,{headers:{"content-type":"application/json",...(options.headers||{})},...options});if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);return r.json();}
+function updateAsk(){ $("ask").disabled=!(state.client&&state.pet&&$("question").value.trim()); }
+function chooseClient(item){state.client=item;state.pet=null;$("client-input").value=item.label;$("client-menu").style.display="none";$("pet-input").value="";$("pet-input").disabled=true;$("pet-status").textContent="Loading patients…";updateAsk();api(`/api/options?kind=pet&clientId=${encodeURIComponent(item.id)}`).then(p=>{state.pets=p.items||[];$("pet-input").disabled=false;$("pet-input").placeholder="Type a patient name";$("pet-status").textContent=`${state.pets.length} patients loaded`;}).catch(e=>$("pet-status").textContent=`Unable to load patients: ${e.message}`);}
+function choosePet(item){state.pet=item;$("pet-input").value=item.label;$("pet-menu").style.display="none";$("pet-status").textContent=[item.species,item.breed].filter(Boolean).join(" · ");updateAsk();}
+$("client-input").addEventListener("input",e=>{state.client=null;state.pet=null;$("pet-input").disabled=true;const q=e.target.value;const items=localFilter(state.clients,q,["label","secondary","id"]);render($("client-menu"),items,chooseClient);$("client-status").textContent=q.length<threshold?`${state.clients.length} clients loaded`:`${items.length} matches`;updateAsk();});
+$("client-input").addEventListener("focus",()=>render($("client-menu"),localFilter(state.clients,$("client-input").value,["label","secondary","id"]),chooseClient));
+$("pet-input").addEventListener("input",e=>{state.pet=null;const items=localFilter(state.pets,e.target.value,["label","secondary","id","species","breed"]);render($("pet-menu"),items,choosePet);$("pet-status").textContent=e.target.value.length<threshold?`${state.pets.length} patients loaded`:`${items.length} matches`;updateAsk();});
+$("pet-input").addEventListener("focus",()=>render($("pet-menu"),localFilter(state.pets,$("pet-input").value,["label","secondary","id","species","breed"]),choosePet));
+$("question").addEventListener("input",updateAsk);
+$("ask").onclick=async()=>{const question=$("question").value.trim();$("ask").disabled=true;$("ask-status").textContent="Searching patient records and answering…";try{const data=await api("/api/rag/answer",{method:"POST",body:JSON.stringify({client_id:state.client.id,pet_id:state.pet.id,question})});$("answer").textContent=data.answer||"";$("refs").innerHTML="";(data.references||[]).forEach(ref=>{const a=document.createElement("a");a.textContent=`${ref.document_title} — ${ref.page_label}`;if(ref.source_page_url){a.href=ref.source_page_url;a.target="_blank";a.rel="noopener";}$("refs").appendChild(a)});$("result").classList.remove("hidden");$("ask-status").textContent=`Completed in ${data.elapsed_seconds??"?"}s`; }catch(e){$("ask-status").textContent=`Unable to answer: ${e.message}`;}finally{updateAsk();}};
+document.addEventListener("click",e=>{if(!e.target.closest(".field")){$("client-menu").style.display="none";$("pet-menu").style.display="none";}});
+api("/api/options?kind=client").then(data=>{state.clients=data.items||[];$("client-status").textContent=`${state.clients.length} clients loaded`;}).catch(e=>$("client-status").textContent=`Unable to load clients: ${e.message}`);
+</script></body></html>
