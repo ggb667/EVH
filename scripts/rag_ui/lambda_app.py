@@ -67,6 +67,19 @@ def _openai_api_key() -> str:
     return secret
 
 
+def _secret_string_json(secret_arn: str) -> dict:
+    client = boto3.client("secretsmanager")
+    response = client.get_secret_value(SecretId=secret_arn)
+    secret = str(response.get("SecretString") or "").strip()
+    if not secret:
+        raise RuntimeError(f"Secrets Manager returned an empty secret for {secret_arn!r}.")
+    try:
+        data = json.loads(secret)
+    except json.JSONDecodeError:
+        return {"secret_string": secret}
+    return data if isinstance(data, dict) else {"secret_string": secret}
+
+
 def _llm_model() -> str:
     return os.environ.get("RAG_UI_LLM_MODEL", "gpt-5.1").strip() or "gpt-5.1"
 
@@ -83,10 +96,26 @@ def _instinct_token() -> str:
     token = os.environ.get("TOKEN", "").strip()
     if token:
         return token
-    client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
+    secret_arn = os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip()
+    if not secret_arn:
+        raise RuntimeError("INSTINCT_CLIENT_SECRET_ARN is required for document URLs.")
+    secret_data = _secret_string_json(secret_arn)
+    client_id = str(
+        secret_data.get("client_id")
+        or secret_data.get("clientId")
+        or secret_data.get("INSTINCT_CLIENT_ID")
+        or secret_data.get("username")
+        or ""
+    ).strip()
+    client_secret = str(
+        secret_data.get("client_secret")
+        or secret_data.get("clientSecret")
+        or secret_data.get("INSTINCT_CLIENT_SECRET")
+        or secret_data.get("password")
+        or ""
+    ).strip()
     if not client_id or not client_secret:
-        raise RuntimeError("Instinct client credentials are required for document URLs.")
+        raise RuntimeError("Instinct secret is missing client_id/client_secret fields.")
     token_url = f"{_instinct_base_url()}/v1/auth/token"
     payload = urlencode({
         "grant_type": "client_credentials",
@@ -478,12 +507,15 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
         "Return a concise answer and mention source page numbers in parentheses.\n\n"
         f"Question: {question}\n\nRetrieved context:\n{context_text}"
     )
+    model_name = _llm_model()
+    started = time.perf_counter()
+    print(f"[RAG_TIMING] answer_model={model_name} answer_request_start", flush=True)
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
         from langchain_openai import ChatOpenAI
 
         model = ChatOpenAI(
-            model=_llm_model(),
+            model=model_name,
             temperature=0.2,
             api_key=_openai_api_key(),
         )
@@ -493,12 +525,18 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
         ])
         text = getattr(response, "content", "")
         if isinstance(text, str) and text.strip():
+            elapsed = time.perf_counter() - started
+            print(
+                "[RAG_TIMING] answer_api_elapsed_seconds="
+                f"{elapsed:.3f} status=ok incomplete_reason=none output_tokens=unknown total_answer_elapsed_seconds={elapsed:.3f}",
+                flush=True,
+            )
             return text.strip()
     except Exception:
         pass
 
     payload = {
-        "model": _llm_model(),
+        "model": model_name,
         "input": [
             {
                 "role": "system",
@@ -536,8 +574,23 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
         method="POST",
     )
     with urllib_request.urlopen(request, timeout=90) as response:
+        api_started = time.perf_counter()
         data = json.loads(response.read().decode("utf-8"))
+        api_elapsed = time.perf_counter() - api_started
     text = _extract_output_text(data)
+    status = str(data.get("status") or "ok")
+    incomplete_reason = str((data.get("incomplete_details") or {}).get("reason") or data.get("incomplete_reason") or "none")
+    output_tokens = (
+        ((data.get("usage") or {}).get("output_tokens"))
+        or ((data.get("usage") or {}).get("output_tokens_details") or {}).get("reasoning_tokens")
+        or "unknown"
+    )
+    total_elapsed = time.perf_counter() - started
+    print(
+        "[RAG_TIMING] answer_api_elapsed_seconds="
+        f"{api_elapsed:.3f} status={status} incomplete_reason={incomplete_reason} output_tokens={output_tokens} total_answer_elapsed_seconds={total_elapsed:.3f}",
+        flush=True,
+    )
     if isinstance(text, str) and text.strip():
         return text.strip()
     raise RuntimeError(f"OpenAI response did not include output text: {json.dumps(data)[:500]}")

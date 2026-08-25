@@ -14,6 +14,7 @@ from scripts.rag_ui.lambda_app import (
     _answer_prompt,
     _deterministic_retrieval_plan,
     _execute_planned_retrieval,
+    _instinct_token,
     _parse_planner_json,
     _plan_retrieval,
     _retrieval_planner_prompt,
@@ -523,6 +524,68 @@ def test_execute_planned_retrieval_falls_back_to_planner_for_ambiguous_question(
     assert plan == {"retrieval": "SEMANTIC", "query": "allergy question"}
     assert hits[0]["snippet"] == "allergy question"
     assert timing["total_seconds"] == 0.02
+
+
+@pytest.mark.unit
+def test_instinct_token_loads_from_secrets_manager(monkeypatch):
+    captured = {}
+
+    class FakeSecrets:
+        def get_secret_value(self, SecretId):
+            captured["SecretId"] = SecretId
+            return {"SecretString": json.dumps({"client_id": "instinct-id", "client_secret": "instinct-secret"})}
+
+    monkeypatch.delenv("TOKEN", raising=False)
+    monkeypatch.setenv("INSTINCT_CLIENT_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:secret:instinct")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.boto3", __import__("types").SimpleNamespace(client=lambda name: FakeSecrets()))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_base_url", lambda: "https://partner.instinctvet.test")
+
+    # We only need to prove the secret is read; short-circuit the token POST response.
+    def fake_urlopen(request, timeout=30):
+        class Resp:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def read(self):
+                return json.dumps({"access_token": "token-123"}).encode("utf-8")
+        return Resp()
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.urllib_request.urlopen", fake_urlopen)
+
+    assert _instinct_token() == "token-123"
+    assert captured["SecretId"] == "arn:aws:secretsmanager:us-east-1:123456789012:secret:instinct"
+
+
+@pytest.mark.unit
+def test_call_openai_answer_logs_timing(monkeypatch, capsys):
+    class FakeResponse:
+        content = "Dental answer"
+
+    class FakeChat:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+        def invoke(self, messages):
+            return FakeResponse()
+
+    class FakeHuman:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeSystem:
+        def __init__(self, content):
+            self.content = content
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._llm_model", lambda: "gpt-test")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._openai_api_key", lambda: "openai-test")
+    monkeypatch.setitem(sys.modules, "langchain_openai", __import__("types").SimpleNamespace(ChatOpenAI=FakeChat))
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", __import__("types").SimpleNamespace(HumanMessage=FakeHuman, SystemMessage=FakeSystem))
+
+    from scripts.rag_ui.lambda_app import _call_openai_answer
+    assert _call_openai_answer("What is the last dental cleaning date?", [{"document_title": "Doc", "page_label": "Page 1", "source_page_url": "", "snippet": "10/14/2021"}]) == "Dental answer"
+    out = capsys.readouterr().out
+    assert "answer_model=gpt-test" in out
+    assert "answer_request_start" in out
 
 
 @pytest.mark.unit
