@@ -327,7 +327,7 @@ def test_lambda_serves_rag_answer_with_citations(monkeypatch):
 
 @pytest.mark.integration
 def test_document_page_redirects_via_cached_instinct_url(monkeypatch):
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._resolve_cached_instinct_url", lambda document_id, page_number, force_refresh=False: "https://instinct.test/file.pdf?page=1")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._resolve_cached_instinct_url", lambda document_id, page_number, force_refresh=False: "https://instinct.test/file.pdf#page=1")
 
     response = lambda_handler(
         {
@@ -337,7 +337,72 @@ def test_document_page_redirects_via_cached_instinct_url(monkeypatch):
         }
     )
     assert response["statusCode"] == 302
-    assert response["headers"]["location"] == "https://instinct.test/file.pdf?page=1"
+    assert response["headers"]["location"] == "https://instinct.test/file.pdf#page=1"
+
+
+@pytest.mark.unit
+def test_document_page_redirect_uses_instinct_url_without_appending_page(monkeypatch):
+    captured = {}
+
+    def fake_resolve(document_id, page_number, force_refresh=False):
+        captured["document_id"] = document_id
+        captured["page_number"] = page_number
+        return "https://instinct.test/file.pdf?signature=abc123"
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._resolve_cached_instinct_url", fake_resolve)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/documents/doc-1/pages/34",
+            "queryStringParameters": {"page": "34"},
+            "requestContext": {"http": {"method": "GET"}},
+        }
+    )
+    assert response["statusCode"] == 302
+    assert response["headers"]["location"] == "https://instinct.test/file.pdf?signature=abc123"
+    assert captured == {"document_id": "doc-1", "page_number": 34}
+    assert "page=34" not in response["headers"]["location"]
+
+
+@pytest.mark.unit
+def test_resolve_cached_instinct_url_appends_page_fragment_not_query(monkeypatch):
+    monkeypatch.setenv("RAG_UI_INSTINCT_URL_TTL_SECONDS", "1800")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._create_chart_file_url", lambda chart_id, inline=True: "https://instinct.test/file.pdf?signature=abc123")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._verify_instinct_url", lambda url, timeout=30: True)
+
+    from scripts.rag_ui.lambda_app import _resolve_cached_instinct_url
+
+    url = _resolve_cached_instinct_url("doc-1", 34, force_refresh=True)
+    assert url == "https://instinct.test/file.pdf?signature=abc123#page=34"
+    assert "?signature=abc123#page=34" in url
+    assert "&page=34" not in url
+
+
+@pytest.mark.unit
+def test_verify_instinct_url_accepts_get_after_head_failure(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(request, timeout=30):
+        calls.append(request.method)
+        if request.method == "HEAD":
+            raise OSError("HEAD failed")
+        return FakeResponse()
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.urllib_request.urlopen", fake_urlopen)
+
+    from scripts.rag_ui.lambda_app import _verify_instinct_url
+
+    assert _verify_instinct_url("https://instinct.test/file.pdf?signature=abc123") is True
+    assert calls == ["HEAD", "GET"]
 
 
 @pytest.mark.unit

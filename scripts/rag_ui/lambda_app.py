@@ -196,12 +196,11 @@ def _resolve_cached_instinct_url(document_id: str, page_number: int, *, force_re
 
     url = _create_chart_file_url(key[0], inline=True)
     expires_at = now + float(os.environ.get("RAG_UI_INSTINCT_URL_TTL_SECONDS", "1800").strip() or 1800)
-    separator = "&" if "?" in url else "?"
-    url = f"{url}{separator}page={key[1]}"
     if not _verify_instinct_url(url):
         raise RuntimeError(f"Instinct URL did not verify for document_id={key[0]!r} page={key[1]}")
-    _INSTINCT_URL_CACHE[key] = _InstinctUrlCacheEntry(url=url, expires_at=expires_at)
-    return url
+    fragment_url = f"{url}#page={key[1]}"
+    _INSTINCT_URL_CACHE[key] = _InstinctUrlCacheEntry(url=fragment_url, expires_at=expires_at)
+    return fragment_url
 
 
 def _summarize_context_chunks(chunks: list[dict]) -> str:
