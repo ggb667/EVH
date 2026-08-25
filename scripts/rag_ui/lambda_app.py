@@ -5,6 +5,8 @@ import os
 import subprocess
 import time
 import traceback
+import re
+from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode
 from pathlib import Path
 from urllib import request as urllib_request
@@ -15,6 +17,15 @@ from scripts.rag_ui.catalog import load_catalog, load_patient_documents, query_o
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_PATH = Path(__file__).resolve().parents[2] / "website" / "EVHInstinctPDFRAG" / "index.html"
+
+
+@dataclass(frozen=True)
+class _InstinctUrlCacheEntry:
+    url: str
+    expires_at: float
+
+
+_INSTINCT_URL_CACHE: dict[tuple[str, int], _InstinctUrlCacheEntry] = {}
 
 
 def _app_version() -> str:
@@ -130,6 +141,40 @@ mutation createChartFileUrl($id: ID!, $inline: Boolean) {
     return url
 
 
+def _verify_instinct_url(url: str, timeout: int = 30) -> bool:
+    if not url:
+        return False
+    for method in ("HEAD", "GET"):
+        try:
+            request = urllib_request.Request(url, method=method)
+            with urllib_request.urlopen(request, timeout=timeout) as response:
+                status = getattr(response, "status", 200)
+                if 200 <= int(status) < 400:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def _resolve_cached_instinct_url(document_id: str, page_number: int, *, force_refresh: bool = False) -> str:
+    key = (str(document_id or "").strip(), int(page_number or 1))
+    if not key[0]:
+        raise ValueError("document_id is required")
+    now = time.time()
+    cached = _INSTINCT_URL_CACHE.get(key)
+    if cached and not force_refresh and cached.expires_at > now and _verify_instinct_url(cached.url):
+        return cached.url
+
+    url = _create_chart_file_url(key[0], inline=True)
+    expires_at = now + float(os.environ.get("RAG_UI_INSTINCT_URL_TTL_SECONDS", "1800").strip() or 1800)
+    separator = "&" if "?" in url else "?"
+    url = f"{url}{separator}page={key[1]}"
+    if not _verify_instinct_url(url):
+        raise RuntimeError(f"Instinct URL did not verify for document_id={key[0]!r} page={key[1]}")
+    _INSTINCT_URL_CACHE[key] = _InstinctUrlCacheEntry(url=url, expires_at=expires_at)
+    return url
+
+
 def _summarize_context_chunks(chunks: list[dict]) -> str:
     lines: list[str] = []
     for idx, item in enumerate(chunks[:8], start=1):
@@ -151,38 +196,11 @@ def _extract_citations(chunks: list[dict]) -> list[dict]:
             "document_id": hit["document_id"],
             "page_number": hit["page_number"],
             "source_page_url": hit["source_page_url"],
-            "instinct_url": f"{_create_chart_file_url(hit['document_id'], inline=True)}{'&' if '?' in _create_chart_file_url(hit['document_id'], inline=True) else '?'}page={hit['page_number']}",
             "snippet": hit["snippet"],
             "confidence": hit.get("confidence", 0.0),
         }
         for hit in chunks
     ]
-
-
-def _build_document_url_map(chunks: list[dict]) -> list[dict]:
-    seen: set[tuple[str, int, str]] = set()
-    urls: list[dict] = []
-    for hit in chunks:
-        document_id = str(hit.get("document_id") or "").strip()
-        page_number = int(hit.get("page_number") or 1)
-        source_page_url = str(hit.get("source_page_url") or "").strip()
-        key = (document_id, page_number, source_page_url)
-        if not document_id or key in seen:
-            continue
-        seen.add(key)
-        instinct_url = _create_chart_file_url(document_id, inline=True)
-        separator = "&" if "?" in instinct_url else "?"
-        instinct_url = f"{instinct_url}{separator}page={page_number}"
-        urls.append(
-            {
-                "document_id": document_id,
-                "page_number": page_number,
-                "source_page_url": source_page_url,
-                "instinct_url": instinct_url,
-                "document_title": hit.get("document_title"),
-            }
-        )
-    return urls
 
 
 def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict]:
@@ -197,16 +215,12 @@ def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict
             continue
         seen.add(key)
         doc = by_id.get(document_id, {})
-        instinct_url = _create_chart_file_url(document_id, inline=True)
-        separator = "&" if "?" in instinct_url else "?"
-        instinct_url = f"{instinct_url}{separator}page={page_number}"
         references.append(
             {
                 "document_id": document_id,
                 "page_number": page_number,
                 "document_title": doc.get("document_title") or hit.get("document_title"),
                 "source_uri": doc.get("source_uri") or hit.get("source_page_url"),
-                "instinct_url": instinct_url,
             }
         )
     return references
@@ -308,6 +322,58 @@ def _parse_planner_json(payload_text: str) -> dict:
     return {"retrieval": retrieval, "query": query}
 
 
+def _normalize_question_for_routing(question: str) -> str:
+    return re.sub(r"\s+", " ", str(question or "").strip().lower())
+
+
+def _strip_question_prefix(question: str) -> str:
+    text = _normalize_question_for_routing(question)
+    for _ in range(4):
+        updated = re.sub(r"^(what|when|which|who|how|is|are|was|were|does|do|did|can|could|would|should)\s+", "", text)
+        updated = re.sub(r"^(is there|are there|was there|were there|do we have|did we have)\s+", "", updated)
+        updated = re.sub(r"^(please\s+|tell me\s+|show me\s+|find\s+|what about\s+)", "", updated)
+        updated = re.sub(r"^(the|a|an|this|that)\s+", "", updated)
+        updated = re.sub(r"\s+(please|thanks?|thank you|say)$", "", updated)
+        updated = updated.strip(" ?.,")
+        if updated == text:
+            break
+        text = updated
+    return text.strip(" ?.,")
+
+
+def _deterministic_retrieval_plan(question: str) -> dict | None:
+    text = _normalize_question_for_routing(question)
+    if not text:
+        return None
+
+    document_patterns = [
+        r"\b(march|april|may|june|july|august|september|october|november|december|january|february)\b.*\b(report|lab|labs|note|notes|record|records|chart|invoice|estimate|consent|vaccine|vaccination|dental|medical)\b",
+        r"\b(report|lab report|lab results|medical notes|medical note|dental chart|dental record|vaccine record|vaccination record|invoice|estimate|consent form|document)\b",
+        r"\bthis\s+(report|lab|note|record|chart|invoice|estimate|document)\b",
+    ]
+    if any(re.search(pattern, text) for pattern in document_patterns):
+        return {"retrieval": "DOCUMENT", "query": _strip_question_prefix(question)}
+
+    if re.search(r"\b(what\s+dates|date[s]? did we|when did we|timeline|history over time|visit history|major events)\b", text):
+        return {"retrieval": "TIMELINE", "query": _strip_question_prefix(question)}
+
+    if re.search(r"\b(ever|all|every|complete history|list all|how many times|has he ever|has she ever|have they ever)\b", text):
+        return {"retrieval": "EXHAUSTIVE", "query": _strip_question_prefix(question)}
+
+    if re.search(r"\b(last|latest|most recent|most recently)\b", text):
+        subject = _strip_question_prefix(question)
+        subject = re.sub(r"\b(last|latest|most recent|most recently)\b", "", subject).strip(" ?.,")
+        subject = re.sub(r"\b(date|date of)\b", "", subject).strip(" ?.,")
+        subject = re.sub(r"\b(the|a|an)\b", "", subject).strip(" ?.,")
+        subject = re.sub(r"\s+", " ", subject).strip()
+        return {"retrieval": "RECENT", "query": subject or _strip_question_prefix(question)}
+
+    if re.search(r"\b(most relevant|relevant record|find|search for|tell me about|what about|show me|does he have|did he have|has he had)\b", text):
+        return {"retrieval": "SEMANTIC", "query": _strip_question_prefix(question)}
+
+    return None
+
+
 def _plan_retrieval(question: str, sources: list[dict] | None = None) -> dict:
     prompt = _retrieval_planner_prompt(question)
     prompt["content"][0]["text"] += f"\n\nUser question: {question}\n"
@@ -390,7 +456,7 @@ def _retrieve_document(query: str, client_id: str, pet_id: str | None) -> tuple[
 
 
 def _execute_planned_retrieval(question: str, client_id: str, pet_id: str) -> tuple[list[dict], dict[str, float], dict]:
-    plan = _plan_retrieval(question, sources=[])
+    plan = _deterministic_retrieval_plan(question) or _plan_retrieval(question, sources=[])
     if "requests" in plan:
         merged_hits: list[dict] = []
         merged_timing: dict[str, float] = {}
@@ -646,7 +712,6 @@ def _serve_rag_answer(event: dict) -> dict:
             "answer": answer,
             "context": context_chunks,
             "patient_documents": patient_documents,
-            "document_urls": _build_document_url_map(patient_documents or context_chunks),
             "references": _build_reference_map(patient_documents, context_chunks),
             "citations": _extract_citations(context_chunks),
             "retrieval": {
@@ -725,7 +790,7 @@ def _serve_document_page(event: dict) -> dict:
     except ValueError:
         page_number = 1
     try:
-        target = _create_chart_file_url(document_id, inline=True)
+        target = _resolve_cached_instinct_url(document_id, page_number)
     except Exception as exc:
         elapsed = time.perf_counter() - started
         print(
@@ -734,8 +799,6 @@ def _serve_document_page(event: dict) -> dict:
             flush=True,
         )
         return _json_response(500, {"error": "document_url_unavailable", "document_id": document_id, "page_number": page_number, "detail": str(exc)})
-    separator = "&" if "?" in target else "?"
-    location = f"{target}{separator}page={page_number}"
     elapsed = time.perf_counter() - started
     print(
         f"[RAG_TIMING] document_page_seconds={elapsed:.3f} status=302 document_id={document_id} page_number={page_number}",
@@ -744,7 +807,7 @@ def _serve_document_page(event: dict) -> dict:
     return {
         "statusCode": 302,
         "headers": {
-            "location": location,
+            "location": target,
             "cache-control": "no-store",
         },
         "body": "",

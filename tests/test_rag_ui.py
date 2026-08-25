@@ -12,6 +12,7 @@ import scripts.rag_ui.catalog as rag_catalog
 from scripts.rag_ui.catalog import load_catalog
 from scripts.rag_ui.lambda_app import (
     _answer_prompt,
+    _deterministic_retrieval_plan,
     _execute_planned_retrieval,
     _parse_planner_json,
     _plan_retrieval,
@@ -319,10 +320,23 @@ def test_lambda_serves_rag_answer_with_citations(monkeypatch):
     assert payload["answer"] == "The patient received Convenia on 2026-08-01."
     assert payload["citations"][0]["document_id"] == "doc-1"
     assert payload["citations"][0]["page_number"] == 1
-    assert payload["citations"][0]["instinct_url"] == "https://instinct.test/file.pdf?page=1"
     assert payload["references"][0]["document_id"] == "doc-1"
-    assert payload["references"][0]["instinct_url"] == "https://instinct.test/file.pdf?page=1"
-    assert payload["document_urls"][0]["instinct_url"] == "https://instinct.test/file.pdf?page=1"
+    assert payload["references"][0]["source_uri"] == "https://example.test/doc-1"
+
+
+@pytest.mark.integration
+def test_document_page_redirects_via_cached_instinct_url(monkeypatch):
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._resolve_cached_instinct_url", lambda document_id, page_number, force_refresh=False: "https://instinct.test/file.pdf?page=1")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/documents/doc-1/pages/1",
+            "queryStringParameters": {"page": "1"},
+            "requestContext": {"http": {"method": "GET"}},
+        }
+    )
+    assert response["statusCode"] == 302
+    assert response["headers"]["location"] == "https://instinct.test/file.pdf?page=1"
 
 
 @pytest.mark.unit
@@ -435,6 +449,7 @@ def test_execute_planned_retrieval_routes_single_and_multi_requests(monkeypatch)
             {f"{intent.lower()}_seconds": 0.01},
         )
 
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._deterministic_retrieval_plan", lambda question: None)
     monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fake_plan)
     monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
 
@@ -445,6 +460,69 @@ def test_execute_planned_retrieval_routes_single_and_multi_requests(monkeypatch)
     assert [hit["document_id"] for hit in hits] == ["RECENT:recent dental", "TIMELINE:dental history"]
     assert timing["recent_seconds"] == 0.01
     assert timing["timeline_seconds"] == 0.01
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("Find the most relevant record about allergies.", {"retrieval": "SEMANTIC", "query": "most relevant record about allergies"}),
+        ("When was the last dental cleaning date?", {"retrieval": "RECENT", "query": "dental cleaning"}),
+        ("What happened at the most recent visit?", {"retrieval": "RECENT", "query": "happened at visit"}),
+        ("What dates did we see him?", {"retrieval": "TIMELINE", "query": "dates did we see him"}),
+        ("Has he ever had seizures?", {"retrieval": "EXHAUSTIVE", "query": "has he ever had seizures"}),
+        ("What does the March lab report say?", {"retrieval": "DOCUMENT", "query": "march lab report"}),
+    ],
+)
+def test_deterministic_retrieval_plan_routes_common_questions(question, expected):
+    assert _deterministic_retrieval_plan(question) == expected
+
+
+@pytest.mark.unit
+def test_execute_planned_retrieval_skips_planner_for_recent_question(monkeypatch):
+    called = {"planner": False, "retrieve": False}
+
+    def fail_plan(*args, **kwargs):
+        called["planner"] = True
+        raise AssertionError("planner should not be called")
+
+    def fake_retrieve(intent, query, client_id, pet_id):
+        called["retrieve"] = True
+        return ([{"document_id": "doc-1", "page_number": 1, "snippet": query}], {"total_seconds": 0.01})
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fail_plan)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
+
+    hits, timing, plan = _execute_planned_retrieval("What is the last dental cleaning date?", "client-1", "pet-1")
+
+    assert plan == {"retrieval": "RECENT", "query": "dental cleaning"}
+    assert called["planner"] is False
+    assert called["retrieve"] is True
+    assert hits[0]["snippet"] == "dental cleaning"
+    assert timing["total_seconds"] == 0.01
+
+
+@pytest.mark.unit
+def test_execute_planned_retrieval_falls_back_to_planner_for_ambiguous_question(monkeypatch):
+    called = {"planner": False}
+
+    def fake_plan(question, sources=None):
+        called["planner"] = True
+        return {"retrieval": "SEMANTIC", "query": "allergy question"}
+
+    def fake_retrieve(intent, query, client_id, pet_id):
+        return ([{"document_id": "doc-1", "page_number": 1, "snippet": query}], {"total_seconds": 0.02})
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._deterministic_retrieval_plan", lambda question: None)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fake_plan)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
+
+    hits, timing, plan = _execute_planned_retrieval("What should I know about him?", "client-1", "pet-1")
+
+    assert called["planner"] is True
+    assert plan == {"retrieval": "SEMANTIC", "query": "allergy question"}
+    assert hits[0]["snippet"] == "allergy question"
+    assert timing["total_seconds"] == 0.02
 
 
 @pytest.mark.unit

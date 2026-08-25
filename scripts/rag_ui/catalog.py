@@ -359,22 +359,80 @@ def _build_catalog(clients: list[dict[str, Any]], patients: list[dict[str, Any]]
 
 
 def load_patient_documents(client_id: str, pet_id: str | None = None) -> list[dict[str, Any]]:
-    catalog = load_catalog()
-    patient = catalog.pets_by_id.get(str(pet_id or "").strip()) if pet_id else None
+    started = time.perf_counter()
+    client_id = str(client_id or "").strip()
+    pet_id = str(pet_id or "").strip() or None
+    if not client_id or not pet_id:
+        print("[RAG_TIMING] patient_documents_seconds=0.000 status=400 docs=0", flush=True)
+        return []
+
+    connection_started = time.perf_counter()
+    connection = _pg_connect()
+    connect_seconds = time.perf_counter() - connection_started
+    if connection is None:
+        print(
+            f"[RAG_TIMING] patient_documents_connect_seconds={connect_seconds:.3f} "
+            f"patient_documents_execute_seconds=0.000 patient_documents_fetch_seconds=0.000 "
+            f"patient_documents_materialize_seconds=0.000 total_seconds={time.perf_counter() - started:.3f} docs=0",
+            flush=True,
+        )
+        return []
+
+    cursor = connection.cursor()
+    query_sql = """
+        select
+          coalesce(document_pdf_id::text, metadata->>'source_reference_id', metadata->>'pdf_id', source_name) as document_id,
+          coalesce(nullif(metadata->>'original_filename', ''), nullif(metadata->>'originalfilename', ''), source_name) as document_title,
+          min(coalesce(page_number, 1)) as page_number,
+          'Page ' || min(coalesce(page_number, 1))::text as page_label,
+          count(*) as chunk_count
+        from public.pms_page_chunk
+        where client_instinct_uuid = %s
+          and patient_id = %s
+          and chunk_text is not null
+        group by 1, 2
+        order by min(coalesce(created_at, now())) asc, min(coalesce(page_number, 1)) asc, 1 asc
+    """
+    try:
+        execute_started = time.perf_counter()
+        cursor.execute(query_sql, (client_id, pet_id))
+        execute_seconds = time.perf_counter() - execute_started
+        fetch_started = time.perf_counter()
+        rows = cursor.fetchall()
+        fetch_seconds = time.perf_counter() - fetch_started
+    finally:
+        cursor.close()
+        connection.close()
+
+    materialize_started = time.perf_counter()
     documents: list[dict[str, Any]] = []
-    for pet in catalog.pets_by_client.get(str(client_id).strip(), []):
-        if patient and pet.id != patient.id:
+    seen: set[str] = set()
+    for row in rows:
+        document_id, document_title, page_number, page_label, _chunk_count = row
+        document_id = str(document_id or "").strip()
+        if not document_id or document_id in seen:
             continue
+        seen.add(document_id)
         documents.append(
             {
-                "document_id": pet.id,
-                "document_title": pet.label,
+                "document_id": document_id,
+                "document_title": str(document_title or "Source PDF"),
                 "source_uri": "",
-                "page_number": 1,
-                "page_label": "Page 1",
+                "page_number": int(page_number or 1),
+                "page_label": str(page_label or f"Page {page_number or 1}"),
                 "source_page_url": "",
             }
         )
+    materialize_seconds = time.perf_counter() - materialize_started
+    total_seconds = time.perf_counter() - started
+    print(
+        "[RAG_TIMING] patient_documents_connect_seconds="
+        f"{connect_seconds:.3f} patient_documents_execute_seconds={execute_seconds:.3f} "
+        f"patient_documents_fetch_seconds={fetch_seconds:.3f} "
+        f"patient_documents_materialize_seconds={materialize_seconds:.3f} "
+        f"total_seconds={total_seconds:.3f} docs={len(documents)}",
+        flush=True,
+    )
     return documents
 
 

@@ -28,21 +28,60 @@ python -m pytest tests/test_rag_ui.py -q
 
 echo "[package] build lambda zip"
 python - <<'PY'
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
 root = Path("/home/ggb66/dev/EVH")
 zip_path = root / "deploy/evh_instinct_rag_search.zip"
+build_dir = Path(tempfile.mkdtemp(prefix="evh-rag-lambda-build-"))
+staging = build_dir
+package_root = root / "pony/worktrees/pinkie"
+
+subprocess.check_call([
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    "--upgrade",
+    "--only-binary=:all:",
+    "--platform",
+    "manylinux2014_x86_64",
+    "--implementation",
+    "cp",
+    "--python-version",
+    "314",
+    "--abi",
+    "cp314",
+    "--target",
+    str(staging),
+    "psycopg==3.2.13",
+    "psycopg-binary==3.2.13",
+    "pg8000==1.31.2",
+    "boto3==1.35.99",
+    "botocore==1.35.99",
+])
+
+for arc, src in [
+    ("scripts/__init__.py", package_root / "scripts/__init__.py"),
+    ("scripts/rag_ui/lambda_app.py", package_root / "scripts/rag_ui/lambda_app.py"),
+    ("scripts/rag_ui/catalog.py", package_root / "scripts/rag_ui/catalog.py"),
+    ("scripts/rag_ui/__init__.py", package_root / "scripts/rag_ui/__init__.py"),
+    ("scripts/rag_ui/README.md", package_root / "scripts/rag_ui/README.md"),
+    ("scripts/rag_ui/static/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
+]:
+    dest = staging / arc
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+
 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
-    for arc, src in [
-        ("scripts/__init__.py", root / "pony/worktrees/pinkie/scripts/__init__.py"),
-        ("scripts/rag_ui/lambda_app.py", root / "pony/worktrees/pinkie/scripts/rag_ui/lambda_app.py"),
-        ("scripts/rag_ui/catalog.py", root / "pony/worktrees/pinkie/scripts/rag_ui/catalog.py"),
-        ("scripts/rag_ui/__init__.py", root / "pony/worktrees/pinkie/scripts/rag_ui/__init__.py"),
-        ("scripts/rag_ui/README.md", root / "pony/worktrees/pinkie/scripts/rag_ui/README.md"),
-        ("scripts/rag_ui/static/index.html", root / "pony/worktrees/pinkie/website/EVHInstinctPDFRAG/index.html"),
-    ]:
-        z.write(src, arcname=arc)
+    for path in sorted(staging.rglob("*")):
+        if path.is_file():
+            z.write(path, arcname=str(path.relative_to(staging)))
 print(zip_path)
 PY
 
