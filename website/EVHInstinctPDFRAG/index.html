@@ -5,7 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>EVH Patient Record Assistant</title>
 <style>
-:root{font-family:Inter,system-ui,sans-serif;color:#18212b;background:#f5f7f9;--bg:#f5f7f9;--card:#fff;--line:#dfe4e8;--line-strong:#bdc6ce;--text:#18212b;--muted:#66717d;--blue:#285f8f;--green:#2b7a63;--amber:#9a6a15;--rose:#8c4b69;--shadow:0 2px 10px #0000000a}
+:root{
+  font-family:Inter,system-ui,sans-serif;
+  color:#18212b;
+  background:#f5f7f9;
+  --bg:#f5f7f9;
+  --card:#fff;
+  --line:#dfe4e8;
+  --line-strong:#bdc6ce;
+  --text:#18212b;
+  --muted:#66717d;
+  --blue:#285f8f;
+  --shadow:0 2px 10px #0000000a;
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text)}
 .wrap{max-width:1100px;margin:28px auto;padding:0 20px 28px}
@@ -16,21 +28,38 @@ h1{margin:0 0 6px;font-size:28px;line-height:1.08}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
 .selector-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
 .field{position:relative}
+.field-wrap{position:relative}
 label{display:block;font-weight:650;margin-bottom:7px}
 input,textarea,button{font:inherit}
 input,textarea{width:100%;padding:11px 12px;border:1px solid var(--line-strong);border-radius:8px;background:white;color:var(--text)}
-textarea{min-height:110px;resize:vertical;line-height:1.45}
-.menu{position:absolute;z-index:20;top:100%;left:0;right:0;max-height:320px;overflow:auto;background:white;border:1px solid #cfd6dc;border-radius:8px;box-shadow:0 8px 24px #0002;display:none}
+input:focus,textarea:focus{outline:2px solid rgba(40,95,143,.16);outline-offset:1px;border-color:#9eb3c5}
+textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
+.menu{
+  position:absolute;
+  z-index:30;
+  top:calc(100% + 4px);
+  left:0;
+  right:0;
+  max-height:320px;
+  overflow:auto;
+  overscroll-behavior:contain;
+  background:white;
+  border:1px solid #cfd6dc;
+  border-radius:8px;
+  box-shadow:0 8px 24px #0002;
+  display:none;
+}
 .option{padding:9px 11px;cursor:pointer;border-bottom:1px solid #eef1f3}
-.option:hover{background:#f0f4f7}
-.secondary{font-size:12px;color:#6b7580}
+.option:last-child{border-bottom:0}
+.option:hover,.option.active{background:#f0f4f7}
+.secondary{font-size:12px;color:#6b7580;margin-top:2px}
 .status{font-size:13px;color:#68737e;margin-top:6px;min-height:18px}
 .ask-area{display:grid;gap:10px}
 .composer-box{position:relative}
 .question-label-row{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
-.question-wrap{position:relative}
 button{padding:10px 16px;border:0;border-radius:8px;background:#263746;color:white;cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
+#ask{position:absolute;right:10px;bottom:10px}
 .hint{font-size:12px;color:var(--muted);line-height:1.35}
 .transcript{display:grid;gap:14px;margin-top:18px}
 .turn{padding:16px;border-radius:12px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow)}
@@ -40,33 +69,30 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .turn-sources{margin:0 0 12px}
 .answer-body{margin-top:0;background:#E0ECFB;padding:14px 16px;border-radius:10px}
 .answer-text{margin:0;white-space:pre-wrap;line-height:1.55;font-size:17px}
-.source-navigator{display:flex;align-items:center;gap:8px;overflow-x:auto;padding:4px 0 2px;scroll-behavior:smooth}
+.source-row{display:flex;align-items:center;gap:8px}
+.source-navigator{display:flex;align-items:center;gap:8px;overflow-x:auto;padding:4px 0 2px;scroll-behavior:smooth;min-width:0;flex:1}
 .source-nav-btn{width:30px;height:30px;border-radius:999px;border:1px solid #d6dde4;background:#fafbfc;color:#40505e;display:grid;place-items:center;flex:0 0 auto;padding:0}
 .source-nav-btn[disabled]{opacity:.28}
-.source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer}
+.source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer;padding:0}
 .source-chip:hover,.source-chip:focus-visible{border-color:#b8c8d8;box-shadow:0 0 0 3px rgba(40,95,143,.08);outline:none}
 .source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
 .source-chip .count{position:absolute;right:-5px;bottom:-5px;min-width:18px;height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
-.source-popover{position:fixed;z-index:80;max-width:min(420px,calc(100vw - 24px));max-height:min(340px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
+.source-popover{position:fixed;z-index:80;max-width:min(460px,calc(100vw - 24px));max-height:min(380px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
 .source-popover.open{display:block}
 .source-popover .title{font-size:13px;font-weight:700;line-height:1.35;margin-bottom:6px}
 .source-popover .meta{font-size:12px;color:var(--muted);text-align:left}
 .source-popover .snippet{margin-top:8px;font-size:13px;line-height:1.45;white-space:pre-wrap;color:#25313d}
 .source-popover .snippet + .snippet{margin-top:8px;padding-top:8px;border-top:1px solid #eef1f3}
 .highlight-term{font-weight:700;border-radius:4px;padding:0 1px;background:rgba(40,95,143,.10);color:#17466f}
-.doc-block{display:grid;gap:8px;padding:12px;border-radius:10px;border:1px solid #e4e9ee;background:#fbfcfd}
-.doc-title{font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px}
-.doc-title .family{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#607080;text-transform:uppercase;letter-spacing:.12em}
-.doc-title .family i{width:18px;height:18px;border-radius:5px;border:1px solid #d6dde4;background:#fff;display:block;overflow:hidden;flex:0 0 auto}
-.doc-title .family i::before{content:"";display:block;width:576px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.28);transform-origin:0 0}
-.passage{padding:9px 10px;border-left:3px solid #cfd8e1;background:#fff;border-radius:8px;line-height:1.45;font-size:14px}
-.passage .refmeta{display:block;margin-top:4px;color:#768394;font-size:11px}
 .refs{display:grid;gap:8px}
 .refs a{display:block;text-decoration:none;color:var(--blue);padding:9px 10px;border:1px solid #d6dde4;border-radius:8px;background:#fafbfc}
 .refs a:hover{background:#f3f7fb;border-color:#c8d6e2}
-.hidden{display:none}
 .empty{padding:16px;border:1px dashed #d6dde4;border-radius:12px;color:#6b7580;background:#fbfcfd}
-@media(max-width:760px){.selector-grid{grid-template-columns:1fr}.header{flex-direction:column}.meta{text-align:left}}
+@media(max-width:760px){
+  .selector-grid{grid-template-columns:1fr}
+  .header{flex-direction:column}
+  .meta{text-align:left}
+}
 </style>
 </head>
 <body>
@@ -78,7 +104,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
     <div class="meta">
       <div>Build: __EVH_BUILD_STAMP__</div>
-      <div id="live-status">Loading clients…</div>
+      <div id="live-status">Ready</div>
     </div>
   </div>
 
@@ -86,17 +112,17 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <section class="card field">
       <label for="client-input">Client</label>
       <div class="field-wrap">
-        <input id="client-input" autocomplete="off" placeholder="Type a client name">
-        <div id="client-menu" class="menu"></div>
+        <input id="client-input" autocomplete="off" placeholder="Type a client name" aria-autocomplete="list" aria-controls="client-menu">
+        <div id="client-menu" class="menu" role="listbox"></div>
       </div>
-      <div id="client-status" class="status">Loading clients…</div>
+      <div id="client-status" class="status"></div>
     </section>
 
     <section class="card field">
       <label for="pet-input">Patient</label>
       <div class="field-wrap">
-        <input id="pet-input" autocomplete="off" disabled placeholder="Select a client first">
-        <div id="pet-menu" class="menu"></div>
+        <input id="pet-input" autocomplete="off" disabled placeholder="Select a client first" aria-autocomplete="list" aria-controls="pet-menu">
+        <div id="pet-menu" class="menu" role="listbox"></div>
       </div>
       <div id="pet-status" class="status"></div>
     </section>
@@ -109,7 +135,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
     <div class="composer-box">
       <textarea id="question" placeholder="When was the last dental cleaning?"></textarea>
-      <button id="ask" disabled style="position:absolute;right:10px;bottom:10px">Ask</button>
+      <button id="ask" disabled>Ask</button>
     </div>
     <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
   </section>
@@ -118,25 +144,97 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </main>
 
 <script>
+"use strict";
+
 const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
-const threshold=3;
-const citationUrl=(documentId,pageNumber)=>`${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
+const SEARCH_MIN=3;
+const SEARCH_DEBOUNCE_MS=200;
+
+const citationUrl=(documentId,pageNumber)=>
+  `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
+
 const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other"];
 const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
-const normalizeFamily=(family)=>familyOrder.includes(family)?family:"other";
-const familySpritePos=(family)=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
-const state={clients:[],pets:[],client:null,pet:null,turns:[],loading:false,firstAnswerSubmitted:false};
-let clientSearchSeq=0;
-let petSearchSeq=0;
+const normalizeFamily=family=>familyOrder.includes(family)?family:"other";
+const familySpritePos=family=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
+
+const state={
+  client:null,
+  pet:null,
+  turns:[],
+  loading:false,
+  firstAnswerSubmitted:false
+};
+
+const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
+const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 let sourcePopoverHideTimer=0;
+
 const $=id=>document.getElementById(id);
-const normalize=v=>String(v??"").toLowerCase().trim();
-function escapeHtml(v){const d=document.createElement("div");d.textContent=String(v??"");return d.innerHTML;}
-function localFilter(items,query,fields){const q=normalize(query);if(q.length<threshold)return items;return items.filter(item=>fields.some(f=>normalize(item[f]).includes(q))||normalize(fields.map(f=>item[f]).join(" ")).includes(q));}
-function render(menu,items,onPick){menu.innerHTML="";if(!items.length){menu.style.display="none";return;}items.slice(0,100).forEach(item=>{const el=document.createElement("div");el.className="option";el.innerHTML=`<div>${escapeHtml(item.label)}</div><div class="secondary">${escapeHtml(item.secondary||"")}</div>`;el.onclick=()=>onPick(item);menu.appendChild(el)});menu.style.display="block";}
+
+function escapeHtml(value){
+  const div=document.createElement("div");
+  div.textContent=String(value??"");
+  return div.innerHTML;
+}
+
+function abortSearch(search){
+  clearTimeout(search.timer);
+  search.timer=0;
+  search.seq++;
+  if(search.controller){
+    search.controller.abort();
+    search.controller=null;
+  }
+}
+
+function clearMenu(menu){
+  menu.replaceChildren();
+  menu.style.display="none";
+}
+
+function clearClientMenu(){clearMenu($("client-menu"));}
+function clearPetMenu(){clearMenu($("pet-menu"));}
+
+function renderMenu(menu,items,onPick){
+  clearMenu(menu);
+  if(!items.length)return;
+
+  const fragment=document.createDocumentFragment();
+  for(const item of items.slice(0,100)){
+    const option=document.createElement("div");
+    option.className="option";
+    option.setAttribute("role","option");
+
+    const primary=document.createElement("div");
+    primary.textContent=item.label||"";
+    option.appendChild(primary);
+
+    if(item.secondary){
+      const secondary=document.createElement("div");
+      secondary.className="secondary";
+      secondary.textContent=item.secondary;
+      option.appendChild(secondary);
+    }
+
+    option.addEventListener("mousedown",event=>{
+      // Pick before the input's blur/focus state can hide the menu.
+      event.preventDefault();
+      onPick(item);
+    });
+    fragment.appendChild(option);
+  }
+
+  menu.appendChild(fragment);
+  menu.style.display="block";
+}
+
 async function api(path,options={}){
   const url=path.startsWith("http")?path:`${API_BASE}${path}`;
-  const response=await fetch(url,{headers:{"content-type":"application/json",...(options.headers||{})},...options});
+  const response=await fetch(url,{
+    ...options,
+    headers:{"content-type":"application/json",...(options.headers||{})}
+  });
   if(!response.ok){
     const body=await response.text();
     const message=body&&body.trim()?body.trim():response.statusText||"Request failed";
@@ -144,39 +242,542 @@ async function api(path,options={}){
   }
   return response.json();
 }
-function searchOptions(kind,query,clientId=""){const params=new URLSearchParams({kind});if(query)params.set("q",query);if(clientId)params.set("clientId",clientId);return api(`/api/options?${params.toString()}`);}
-function updateAsk(){const ok=!!(state.client&&state.pet&&$("question").value.trim()&&!state.loading);$("ask").disabled=!ok;}
-function clearTranscript(){state.turns=[];$("transcript").innerHTML='<div class="empty">Ask a question to begin a patient-specific conversation.</div>';}
-function updateQuestionPrompt(){
-  $("question").placeholder = state.firstAnswerSubmitted ? "Ask another question…" : "When was the last dental cleaning?";
+
+function searchOptions(kind,query,clientId="",signal){
+  const params=new URLSearchParams({kind,q:query});
+  if(clientId)params.set("clientId",clientId);
+  return api(`/api/options?${params.toString()}`,{signal});
 }
-function clearClientMenu(){const menu=$("client-menu");menu.innerHTML="";menu.style.display="none";}
-function clearPetMenu(){const menu=$("pet-menu");menu.innerHTML="";menu.style.display="none";}
-function chooseClient(item){state.client=item;state.pet=null;$("client-input").value=item.label;$("client-menu").style.display="none";$("pet-input").value="";$("pet-input").disabled=true;$("pet-status").textContent="Loading patients…";clearTranscript();updateAsk();searchOptions("pet","",item.id).then(p=>{state.pets=p.items||[];$("pet-input").disabled=false;$("pet-input").placeholder="Type a patient name";$("pet-status").textContent=`${state.pets.length} patients loaded`;}).catch(e=>$("pet-status").textContent=`Unable to load patients: ${e.message}`);}
-function choosePet(item){state.pet=item;$("pet-input").value=item.label;$("pet-menu").style.display="none";$("pet-status").textContent=[item.species,item.breed].filter(Boolean).join(" · ");clearTranscript();updateAsk();}
-function citationLink(ref){const docId=ref.document_id||ref.documentId||"";const page=ref.page_number||ref.pageNumber||1;const label=ref.document_title||ref.documentTitle||ref.page_label||`Page ${page}`;const a=document.createElement("a");a.textContent=`${label} — Page ${page}`;if(docId){a.href=citationUrl(docId,page);a.target="_blank";a.rel="noopener";}return a;}
-function groupedRefs(turn){const refs=(turn.citations||turn.references||[]).map(ref=>({document_id:ref.document_id||ref.documentId||"",page_number:ref.page_number||ref.pageNumber||1,document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",snippet:ref.snippet||"",terms:Array.isArray(ref.terms)?ref.terms:[],source_page_url:ref.source_page_url||""}));const byId=new Map();refs.forEach(ref=>{const id=ref.document_id||`${ref.document_title}-${ref.page_number}`;const existing=byId.get(id)||{document_id:ref.document_id,document_title:ref.document_title,pages:[],snippets:[],terms:[]};existing.pages.push(ref.page_number);if(ref.snippet)existing.snippets.push(ref.snippet);if(ref.terms.length)existing.terms.push(...ref.terms);if(!existing.document_title||existing.document_title==="Source PDF")existing.document_title=ref.document_title;byId.set(id,existing);});return [...byId.values()].map(doc=>({...doc,terms:[...new Set(doc.terms.map(t=>String(t||"").trim()).filter(Boolean))]}));}
-function createSourcePopover(){let pop=$("source-popover");if(pop)return pop;pop=document.createElement("div");pop.id="source-popover";pop.className="source-popover";pop.innerHTML='<div class="title"></div><div class="meta"></div><div class="snippets"></div>';document.body.appendChild(pop);pop.addEventListener("mouseenter",()=>{clearTimeout(sourcePopoverHideTimer);pop.classList.add("open");});pop.addEventListener("mouseleave",hideSourcePopover);return pop;}
-function highlightText(text, terms=[]){let out=escapeHtml(text);const mappings=[...new Set((terms||[]).map(t=>String(t||"").trim()).filter(Boolean))].sort((a,b)=>b.length-a.length);for(const term of mappings){const safe=term.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");const re=new RegExp(`(${safe})`,"gi");out=out.replace(re,'<span class="highlight-term">$1</span>');}return out;}
-function questionTerms(question){return [...new Set(String(question||"").toLowerCase().split(/[^a-z0-9]+/).map(t=>t.trim()).filter(t=>t.length>2 && !new Set(['what','when','where','which','who','whom','whose','was','were','are','is','the','and','for','with','that','this','have','has','had','last','date','does','did','his','her','him','she','him','from','about','into','after','before','who']).has(t)))];}
-function showSourcePopover(anchor,doc,terms=[]){const pop=createSourcePopover();pop.querySelector(".title").textContent=doc.document_title||"Source PDF";pop.querySelector(".meta").textContent=`${doc.pages.length} page${doc.pages.length===1?"":"s"}`;const snippets=pop.querySelector(".snippets");snippets.innerHTML="";doc.snippets.slice(0,5).forEach((snippet,idx)=>{const div=document.createElement("div");div.className="snippet";div.innerHTML=`<div class="meta">Page ${escapeHtml(doc.pages[idx]||doc.pages[0]||1)}</div>${highlightText(snippet,[...(doc.terms||[]),...terms])}`;snippets.appendChild(div);});const r=anchor.getBoundingClientRect();const left=Math.min(window.innerWidth-24-pop.offsetWidth,Math.max(12,r.left));const top=Math.min(window.innerHeight-24-pop.offsetHeight,Math.max(12,r.bottom+8));pop.style.left=`${left}px`;pop.style.top=`${top}px`;pop.classList.add("open");}
-function hideSourcePopover(){clearTimeout(sourcePopoverHideTimer);sourcePopoverHideTimer=setTimeout(()=>{const pop=$("source-popover");if(pop)pop.classList.remove("open");},120);}
-function sourceChip(doc,terms){const btn=document.createElement("button");btn.type="button";btn.className="source-chip";btn.title=doc.document_title||"Source PDF";btn.dataset.docId=doc.document_id||"";btn.dataset.page=doc.pages[0]||1;btn.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos('other')}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;btn.addEventListener("click",()=>{if(doc.document_id)window.open(citationUrl(doc.document_id,doc.pages[0]||1),"_blank","noopener");});btn.addEventListener("mouseenter",()=>showSourcePopover(btn,doc,terms));btn.addEventListener("mouseleave",hideSourcePopover);btn.addEventListener("focus",()=>showSourcePopover(btn,doc,terms));btn.addEventListener("blur",hideSourcePopover);return btn;}
-function renderTurn(turn){const section=document.createElement("section");section.className="turn";const docs=groupedRefs(turn);const terms=questionTerms(turn.question);section.innerHTML=`<div class="turn-question"><p class="question-text">${escapeHtml(turn.question)}</p><div class="question-meta">${escapeHtml(turn.when)}</div></div>`;if(docs.length){const wrap=document.createElement("div");wrap.className="turn-sources";const row=document.createElement("div");row.style.display="flex";row.style.alignItems="center";row.style.gap="8px";const prev=document.createElement("button");prev.type="button";prev.className="source-nav-btn";prev.textContent="‹";const next=document.createElement("button");next.type="button";next.className="source-nav-btn";next.textContent="›";const rail=document.createElement("div");rail.className="source-navigator";docs.forEach(doc=>rail.appendChild(sourceChip(doc,terms)));const updateButtons=()=>{prev.disabled=rail.scrollLeft<=0;next.disabled=rail.scrollLeft>=rail.scrollWidth-rail.clientWidth-1;};prev.addEventListener("click",()=>rail.scrollBy({left:-260,behavior:"smooth"}));next.addEventListener("click",()=>rail.scrollBy({left:260,behavior:"smooth"}));rail.addEventListener("scroll",updateButtons);rail.addEventListener("wheel",e=>{if(Math.abs(e.deltaY)>Math.abs(e.deltaX)){rail.scrollLeft+=e.deltaY;e.preventDefault();updateButtons();}},{passive:false});setTimeout(updateButtons,0);row.appendChild(prev);row.appendChild(rail);row.appendChild(next);wrap.appendChild(row);section.appendChild(wrap);}else{const refs=turn.references||[];if(refs.length){const wrap=document.createElement("div");wrap.className="turn-sources";const list=document.createElement("div");list.className="refs";refs.forEach(ref=>list.appendChild(citationLink(ref)));wrap.appendChild(list);section.appendChild(wrap);}}const answer=document.createElement("div");answer.className="answer-body";answer.innerHTML=`<p class="answer-text">${escapeHtml(turn.answer)}</p>`;section.appendChild(answer);return section;}
-function appendTurn(turn){state.turns.push(turn);const transcript=$("transcript");if(transcript.querySelector(".empty"))transcript.innerHTML="";const composer=$("composer");transcript.appendChild(renderTurn(turn));transcript.appendChild(composer);transcript.lastElementChild?.scrollIntoView({behavior:"smooth",block:"end"});}
-async function submitQuestion(){if(state.loading)return;const question=$("question").value.trim();if(!(state.client&&state.pet&&question))return;state.loading=true;updateAsk();$("ask-status").textContent="Searching patient records and answering…";try{const params=new URLSearchParams({client_id:state.client.id,pet_id:state.pet.id,question});const data=await api(`/api/rag/answer?${params.toString()}`,{method:"POST"});appendTurn({when:new Date().toLocaleString([], {hour:'numeric',minute:'2-digit',month:'short',day:'numeric'}),question,answer:data.answer||"",citations:(data.citations||[]),references:(data.references||[])});$("question").value="";autoResize($("question"));state.firstAnswerSubmitted=true;updateQuestionPrompt();$("ask-status").textContent=`Completed in ${data.elapsed_seconds??"?"}s`;}catch(e){$("ask-status").textContent=`Unable to answer: ${e.message}`;}finally{state.loading=false;updateAsk();}}
-function autoResize(el){el.style.height="auto";el.style.height=Math.min(el.scrollHeight,180)+"px";}
-$("client-input").addEventListener("input",e=>{state.client=null;state.pet=null;$("pet-input").disabled=true;clearPetMenu();const q=e.target.value.trim();const seq=++clientSearchSeq;clearClientMenu();if(q.length<threshold){$("client-status").textContent=q?"Type 3+ characters":"";updateAsk();return;}$("client-status").textContent="Searching…";searchOptions("client",q).then(data=>{if(seq!==clientSearchSeq)return;state.clients=data.items||[];render($("client-menu"),state.clients,chooseClient);$("client-status").textContent=state.clients.length?`${state.clients.length} matches`:"No matches";}).catch(err=>{if(seq!==clientSearchSeq)return;clearClientMenu();$("client-status").textContent=`Unable to load clients: ${err.message}`;});updateAsk();});
-$("client-input").addEventListener("focus",()=>{const q=$("client-input").value.trim();if(q.length<threshold){clearClientMenu();return;}searchOptions("client",q).then(data=>{state.clients=data.items||[];render($("client-menu"),state.clients,chooseClient);$("client-status").textContent=state.clients.length?`${state.clients.length} matches`:"No matches";}).catch(e=>{clearClientMenu();$("client-status").textContent=`Unable to load clients: ${e.message}`;});});
-$("pet-input").addEventListener("input",e=>{state.pet=null;const q=e.target.value.trim();const clientId=state.client&&state.client.id?state.client.id:"";const seq=++petSearchSeq;clearPetMenu();if(!clientId){$("pet-status").textContent="Select a client first";return;}if(q.length<threshold){$("pet-status").textContent=q?"Type 3+ characters":"";updateAsk();return;}searchOptions("pet",q,clientId).then(data=>{if(seq!==petSearchSeq)return;state.pets=data.items||[];render($("pet-menu"),state.pets,choosePet);$("pet-status").textContent=state.pets.length?`${state.pets.length} matches`:"No matches";}).catch(err=>{if(seq!==petSearchSeq)return;clearPetMenu();$("pet-status").textContent=`Unable to load patients: ${err.message}`;});updateAsk();});
-$("pet-input").addEventListener("focus",()=>{const q=$("pet-input").value.trim();const clientId=state.client&&state.client.id?state.client.id:"";if(!clientId||q.length<threshold){clearPetMenu();return;}$("pet-status").textContent="Searching…";searchOptions("pet",q,clientId).then(data=>{state.pets=data.items||[];render($("pet-menu"),state.pets,choosePet);$("pet-status").textContent=state.pets.length?`${state.pets.length} matches`:"No matches";}).catch(err=>{clearPetMenu();$("pet-status").textContent=`Unable to load patients: ${err.message}`;});});
-$("question").addEventListener("input",e=>{autoResize(e.target);updateAsk();});
-$("question").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.ctrlKey){e.preventDefault();const el=e.target;const s=el.selectionStart,e2=el.selectionEnd;el.value=el.value.slice(0,s)+"\n"+el.value.slice(e2);el.selectionStart=el.selectionEnd=s+1;autoResize(el);updateAsk();}else if(e.key==="Enter"&&!e.shiftKey&&!e.ctrlKey){e.preventDefault();submitQuestion();}});
-$("ask").onclick=submitQuestion;
-document.addEventListener("click",e=>{if(!e.target.closest(".field")){$("client-menu").style.display="none";$("pet-menu").style.display="none";hideSourcePopover();}});
+
+function scheduleOptionSearch({
+  search,
+  kind,
+  query,
+  clientId="",
+  input,
+  menu,
+  status,
+  onPick
+}){
+  const q=query.trim();
+
+  abortSearch(search);
+  clearMenu(menu);
+  search.items=[];
+  search.lastQuery=q;
+
+  if(q.length<SEARCH_MIN){
+    status.textContent=q?`Type ${SEARCH_MIN}+ characters`:"";
+    return;
+  }
+
+  const seq=search.seq;
+  search.timer=setTimeout(async()=>{
+    // Input may have changed during debounce.
+    if(seq!==search.seq || input.value.trim()!==q)return;
+
+    const controller=new AbortController();
+    search.controller=controller;
+    status.textContent="Searching…";
+
+    try{
+      const data=await searchOptions(kind,q,clientId,controller.signal);
+
+      // All three checks matter:
+      //   1) not superseded,
+      //   2) not aborted,
+      //   3) response still belongs to the exact visible query.
+      if(seq!==search.seq || controller.signal.aborted || input.value.trim()!==q)return;
+
+      const items=Array.isArray(data.items)?data.items:[];
+      search.items=items;
+      search.lastQuery=q;
+
+      // Backend fragment ranking is authoritative. Do not re-sort or locally filter.
+      renderMenu(menu,items,onPick);
+      status.textContent=items.length?`${items.length} matches`:"No matches";
+    }catch(error){
+      if(error?.name==="AbortError")return;
+      if(seq!==search.seq || input.value.trim()!==q)return;
+      clearMenu(menu);
+      search.items=[];
+      status.textContent=`Unable to load ${kind==="client"?"clients":"patients"}: ${error.message}`;
+    }finally{
+      if(search.controller===controller)search.controller=null;
+    }
+  },SEARCH_DEBOUNCE_MS);
+}
+
+function updateAsk(){
+  $("ask").disabled=!(state.client&&state.pet&&$("question").value.trim()&&!state.loading);
+}
+
+function clearTranscript(){
+  state.turns=[];
+  $("transcript").innerHTML='<div class="empty">Ask a question to begin a patient-specific conversation.</div>';
+}
+
+function updateQuestionPrompt(){
+  $("question").placeholder=state.firstAnswerSubmitted
+    ?"Ask another question…"
+    :"When was the last dental cleaning?";
+}
+
+function resetPatientSelection(){
+  abortSearch(petSearch);
+  clearPetMenu();
+  state.pet=null;
+  $("pet-input").value="";
+  $("pet-status").textContent="";
+}
+
+function chooseClient(item){
+  abortSearch(clientSearch);
+  clearClientMenu();
+
+  state.client=item;
+  $("client-input").value=item.label||"";
+  $("client-status").textContent="";
+
+  resetPatientSelection();
+  $("pet-input").disabled=false;
+  $("pet-input").placeholder="Type a patient name";
+
+  clearTranscript();
+  updateAsk();
+}
+
+function choosePet(item){
+  abortSearch(petSearch);
+  clearPetMenu();
+
+  state.pet=item;
+  $("pet-input").value=item.label||"";
+  $("pet-status").textContent=[item.species,item.breed].filter(Boolean).join(" · ");
+
+  clearTranscript();
+  updateAsk();
+}
+
+function citationLink(ref){
+  const docId=ref.document_id||ref.documentId||"";
+  const page=ref.page_number||ref.pageNumber||1;
+  const label=ref.document_title||ref.documentTitle||ref.page_label||`Page ${page}`;
+  const link=document.createElement("a");
+  link.textContent=`${label} — Page ${page}`;
+  if(docId){
+    link.href=citationUrl(docId,page);
+    link.target="_blank";
+    link.rel="noopener";
+  }
+  return link;
+}
+
+function groupedRefs(turn){
+  const refs=(turn.citations||turn.references||[]).map(ref=>({
+    document_id:ref.document_id||ref.documentId||"",
+    page_number:ref.page_number||ref.pageNumber||1,
+    document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",
+    snippet:ref.snippet||"",
+    terms:Array.isArray(ref.terms)?ref.terms:[]
+  }));
+
+  const byId=new Map();
+  for(const ref of refs){
+    const id=ref.document_id||`${ref.document_title}-${ref.page_number}`;
+    const existing=byId.get(id)||{
+      document_id:ref.document_id,
+      document_title:ref.document_title,
+      pages:[],
+      snippets:[],
+      terms:[]
+    };
+    existing.pages.push(ref.page_number);
+    if(ref.snippet)existing.snippets.push(ref.snippet);
+    if(ref.terms.length)existing.terms.push(...ref.terms);
+    byId.set(id,existing);
+  }
+
+  return [...byId.values()].map(doc=>({
+    ...doc,
+    pages:[...new Set(doc.pages)],
+    terms:[...new Set(doc.terms.map(term=>String(term||"").trim()).filter(Boolean))]
+  }));
+}
+
+function createSourcePopover(){
+  let pop=$("source-popover");
+  if(pop)return pop;
+
+  pop=document.createElement("div");
+  pop.id="source-popover";
+  pop.className="source-popover";
+  pop.innerHTML='<div class="title"></div><div class="meta"></div><div class="snippets"></div>';
+  document.body.appendChild(pop);
+
+  pop.addEventListener("mouseenter",()=>{
+    clearTimeout(sourcePopoverHideTimer);
+    pop.classList.add("open");
+  });
+  pop.addEventListener("mouseleave",hideSourcePopover);
+  return pop;
+}
+
+function highlightText(text,terms=[]){
+  const source=String(text??"");
+  const unique=[...new Set(
+    terms.map(t=>String(t||"").trim()).filter(Boolean)
+  )].sort((a,b)=>b.length-a.length);
+
+  if(!unique.length)return escapeHtml(source);
+
+  // Build the output by walking text nodes, not by repeatedly replacing HTML.
+  const escapedTerms=unique.map(term=>term.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"));
+  const regex=new RegExp(`(${escapedTerms.join("|")})`,"gi");
+  let last=0;
+  let out="";
+  for(const match of source.matchAll(regex)){
+    out+=escapeHtml(source.slice(last,match.index));
+    out+=`<span class="highlight-term">${escapeHtml(match[0])}</span>`;
+    last=match.index+match[0].length;
+  }
+  out+=escapeHtml(source.slice(last));
+  return out;
+}
+
+function questionTerms(question){
+  const stop=new Set([
+    "what","when","where","which","who","whom","whose","was","were","are","is",
+    "the","and","for","with","that","this","have","has","had","last","date",
+    "does","did","his","her","him","she","from","about","into","after","before"
+  ]);
+  return [...new Set(
+    String(question||"")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map(t=>t.trim())
+      .filter(t=>t.length>2&&!stop.has(t))
+  )];
+}
+
+function showSourcePopover(anchor,doc,terms=[]){
+  clearTimeout(sourcePopoverHideTimer);
+  const pop=createSourcePopover();
+
+  pop.querySelector(".title").textContent=doc.document_title||"Source PDF";
+  pop.querySelector(".meta").textContent=
+    `${doc.pages.length} page${doc.pages.length===1?"":"s"}`;
+
+  const snippets=pop.querySelector(".snippets");
+  snippets.replaceChildren();
+
+  doc.snippets.slice(0,5).forEach((snippet,index)=>{
+    const div=document.createElement("div");
+    div.className="snippet";
+    const page=doc.pages[index]||doc.pages[0]||1;
+    div.innerHTML=`<div class="meta">Page ${escapeHtml(page)}</div>${highlightText(snippet,[...(doc.terms||[]),...terms])}`;
+    snippets.appendChild(div);
+  });
+
+  // Make the popover visible before measuring it.
+  pop.style.visibility="hidden";
+  pop.classList.add("open");
+
+  const anchorRect=anchor.getBoundingClientRect();
+  const popRect=pop.getBoundingClientRect();
+  const left=Math.min(window.innerWidth-12-popRect.width,Math.max(12,anchorRect.left));
+  const below=anchorRect.bottom+8;
+  const above=anchorRect.top-popRect.height-8;
+  const top=(below+popRect.height<=window.innerHeight-12)
+    ? below
+    : Math.max(12,above);
+
+  pop.style.left=`${left}px`;
+  pop.style.top=`${top}px`;
+  pop.style.visibility="";
+}
+
+function hideSourcePopover(){
+  clearTimeout(sourcePopoverHideTimer);
+  sourcePopoverHideTimer=setTimeout(()=>{
+    $("source-popover")?.classList.remove("open");
+  },180);
+}
+
+function sourceChip(doc,terms){
+  const button=document.createElement("button");
+  button.type="button";
+  button.className="source-chip";
+  button.setAttribute("aria-label",doc.document_title||"Source PDF");
+  button.dataset.docId=doc.document_id||"";
+  button.dataset.page=doc.pages[0]||1;
+  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("other")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
+
+  button.addEventListener("click",()=>{
+    if(doc.document_id){
+      window.open(citationUrl(doc.document_id,doc.pages[0]||1),"_blank","noopener");
+    }
+  });
+  button.addEventListener("mouseenter",()=>showSourcePopover(button,doc,terms));
+  button.addEventListener("mouseleave",hideSourcePopover);
+  button.addEventListener("focus",()=>showSourcePopover(button,doc,terms));
+  button.addEventListener("blur",hideSourcePopover);
+  return button;
+}
+
+function renderTurn(turn){
+  const section=document.createElement("section");
+  section.className="turn";
+
+  const docs=groupedRefs(turn);
+  const terms=questionTerms(turn.question);
+
+  section.innerHTML=
+    `<div class="turn-question"><p class="question-text">${escapeHtml(turn.question)}</p><div class="question-meta">${escapeHtml(turn.when)}</div></div>`;
+
+  if(docs.length){
+    const wrap=document.createElement("div");
+    wrap.className="turn-sources";
+
+    const row=document.createElement("div");
+    row.className="source-row";
+
+    const prev=document.createElement("button");
+    prev.type="button";
+    prev.className="source-nav-btn";
+    prev.textContent="‹";
+
+    const next=document.createElement("button");
+    next.type="button";
+    next.className="source-nav-btn";
+    next.textContent="›";
+
+    const rail=document.createElement("div");
+    rail.className="source-navigator";
+    docs.forEach(doc=>rail.appendChild(sourceChip(doc,terms)));
+
+    const updateButtons=()=>{
+      prev.disabled=rail.scrollLeft<=0;
+      next.disabled=rail.scrollLeft>=rail.scrollWidth-rail.clientWidth-1;
+    };
+
+    prev.addEventListener("click",()=>rail.scrollBy({left:-260,behavior:"smooth"}));
+    next.addEventListener("click",()=>rail.scrollBy({left:260,behavior:"smooth"}));
+    rail.addEventListener("scroll",updateButtons);
+    rail.addEventListener("wheel",event=>{
+      if(Math.abs(event.deltaY)>Math.abs(event.deltaX)){
+        rail.scrollLeft+=event.deltaY;
+        event.preventDefault();
+        updateButtons();
+      }
+    },{passive:false});
+
+    row.append(prev,rail,next);
+    wrap.appendChild(row);
+    section.appendChild(wrap);
+    requestAnimationFrame(updateButtons);
+  }else{
+    const refs=turn.references||[];
+    if(refs.length){
+      const wrap=document.createElement("div");
+      wrap.className="turn-sources";
+      const list=document.createElement("div");
+      list.className="refs";
+      refs.forEach(ref=>list.appendChild(citationLink(ref)));
+      wrap.appendChild(list);
+      section.appendChild(wrap);
+    }
+  }
+
+  const answer=document.createElement("div");
+  answer.className="answer-body";
+  const answerText=document.createElement("p");
+  answerText.className="answer-text";
+  answerText.textContent=turn.answer||"";
+  answer.appendChild(answerText);
+  section.appendChild(answer);
+
+  return section;
+}
+
+function appendTurn(turn){
+  state.turns.push(turn);
+  const transcript=$("transcript");
+  if(transcript.querySelector(".empty"))transcript.replaceChildren();
+
+  transcript.appendChild(renderTurn(turn));
+
+  // Composer always remains after the latest turn.
+  transcript.appendChild($("composer"));
+  $("composer").scrollIntoView({behavior:"smooth",block:"end"});
+}
+
+async function submitQuestion(){
+  if(state.loading)return;
+
+  const question=$("question").value.trim();
+  if(!(state.client&&state.pet&&question))return;
+
+  state.loading=true;
+  updateAsk();
+  $("ask-status").textContent="Searching patient records and answering…";
+
+  try{
+    const params=new URLSearchParams({
+      client_id:state.client.id,
+      pet_id:state.pet.id,
+      question
+    });
+
+    const data=await api(`/api/rag/answer?${params.toString()}`,{method:"POST"});
+
+    appendTurn({
+      when:new Date().toLocaleString([],{
+        hour:"numeric",
+        minute:"2-digit",
+        month:"short",
+        day:"numeric"
+      }),
+      question,
+      answer:data.answer||"",
+      citations:data.citations||[],
+      references:data.references||[]
+    });
+
+    $("question").value="";
+    autoResize($("question"));
+    state.firstAnswerSubmitted=true;
+    updateQuestionPrompt();
+    $("ask-status").textContent=`Completed in ${data.elapsed_seconds??"?"}s`;
+  }catch(error){
+    $("ask-status").textContent=`Unable to answer: ${error.message}`;
+  }finally{
+    state.loading=false;
+    updateAsk();
+  }
+}
+
+function autoResize(element){
+  element.style.height="auto";
+  element.style.height=Math.min(element.scrollHeight,180)+"px";
+}
+
+/* Client search:
+   - no preload
+   - no focus request
+   - 3-char minimum
+   - debounce
+   - abort superseded requests
+   - backend fragment order preserved */
+$("client-input").addEventListener("input",event=>{
+  state.client=null;
+  resetPatientSelection();
+  $("pet-input").disabled=true;
+  $("pet-input").placeholder="Select a client first";
+  updateAsk();
+
+  scheduleOptionSearch({
+    search:clientSearch,
+    kind:"client",
+    query:event.target.value,
+    input:event.target,
+    menu:$("client-menu"),
+    status:$("client-status"),
+    onPick:chooseClient
+  });
+});
+
+$("client-input").addEventListener("focus",()=>{
+  // Focus does not hit the backend. Re-open only results known to belong
+  // to the exact current query.
+  const q=$("client-input").value.trim();
+  if(q.length>=SEARCH_MIN && q===clientSearch.lastQuery && clientSearch.items.length){
+    renderMenu($("client-menu"),clientSearch.items,chooseClient);
+  }
+});
+
+/* Patient search uses the exact same lifecycle, scoped to the selected client. */
+$("pet-input").addEventListener("input",event=>{
+  state.pet=null;
+  updateAsk();
+
+  if(!state.client){
+    abortSearch(petSearch);
+    clearPetMenu();
+    $("pet-status").textContent="Select a client first";
+    return;
+  }
+
+  scheduleOptionSearch({
+    search:petSearch,
+    kind:"pet",
+    query:event.target.value,
+    clientId:state.client.id,
+    input:event.target,
+    menu:$("pet-menu"),
+    status:$("pet-status"),
+    onPick:choosePet
+  });
+});
+
+$("pet-input").addEventListener("focus",()=>{
+  const q=$("pet-input").value.trim();
+  if(
+    state.client &&
+    q.length>=SEARCH_MIN &&
+    q===petSearch.lastQuery &&
+    petSearch.items.length
+  ){
+    renderMenu($("pet-menu"),petSearch.items,choosePet);
+  }
+});
+
+$("question").addEventListener("input",event=>{
+  autoResize(event.target);
+  updateAsk();
+});
+
+$("question").addEventListener("keydown",event=>{
+  if(event.key==="Enter"&&event.ctrlKey){
+    event.preventDefault();
+    const element=event.target;
+    const start=element.selectionStart;
+    const end=element.selectionEnd;
+    element.value=element.value.slice(0,start)+"\n"+element.value.slice(end);
+    element.selectionStart=element.selectionEnd=start+1;
+    autoResize(element);
+    updateAsk();
+  }else if(event.key==="Enter"&&!event.shiftKey&&!event.ctrlKey){
+    event.preventDefault();
+    submitQuestion();
+  }
+});
+
+$("ask").addEventListener("click",submitQuestion);
+
+document.addEventListener("keydown",event=>{
+  if(event.key==="Escape"){
+    abortSearch(clientSearch);
+    abortSearch(petSearch);
+    clearClientMenu();
+    clearPetMenu();
+    hideSourcePopover();
+  }
+});
+
+document.addEventListener("click",event=>{
+  if(!event.target.closest(".field")){
+    clearClientMenu();
+    clearPetMenu();
+  }
+  if(!event.target.closest(".source-chip")&&!event.target.closest(".source-popover")){
+    hideSourcePopover();
+  }
+});
+
 updateQuestionPrompt();
-searchOptions("client","").then(data=>{state.clients=data.items||[];$("client-status").textContent=`${state.clients.length} clients loaded`;$("live-status").textContent="Ready";clearTranscript();}).catch(e=>$("client-status").textContent=`Unable to load clients: ${e.message}`);
 clearTranscript();
+$("live-status").textContent="Ready";
 </script>
 </body>
 </html>

@@ -1,25 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
-import time
-from pathlib import Path
 import sys
+import time
+import types
+import base64
+from pathlib import Path
 
 import pytest
 
 import scripts.rag_ui.catalog as rag_catalog
 from scripts.rag_ui.catalog import load_catalog
-from scripts.rag_ui.lambda_app import (
-    _answer_prompt,
-    _deterministic_retrieval_plan,
-    _execute_planned_retrieval,
-    _instinct_token,
-    _parse_planner_json,
-    _plan_retrieval,
-    _retrieval_planner_prompt,
-    lambda_handler,
-)
+import scripts.rag_ui.lambda_app as lambda_app
+from scripts.rag_ui.lambda_app import lambda_handler
 
 
 def write_sample_catalog(path: Path) -> None:
@@ -206,11 +201,14 @@ def test_lambda_serves_index_and_options(tmp_path, monkeypatch):
     sample = tmp_path / "sample.json"
     write_sample_catalog(sample)
     monkeypatch.setenv("RAG_UI_DATA_PATH", str(sample))
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html><title>packaged</title>", encoding="utf-8")
+    monkeypatch.setattr(lambda_app, "INDEX_PATH", static_dir / "index.html")
 
     index_response = lambda_handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}})
     assert index_response["statusCode"] == 200
-    assert "client-input" in index_response["body"]
-    assert "pet-input" in index_response["body"]
+    assert "packaged" in index_response["body"]
 
     options_response = lambda_handler(
         {
@@ -222,6 +220,40 @@ def test_lambda_serves_index_and_options(tmp_path, monkeypatch):
     payload = json.loads(options_response["body"])
     assert payload["kind"] == "pet"
     assert [item["label"] for item in payload["items"]] == ["Milo"]
+
+
+@pytest.mark.unit
+def test_serve_index_reads_packaged_static_html(monkeypatch, tmp_path):
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    index_path = static_dir / "index.html"
+    index_path.write_text("<!doctype html><title>packaged</title>", encoding="utf-8")
+
+    monkeypatch.setattr(lambda_app, "__file__", str(tmp_path / "lambda_app.py"))
+    monkeypatch.setattr(lambda_app, "INDEX_PATH", index_path)
+
+    response = lambda_app._serve_index()
+
+    assert response["statusCode"] == 200
+    assert response["headers"]["content-type"] == "text/html; charset=utf-8"
+    assert response["body"] == "<!doctype html><title>packaged</title>"
+
+
+@pytest.mark.unit
+def test_lambda_serves_pdf_icons_asset(monkeypatch, tmp_path):
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    icon_path = static_dir / "PDFIcons.png"
+    icon_bytes = b"\x89PNG\r\n\x1a\nfakepng"
+    icon_path.write_bytes(icon_bytes)
+
+    monkeypatch.setattr(lambda_app, "PDF_ICONS_PATH", icon_path)
+    response = lambda_app._serve_static_asset("/PDFIcons.png")
+
+    assert response["statusCode"] == 200
+    assert response["headers"]["content-type"] == "image/png"
+    assert response["isBase64Encoded"] is True
+    assert base64.b64decode(response["body"]) == icon_bytes
 
 
 @pytest.mark.integration
@@ -321,373 +353,109 @@ def test_lambda_serves_rag_answer_with_citations(monkeypatch):
     assert payload["answer"] == "The patient received Convenia on 2026-08-01."
     assert payload["citations"][0]["document_id"] == "doc-1"
     assert payload["citations"][0]["page_number"] == 1
+    assert payload["citations"][0]["source_page_url"] == "https://example.test/doc-1#page=1"
     assert payload["references"][0]["document_id"] == "doc-1"
     assert payload["references"][0]["source_uri"] == "https://example.test/doc-1"
 
 
-@pytest.mark.integration
-def test_document_page_redirects_via_cached_instinct_url(monkeypatch):
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._resolve_cached_instinct_url", lambda document_id, page_number, force_refresh=False: "https://instinct.test/file.pdf#page=1")
-
-    response = lambda_handler(
-        {
-            "rawPath": "/api/rag/documents/doc-1/pages/1",
-            "queryStringParameters": {"page": "1"},
-            "requestContext": {"http": {"method": "GET"}},
-        }
-    )
-    assert response["statusCode"] == 302
-    assert response["headers"]["location"] == "https://instinct.test/file.pdf#page=1"
-
-
 @pytest.mark.unit
-def test_document_page_redirect_uses_instinct_url_without_appending_page(monkeypatch):
+def test_call_openai_answer_uses_timeout_and_single_retry(monkeypatch):
     captured = {}
 
-    def fake_resolve(document_id, page_number, force_refresh=False):
-        captured["document_id"] = document_id
-        captured["page_number"] = page_number
-        return "https://instinct.test/file.pdf?signature=abc123"
+    fake_langchain_openai = types.ModuleType("langchain_openai")
 
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._resolve_cached_instinct_url", fake_resolve)
-
-    response = lambda_handler(
-        {
-            "rawPath": "/api/rag/documents/doc-1/pages/34",
-            "queryStringParameters": {"page": "34"},
-            "requestContext": {"http": {"method": "GET"}},
-        }
-    )
-    assert response["statusCode"] == 302
-    assert response["headers"]["location"] == "https://instinct.test/file.pdf?signature=abc123"
-    assert captured == {"document_id": "doc-1", "page_number": 34}
-    assert "page=34" not in response["headers"]["location"]
-
-
-@pytest.mark.unit
-def test_resolve_cached_instinct_url_appends_page_fragment_not_query(monkeypatch):
-    monkeypatch.setenv("RAG_UI_INSTINCT_URL_TTL_SECONDS", "1800")
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._create_chart_file_url", lambda chart_id, inline=True: "https://instinct.test/file.pdf?signature=abc123")
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._verify_instinct_url", lambda url, timeout=30: True)
-
-    from scripts.rag_ui.lambda_app import _resolve_cached_instinct_url
-
-    url = _resolve_cached_instinct_url("doc-1", 34, force_refresh=True)
-    assert url == "https://instinct.test/file.pdf?signature=abc123#page=34"
-    assert "?signature=abc123#page=34" in url
-    assert "&page=34" not in url
-
-
-@pytest.mark.unit
-def test_verify_instinct_url_accepts_get_after_head_failure(monkeypatch):
-    calls = []
-
-    class FakeResponse:
-        status = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    def fake_urlopen(request, timeout=30):
-        calls.append(request.method)
-        if request.method == "HEAD":
-            raise OSError("HEAD failed")
-        return FakeResponse()
-
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.urllib_request.urlopen", fake_urlopen)
-
-    from scripts.rag_ui.lambda_app import _verify_instinct_url
-
-    assert _verify_instinct_url("https://instinct.test/file.pdf?signature=abc123") is True
-    assert calls == ["HEAD", "GET"]
-
-
-@pytest.mark.unit
-def test_retrieval_planner_prompt_includes_all_intents_and_rules():
-    prompt = _retrieval_planner_prompt("When was the last dental?")
-    text = prompt["content"][0]["text"]
-    assert "SEMANTIC" in text
-    assert "RECENT" in text
-    assert "TIMELINE" in text
-    assert "EXHAUSTIVE" in text
-    assert "DOCUMENT" in text
-    assert "Do not answer the question" in text
-    assert "Return only JSON" in text
-
-
-@pytest.mark.unit
-def test_answer_prompt_is_evidence_only_and_mentions_grouping():
-    prompt = _answer_prompt("What happened at the last visit?", sources=[{"document_id": "doc-1"}])
-    text = prompt["content"][0]["text"]
-    assert "careful patient-record assistant" in text
-    assert "Use only the provided retrieved evidence" in text
-    assert "If the retrieved evidence is grouped by document" in text
-    assert "Do not invent facts" in text
-
-
-@pytest.mark.unit
-def test_parse_planner_json_handles_single_and_multi_requests():
-    single = _parse_planner_json('{"retrieval":"RECENT","query":"last dental"}')
-    multi = _parse_planner_json('{"requests":[{"retrieval":"RECENT","query":"last dental"},{"retrieval":"TIMELINE","query":"dental history"}]}')
-    assert single == {"retrieval": "RECENT", "query": "last dental"}
-    assert multi == {
-        "requests": [
-            {"retrieval": "RECENT", "query": "last dental"},
-            {"retrieval": "TIMELINE", "query": "dental history"},
-        ]
-    }
-
-
-@pytest.mark.unit
-def test_plan_retrieval_uses_langchain_planner_json(monkeypatch):
-    captured = {}
-
-    class FakeResponse:
-        content = '{"retrieval":"DOCUMENT","query":"March lab report"}'
-
-    class FakeChat:
+    class FakeChatOpenAI:
         def __init__(self, **kwargs):
-            captured["kwargs"] = kwargs
+            captured.update(kwargs)
 
         def invoke(self, messages):
-            captured["messages"] = messages
-            return FakeResponse()
+            return type("Resp", (), {"content": "The last documented dental cleaning date is 10/14/2021."})()
 
-    class FakeHuman:
-        def __init__(self, content):
-            self.content = content
+    fake_langchain_openai.ChatOpenAI = FakeChatOpenAI
 
-    class FakeSystem:
-        def __init__(self, content):
-            self.content = content
+    fake_messages = types.ModuleType("langchain_core.messages")
+    fake_messages.HumanMessage = lambda content: {"role": "user", "content": content}
+    fake_messages.SystemMessage = lambda content: {"role": "system", "content": content}
 
-    fake_openai = __import__("types").SimpleNamespace(ChatOpenAI=FakeChat)
-    fake_messages = __import__("types").SimpleNamespace(HumanMessage=FakeHuman, SystemMessage=FakeSystem)
-    monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_langchain_openai)
     monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_messages)
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._openai_api_key", lambda: "test-key")
+    monkeypatch.setattr(lambda_app, "_openai_api_key", lambda: "test-key")
 
-    plan = _plan_retrieval("What does the March lab report say?")
+    answer = lambda_app._call_openai_answer(
+        "What is the last dental cleaning date?",
+        [{"document_title": "Source PDF", "page_label": "Page 1", "source_page_url": "", "snippet": "Date: 10/14/2021 4:40 PM"}],
+    )
 
-    assert plan == {"retrieval": "DOCUMENT", "query": "March lab report"}
-    assert captured["kwargs"]["temperature"] == 0
-    assert any("strict retrieval planner" in getattr(msg, "content", "") for msg in captured["messages"])
-    assert any("What does the March lab report say?" in getattr(msg, "content", "") for msg in captured["messages"])
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "question,expected_intent",
-    [
-        ("When was the last dental?", "RECENT"),
-        ("What happened at the last visit?", "RECENT"),
-        ("What dates did we see him?", "TIMELINE"),
-        ("Has he ever had seizures?", "EXHAUSTIVE"),
-        ("What does the March lab report say?", "DOCUMENT"),
-        ("Find the most relevant record about allergies.", "SEMANTIC"),
-    ],
-)
-def test_planner_prompt_covers_question_to_intent_examples(question, expected_intent):
-    prompt = _retrieval_planner_prompt(question)
-    text = prompt["content"][0]["text"]
-    assert expected_intent in text
+    assert "10/14/2021" in answer
+    assert captured["timeout"] == 8
+    assert captured["max_retries"] == 1
+    assert captured["temperature"] == 0.2
+    assert captured["model"] == lambda_app._llm_model()
+    assert captured["api_key"] == "test-key"
 
 
 @pytest.mark.unit
-def test_execute_planned_retrieval_routes_single_and_multi_requests(monkeypatch):
-    planned = {}
+def test_call_openai_answer_fast_fails_on_timeout(monkeypatch):
+    fake_langchain_openai = types.ModuleType("langchain_openai")
 
-    def fake_plan(question, sources=None):
-        planned["question"] = question
-        return {
-            "requests": [
-                {"retrieval": "RECENT", "query": "recent dental"},
-                {"retrieval": "TIMELINE", "query": "dental history"},
-            ]
-        }
-
-    def fake_retrieve(intent, query, client_id, pet_id):
-        return (
-            [{"document_id": f"{intent}:{query}", "page_number": 1, "snippet": query}],
-            {f"{intent.lower()}_seconds": 0.01},
-        )
-
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._deterministic_retrieval_plan", lambda question: None)
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fake_plan)
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
-
-    hits, timing, plan = _execute_planned_retrieval("Compare his last dental with the previous one.", "client-1", "pet-1")
-    assert planned["question"] == "Compare his last dental with the previous one."
-    assert plan["requests"][0]["retrieval"] == "RECENT"
-    assert plan["requests"][1]["retrieval"] == "TIMELINE"
-    assert [hit["document_id"] for hit in hits] == ["RECENT:recent dental", "TIMELINE:dental history"]
-    assert timing["recent_seconds"] == 0.01
-    assert timing["timeline_seconds"] == 0.01
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "question,expected",
-    [
-        ("Find the most relevant record about allergies.", {"retrieval": "SEMANTIC", "query": "most relevant record about allergies"}),
-        ("When was the last dental cleaning date?", {"retrieval": "RECENT", "query": "dental cleaning"}),
-        ("What happened at the most recent visit?", {"retrieval": "RECENT", "query": "happened at visit"}),
-        ("What dates did we see him?", {"retrieval": "TIMELINE", "query": "dates did we see him"}),
-        ("Has he ever had seizures?", {"retrieval": "EXHAUSTIVE", "query": "has he ever had seizures"}),
-        ("What does the March lab report say?", {"retrieval": "DOCUMENT", "query": "march lab report"}),
-    ],
-)
-def test_deterministic_retrieval_plan_routes_common_questions(question, expected):
-    assert _deterministic_retrieval_plan(question) == expected
-
-
-@pytest.mark.unit
-def test_execute_planned_retrieval_skips_planner_for_recent_question(monkeypatch):
-    called = {"planner": False, "retrieve": False}
-
-    def fail_plan(*args, **kwargs):
-        called["planner"] = True
-        raise AssertionError("planner should not be called")
-
-    def fake_retrieve(intent, query, client_id, pet_id):
-        called["retrieve"] = True
-        return ([{"document_id": "doc-1", "page_number": 1, "snippet": query}], {"total_seconds": 0.01})
-
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fail_plan)
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
-
-    hits, timing, plan = _execute_planned_retrieval("What is the last dental cleaning date?", "client-1", "pet-1")
-
-    assert plan == {"retrieval": "RECENT", "query": "dental cleaning"}
-    assert called["planner"] is False
-    assert called["retrieve"] is True
-    assert hits[0]["snippet"] == "dental cleaning"
-    assert timing["total_seconds"] == 0.01
-
-
-@pytest.mark.unit
-def test_execute_planned_retrieval_falls_back_to_planner_for_ambiguous_question(monkeypatch):
-    called = {"planner": False}
-
-    def fake_plan(question, sources=None):
-        called["planner"] = True
-        return {"retrieval": "SEMANTIC", "query": "allergy question"}
-
-    def fake_retrieve(intent, query, client_id, pet_id):
-        return ([{"document_id": "doc-1", "page_number": 1, "snippet": query}], {"total_seconds": 0.02})
-
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._deterministic_retrieval_plan", lambda question: None)
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._plan_retrieval", fake_plan)
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._retrieve_with_intent", fake_retrieve)
-
-    hits, timing, plan = _execute_planned_retrieval("What should I know about him?", "client-1", "pet-1")
-
-    assert called["planner"] is True
-    assert plan == {"retrieval": "SEMANTIC", "query": "allergy question"}
-    assert hits[0]["snippet"] == "allergy question"
-    assert timing["total_seconds"] == 0.02
-
-
-@pytest.mark.unit
-def test_instinct_token_loads_from_secrets_manager(monkeypatch):
-    captured = {}
-
-    class FakeSecrets:
-        def get_secret_value(self, SecretId):
-            captured["SecretId"] = SecretId
-            return {"SecretString": json.dumps({"client_id": "instinct-id", "client_secret": "instinct-secret"})}
-
-    monkeypatch.delenv("TOKEN", raising=False)
-    monkeypatch.setenv("INSTINCT_CLIENT_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:secret:instinct")
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.boto3", __import__("types").SimpleNamespace(client=lambda name: FakeSecrets()))
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_base_url", lambda: "https://partner.instinctvet.test")
-
-    # We only need to prove the secret is read; short-circuit the token POST response.
-    def fake_urlopen(request, timeout=30):
-        class Resp:
-            def __enter__(self):
-                return self
-            def __exit__(self, exc_type, exc, tb):
-                return False
-            def read(self):
-                return json.dumps({"access_token": "token-123"}).encode("utf-8")
-        return Resp()
-
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.urllib_request.urlopen", fake_urlopen)
-
-    assert _instinct_token() == "token-123"
-    assert captured["SecretId"] == "arn:aws:secretsmanager:us-east-1:123456789012:secret:instinct"
-
-
-@pytest.mark.unit
-def test_call_openai_answer_logs_timing(monkeypatch, capsys):
-    class FakeResponse:
-        content = "Dental answer"
-
-    class FakeChat:
+    class SlowChatOpenAI:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+
         def invoke(self, messages):
-            return FakeResponse()
+            raise TimeoutError("request timed out")
 
-    class FakeHuman:
-        def __init__(self, content):
-            self.content = content
+    fake_langchain_openai.ChatOpenAI = SlowChatOpenAI
 
-    class FakeSystem:
-        def __init__(self, content):
-            self.content = content
+    fake_messages = types.ModuleType("langchain_core.messages")
+    fake_messages.HumanMessage = lambda content: {"role": "user", "content": content}
+    fake_messages.SystemMessage = lambda content: {"role": "system", "content": content}
 
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._llm_model", lambda: "gpt-test")
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._openai_api_key", lambda: "openai-test")
-    monkeypatch.setitem(sys.modules, "langchain_openai", __import__("types").SimpleNamespace(ChatOpenAI=FakeChat))
-    monkeypatch.setitem(sys.modules, "langchain_core.messages", __import__("types").SimpleNamespace(HumanMessage=FakeHuman, SystemMessage=FakeSystem))
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_langchain_openai)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_messages)
+    monkeypatch.setattr(lambda_app, "_openai_api_key", lambda: "test-key")
+    monkeypatch.setattr(lambda_app.urllib_request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("fallback should not run")))
 
-    from scripts.rag_ui.lambda_app import _call_openai_answer
-    assert _call_openai_answer("What is the last dental cleaning date?", [{"document_title": "Doc", "page_label": "Page 1", "source_page_url": "", "snippet": "10/14/2021"}]) == "Dental answer"
-    out = capsys.readouterr().out
-    assert "answer_model=gpt-test" in out
-    assert "answer_request_start" in out
+    started = time.perf_counter()
+    with pytest.raises(RuntimeError) as excinfo:
+        lambda_app._call_openai_answer(
+            "What is the last dental cleaning date?",
+            [{"document_title": "Source PDF", "page_label": "Page 1", "source_page_url": "", "snippet": "Date: 10/14/2021 4:40 PM"}],
+        )
+    elapsed = time.perf_counter() - started
 
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "question,expected_rule",
-    [
-        ("When was the last dental?", "latest / last / most recent"),
-        ("What happened at the last visit?", "latest / last / most recent"),
-        ("What dates did we see him?", "dates / timeline / history over time"),
-        ("Has he ever had seizures?", "ever / all / every / complete history / list all"),
-        ("What does the March lab report say?", "specific report / date / document type"),
-        ("Find the most relevant record about allergies.", "most relevant record"),
-    ],
-)
-def test_question_intent_matrix_is_represented(question, expected_rule):
-    # This is a planner contract smoke test: the examples in the prompt
-    # must keep the intent labels visible to the model.
-    prompt = _retrieval_planner_prompt(question)["content"][0]["text"]
-    assert expected_rule in prompt
+    assert "timed out" in str(excinfo.value).lower()
+    assert elapsed < 5
 
 
 @pytest.mark.unit
-def test_index_uses_load_once_and_local_filtering():
+def test_index_uses_request_driven_search_lifecycle():
     html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
-    assert "loadClientsOnce" in html
-    assert "loadPetsOnce" in html
-    assert "filterClientsLocally" in html
-    assert "filterPetsLocally" in html
-    assert 'kind: "client",\n        q: query' not in html
-    assert 'kind: "pet",\n        clientId: state.client.id,\n        q: query' not in html
+    assert 'const SEARCH_MIN=3;' in html
+    assert 'scheduleOptionSearch({' in html
+    assert 'abortSearch(clientSearch);' in html
+    assert 'abortSearch(petSearch);' in html
+    assert 'no preload' in html
+    assert 'no focus request' in html
+    assert '3-char minimum' in html
+    assert 'debounce' in html
+    assert 'abort superseded requests' in html
+    assert 'backend fragment order preserved' in html
+    assert 'Focus does not hit the backend' in html
+    assert 'if(q.length>=SEARCH_MIN && q===clientSearch.lastQuery && clientSearch.items.length)' in html
+    assert 'q.length>=SEARCH_MIN' in html
+    assert 'q===petSearch.lastQuery' in html
+    assert 'petSearch.items.length' in html
+    assert 'Searching…' in html
+    assert 'no initial/default client list is loaded' in html or 'Clear menus' in html or 'clearClientMenu()' in html
 
 
 @pytest.mark.integration
 def test_live_client_filter_performance_budget():
-    required = ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")
-    missing = [name for name in required if not __import__("os").environ.get(name)]
-    assert not missing, f"live PostgreSQL credentials are required for this integration test: {', '.join(missing)}"
+    required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
+    missing = [name for name in required if not os.environ.get(name, "").strip()]
+    if missing:
+        raise AssertionError(f"live DB creds are required for this integration test: {', '.join(missing)}")
 
     catalog = load_catalog()
     all_labels = [item["label"] for item in catalog.search_clients("")]
