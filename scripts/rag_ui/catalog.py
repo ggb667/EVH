@@ -139,13 +139,14 @@ def _path_exists(path: str) -> bool:
     return bool(path) and Path(path).expanduser().exists()
 
 
+def _is_test_context() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST", "").strip() or os.environ.get("RAG_UI_TEST_MODE", "").strip())
+
+
 def resolve_data_path(explicit_path: str | None = None) -> Path:
     default_paths = (
-        os.environ.get("RAG_UI_DB_PATH", "").strip(),
-        os.environ.get("RAG_UI_DATA_PATH", "").strip(),
         "/home/ggb66/dev/EVH/exports/instinct_identity.sqlite",
         "/home/ggb66/dev/EVH/exports/instinct_identity.db",
-        "/home/ggb66/dev/EVH/scripts/instinct_bulk_cache.json",
     )
 
     if explicit_path:
@@ -153,13 +154,19 @@ def resolve_data_path(explicit_path: str | None = None) -> Path:
         if candidate.exists():
             return candidate
 
+    if _is_test_context():
+        for env_name in ("RAG_UI_DB_PATH", "RAG_UI_DATA_PATH"):
+            raw_path = os.environ.get(env_name, "").strip()
+            if _path_exists(raw_path):
+                return Path(raw_path)
+
     for raw_path in default_paths:
         if _path_exists(raw_path):
             return Path(raw_path)
 
     raise FileNotFoundError(
-        "Could not find a RAG UI data source. Set RAG_UI_DATA_PATH or place "
-        "instinct_bulk_cache.json alongside the repo."
+        "Could not find a live RAG UI data source. Set production database "
+        "credentials or use explicit test paths only under pytest."
     )
 
 
@@ -1034,7 +1041,9 @@ def _load_cached_file_catalog(path: Path, force: bool = False) -> RagCatalog:
 
 
 def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> RagCatalog:
-    explicit_path = data_path or os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip()
+    explicit_path = data_path
+    if explicit_path is None and _is_test_context():
+        explicit_path = os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip()
     if explicit_path:
         return _load_cached_file_catalog(resolve_data_path(explicit_path), force=force)
 
@@ -1049,7 +1058,12 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
         _CATALOG_CACHE[cache_key] = (0.0, now, catalog)
         return catalog
 
-    return _load_cached_file_catalog(resolve_data_path(data_path), force=force)
+    if _is_test_context():
+        return _load_cached_file_catalog(resolve_data_path(data_path), force=force)
+    raise FileNotFoundError(
+        "No live RAG catalog source configured. Set production database "
+        "credentials or explicit live data path."
+    )
 
 
 def load_catalog(data_path: str | None = None) -> RagCatalog:

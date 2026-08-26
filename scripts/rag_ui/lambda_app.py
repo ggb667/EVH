@@ -33,9 +33,9 @@ _INSTINCT_URL_CACHE: dict[tuple[str, int], _InstinctUrlCacheEntry] = {}
 def _app_version() -> str:
     env_version = os.environ.get("RAG_UI_VERSION", "").strip()
     if env_version:
-      return env_version
+        return env_version
     try:
-        root = Path(__file__).resolve().parents[3]
+        root = Path(__file__).resolve().parents[5]
         return subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
             text=True,
@@ -659,7 +659,13 @@ def _serve_static_asset(path: str) -> dict:
 
 
 def _serve_version() -> dict:
-    return _json_response(200, {"version": _app_version()})
+    return _json_response(
+        200,
+        {
+            "version": _app_version(),
+            "lambda_version": os.environ.get("AWS_LAMBDA_FUNCTION_VERSION", "").strip() or "$LATEST",
+        },
+    )
 
 
 def _serve_options(event: dict) -> dict:
