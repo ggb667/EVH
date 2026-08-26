@@ -34,15 +34,7 @@ def _app_version() -> str:
     env_version = os.environ.get("RAG_UI_VERSION", "").strip()
     if env_version:
         return env_version
-    try:
-        root = Path(__file__).resolve().parents[5]
-        return subprocess.check_output(
-            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except Exception:
-        return "unknown"
+    return "unknown"
 
 
 def _headers(content_type: str) -> dict[str, str]:

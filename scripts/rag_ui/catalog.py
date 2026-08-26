@@ -720,15 +720,22 @@ def _initialize_client_search() -> tuple[tuple[ClientOption, ...], dict[str, Cli
     return clients, client_by_id, fragment_index
 
 
-if all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
+CLIENTS: tuple[ClientOption, ...] = ()
+CLIENT_BY_ID: dict[str, ClientOption] = {}
+CLIENT_FRAGMENT_INDEX: dict[str, set[str]] = {}
+
+
+def _ensure_client_search_initialized() -> None:
+    global CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX
+    if CLIENTS or CLIENT_BY_ID or CLIENT_FRAGMENT_INDEX:
+        return
+    if not all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
+        return
     CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX = _initialize_client_search()
-else:
-    CLIENTS = ()
-    CLIENT_BY_ID = {}
-    CLIENT_FRAGMENT_INDEX = {}
 
 
 def query_options_from_postgres(kind: str, query: str, client_id: str | None = None) -> list[dict[str, Any]]:
+    _ensure_client_search_initialized()
     kind = str(kind or "client").strip().lower()
     query_text = str(query or "").strip()
     total_started = time.perf_counter()
@@ -771,7 +778,7 @@ def query_options_from_postgres(kind: str, query: str, client_id: str | None = N
         print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=pet client_id={client_id} count={len(results or pets[:10])}", flush=True)
         return results or [item.as_dict() for item in pets[:10]]
 
-    clients = _postgres_client_options()
+    clients = CLIENTS or _postgres_client_options()
     if not query_text:
         print(f"[RAG_TIMING] ranking_seconds=0.000 kind=client query={query_text!r}", flush=True)
         print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
@@ -1076,16 +1083,3 @@ def load_catalog(data_path: str | None = None) -> RagCatalog:
     if data_path is None:
         _CATALOG_MEMORY = (time.time(), catalog)
     return catalog
-
-
-def _prime_catalog_memory() -> None:
-    global _CATALOG_MEMORY
-    if _CATALOG_MEMORY is not None:
-        return
-    try:
-        _CATALOG_MEMORY = (time.time(), refresh_catalog())
-    except Exception:
-        _CATALOG_MEMORY = None
-
-
-_prime_catalog_memory()

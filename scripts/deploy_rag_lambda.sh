@@ -94,6 +94,29 @@ aws lambda update-function-code \
   --query '{FunctionName:FunctionName,Version:Version,LastModified:LastModified}' \
   --output json
 
+aws lambda wait function-updated \
+  --function-name "$FUNCTION_NAME"
+
+echo "[deploy] stamp lambda version env"
+APP_VERSION="$(git rev-parse --short HEAD)"
+CURRENT_ENV_JSON="$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Environment.Variables' --output json)"
+python3 - "$APP_VERSION" "$CURRENT_ENV_JSON" <<'PY'
+import json
+import subprocess
+import sys
+
+version = sys.argv[1]
+current = json.loads(sys.argv[2] or "{}")
+current["RAG_UI_VERSION"] = version
+payload = json.dumps({"Variables": current})
+subprocess.check_call([
+    "aws", "lambda", "update-function-configuration",
+    "--function-name", "evh_instinct_rag_search",
+    "--environment", payload,
+    "--output", "json",
+])
+PY
+
 echo "[smoke] live lambda route check"
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
