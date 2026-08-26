@@ -7,6 +7,7 @@ import sys
 import time
 import types
 import base64
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,20 @@ import scripts.rag_ui.catalog as rag_catalog
 from scripts.rag_ui.catalog import load_catalog
 import scripts.rag_ui.lambda_app as lambda_app
 from scripts.rag_ui.lambda_app import lambda_handler
+
+
+def _has_postgres_driver() -> bool:
+    try:
+        if importlib.util.find_spec("psycopg") is not None:
+            return True
+    except ModuleNotFoundError:
+        pass
+    try:
+        if importlib.util.find_spec("pg8000.dbapi") is not None:
+            return True
+    except ModuleNotFoundError:
+        pass
+    return False
 
 
 def write_sample_catalog(path: Path) -> None:
@@ -491,6 +506,8 @@ def test_index_uses_request_driven_search_lifecycle():
 
 @pytest.mark.integration
 def test_live_client_filter_candidate_retention():
+    if not _has_postgres_driver():
+        pytest.skip("Postgres driver unavailable in local test environment")
     required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
     missing = [name for name in required if not os.environ.get(name, "").strip()]
     if missing:
@@ -530,6 +547,8 @@ def test_live_client_filter_candidate_retention():
 
 @pytest.mark.integration
 def test_live_client_filter_ranking_contract():
+    if not _has_postgres_driver():
+        pytest.skip("Postgres driver unavailable in local test environment")
     required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
     missing = [name for name in required if not os.environ.get(name, "").strip()]
     if missing:
@@ -552,6 +571,8 @@ def test_live_client_filter_ranking_contract():
 
 @pytest.mark.integration
 def test_live_client_filter_performance_budget():
+    if not _has_postgres_driver():
+        pytest.skip("Postgres driver unavailable in local test environment")
     required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
     missing = [name for name in required if not os.environ.get(name, "").strip()]
     if missing:

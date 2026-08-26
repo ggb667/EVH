@@ -600,7 +600,7 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
               account_id as id,
               coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id) as label,
               coalesce(nullif(pims_code, ''), account_id) as secondary
-            from public.instinct_owner_lookup_norm
+            from public.instinct_owner_lookup
             """
         )
         execute_seconds = time.perf_counter() - execute_started
@@ -977,7 +977,7 @@ def _load_catalog_from_postgres() -> RagCatalog:
               coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id) as label,
               coalesce(nullif(pims_code, ''), account_id) as secondary,
               coalesce(owner_name, '') as owner_name
-            from public.instinct_owner_lookup_norm
+            from public.instinct_owner_lookup
             """
         )
         owner_rows = cursor.fetchall()
