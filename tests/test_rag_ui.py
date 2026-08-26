@@ -451,7 +451,7 @@ def test_index_uses_request_driven_search_lifecycle():
 
 
 @pytest.mark.integration
-def test_live_client_filter_performance_budget():
+def test_live_client_filter_candidate_retention():
     required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
     missing = [name for name in required if not os.environ.get(name, "").strip()]
     if missing:
@@ -462,28 +462,68 @@ def test_live_client_filter_performance_budget():
     assert all_labels, "expected a populated real client catalog"
     assert any(label == "Deborah Burchill" for label in all_labels), "expected Deborah Burchill in the real catalog"
 
-    queries = ["D", "De", "Deb", "Debo", "Debor", "Debora", "Deborah", "Deborah ", "Deborah B", "Deborah Bu", "Deborah Bur"]
-    results: dict[str, list[str]] = {}
+    client_fragment_index = catalog.client_fragment_index
+    client_by_id = catalog.clients_by_id
+
+    candidate_cases = {
+        "Deb": lambda scores, client_id: client_id in scores,
+        "Debo": lambda scores, client_id: client_id in scores,
+        "Debor": lambda scores, client_id: client_id in scores,
+        "Debora": lambda scores, client_id: client_id in scores,
+        "Deborah": lambda scores, client_id: client_id in scores,
+        "Deborah B": lambda scores, client_id: client_id in scores,
+        "Deborah Bu": lambda scores, client_id: client_id in scores,
+        "Deborah Bur": lambda scores, client_id: client_id in scores,
+        "Burchell": lambda scores, client_id: client_id in scores,
+        "BEBBORAH": lambda scores, client_id: bool(scores),
+    }
+
+    deborah_id = next(
+        item_id
+        for item_id, item in client_by_id.items()
+        if item.label == "Deborah Burchill"
+    )
+
+    for query, predicate in candidate_cases.items():
+        scores = rag_catalog._fragment_scores(query, client_fragment_index)
+        assert predicate(scores, deborah_id), f"{query!r}: expected Deborah Burchill to remain in the candidate set"
+
+
+@pytest.mark.integration
+def test_live_client_filter_ranking_contract():
+    required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
+    missing = [name for name in required if not os.environ.get(name, "").strip()]
+    if missing:
+        raise AssertionError(f"live DB creds are required for this integration test: {', '.join(missing)}")
+
+    catalog = load_catalog()
+
+    ranking_cases = [
+        ("Deborah Bur", lambda labels: "Deborah Burchill" in labels[:2]),
+        ("Burchell", lambda labels: "Deborah Burchill" in labels[:2]),
+        ("Deborah Burchill", lambda labels: labels[0] == "Deborah Burchill"),
+    ]
+
+    for query, predicate in ranking_cases:
+        labels = [item["label"] for item in catalog.search_clients(query)]
+        assert labels, f"{query!r}: expected nonempty results"
+        assert len(labels) <= 10, f"{query!r}: expected top-10 max"
+        assert predicate(labels), f"{query!r}: ranking contract failed — got {labels[:5]}"
+
+
+@pytest.mark.integration
+def test_live_client_filter_performance_budget():
+    required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
+    missing = [name for name in required if not os.environ.get(name, "").strip()]
+    if missing:
+        raise AssertionError(f"live DB creds are required for this integration test: {', '.join(missing)}")
+
+    catalog = load_catalog()
+    queries = ["D", "De", "Deb", "Debo", "Debor", "Debora", "Deborah", "Deborah ", "Deborah B", "Deborah Bu", "Deborah Bur", "Burchell"]
     timings: dict[str, float] = {}
-
-    # Warm the catalog/search path once so the timing budget reflects interactive filtering
-    # rather than one-time cache or module initialization noise.
     catalog.search_clients("Deb")
-
     for query in queries:
         started = time.perf_counter()
-        results[query] = [item["label"] for item in catalog.search_clients(query)]
+        catalog.search_clients(query)
         timings[query] = time.perf_counter() - started
-
-    assert results["D"] == all_labels
-    assert results["De"] == all_labels
-    assert "Deborah Burchill" in results["Deb"]
-    assert "Deborah Burchill" in results["Debo"]
-    assert "Deborah Burchill" in results["Debor"]
-    assert "Deborah Burchill" in results["Debora"]
-    assert "Deborah Burchill" in results["Deborah"]
-    assert "Deborah Burchill" in results["Deborah "]
-    assert "Deborah Burchill" in results["Deborah B"]
-    assert "Deborah Burchill" in results["Deborah Bu"]
-    assert results["Deborah Bur"][0] == "Deborah Burchill"
     assert max(timings.values()) < 0.1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import heapq
 import os
 import re
 import sqlite3
@@ -39,6 +40,21 @@ def _token_fragments(token: str, min_len: int = 3, max_len: int = 7) -> set[str]
     return fragments
 
 
+def _token_fragment_weights(token: str, min_len: int = 3, max_len: int = 7) -> dict[str, int]:
+    token = re.sub(r"[^A-Z0-9]+", "", str(token or "").upper())
+    fragments: dict[str, int] = {}
+    if len(token) < min_len:
+        return fragments
+    for length in range(min_len, min(7, len(token)) + 1):
+        fragment = token[:length]
+        fragments[fragment] = max(fragments.get(fragment, 0), length + 1)
+    for length in range(4, min(len(token), max_len) + 1):
+        for start in range(0, len(token) - length + 1):
+            fragment = token[start : start + length]
+            fragments[fragment] = max(fragments.get(fragment, 0), length)
+    return fragments
+
+
 def _build_fragment_index(items: Iterable[Any], min_len: int = 3, max_len: int = 7) -> dict[str, set[str]]:
     index: dict[str, set[str]] = {}
     for item in items:
@@ -53,9 +69,9 @@ def _fragment_scores(query: str, index: dict[str, set[str]], min_len: int = 3, m
     totals: dict[str, int] = {}
     for token in _query_tokens(query):
         per_token: dict[str, int] = {}
-        for fragment in _token_fragments(token, min_len=min_len, max_len=max_len):
+        for fragment, fragment_score in _token_fragment_weights(token, min_len=min_len, max_len=max_len).items():
             for item_id in index.get(fragment, ()): 
-                score = len(fragment)
+                score = fragment_score
                 if score > per_token.get(item_id, 0):
                     per_token[item_id] = score
         for item_id, score in per_token.items():
@@ -63,17 +79,56 @@ def _fragment_scores(query: str, index: dict[str, set[str]], min_len: int = 3, m
     return totals
 
 
-def _rank_items(items: list[Any], scores: dict[str, int], limit: int = 10) -> list[Any]:
-    return sorted(
-        items,
-        key=lambda item: (
-            -scores.get(str(item.id), 0),
-            len(str(item.label)),
-            str(item.label).upper()[::-1],
-            str(item.secondary).upper()[::-1],
-            str(item.id),
-        ),
-    )[:limit]
+@lru_cache(maxsize=4096)
+def _token_fragment_cache(token: str) -> frozenset[str]:
+    return frozenset(_token_fragments(token))
+
+
+@lru_cache(maxsize=4096)
+def _token_prefix_cache(token: str) -> tuple[str, ...]:
+    token = re.sub(r"[^A-Z0-9]+", "", str(token or "").upper())
+    prefixes: list[str] = []
+    if len(token) < 3:
+        return tuple(prefixes)
+    for length in range(3, min(7, len(token)) + 1):
+        prefixes.append(token[:length])
+    return tuple(prefixes)
+
+
+def _item_rank_key(query_tokens: list[str], item: Any, scores: dict[str, int]) -> tuple[Any, ...]:
+    search_tokens = _search_tokens(f"{getattr(item, 'label', '')} {getattr(item, 'secondary', '')}")
+    token_prefix_evidence = 0
+    token_length_score = 0
+    for query_token in query_tokens:
+        query_fragments = _token_fragment_cache(query_token)
+        query_prefixes = _token_prefix_cache(query_token)
+        best_prefix = 0
+        best_token_length = 0
+        for token in search_tokens:
+            token_fragments = _token_fragment_cache(token)
+            if query_fragments.isdisjoint(token_fragments):
+                continue
+            best_token_length = max(best_token_length, len(token))
+            for prefix in query_prefixes:
+                if prefix in token_fragments:
+                    best_prefix = max(best_prefix, len(prefix) + 1)
+        token_prefix_evidence += best_prefix
+        token_length_score += best_token_length
+    return (
+        scores.get(str(item.id), 0),
+        token_prefix_evidence,
+        token_length_score,
+        len(str(item.label)),
+        str(item.label).upper()[::-1],
+        str(item.secondary).upper()[::-1],
+        str(item.id),
+    )
+
+
+def _rank_items(query: str, items_by_id: dict[str, Any], scores: dict[str, int], limit: int = 10) -> list[Any]:
+    query_tokens = _query_tokens(query)
+    scored_items = [items_by_id[item_id] for item_id in scores if item_id in items_by_id]
+    return heapq.nlargest(limit, scored_items, key=lambda item: _item_rank_key(query_tokens, item, scores))
 
 
 def _join_non_empty(parts: Iterable[Any]) -> str:
@@ -277,7 +332,8 @@ class RagCatalog:
         scores = _fragment_scores(query, self.client_fragment_index)
         if not scores:
             return [item.as_dict() for item in self.clients]
-        return [self.clients_by_id[item_id].as_dict() for item_id in sorted(scores, key=scores.get, reverse=True)]
+        ranked = _rank_items(query, self.clients_by_id, scores)
+        return [item.as_dict() for item in ranked]
 
     def search_pets(self, client_id: str | None, query: str) -> list[dict[str, Any]]:
         if not client_id or client_id not in self.pets_by_client:
@@ -289,7 +345,8 @@ class RagCatalog:
         scores = _fragment_scores(query, self.pet_fragment_indexes.get(client_id, {}))
         if not scores:
             return [item.as_dict() for item in source]
-        return [self.pets_by_id[item_id].as_dict() for item_id in sorted(scores, key=scores.get, reverse=True)]
+        ranked = _rank_items(query, self.pets_by_id, scores)
+        return [item.as_dict() for item in ranked]
 
 
 @dataclass(frozen=True)
@@ -522,11 +579,15 @@ def search_pet_chunks_by_embedding(client_id: str, pet_id: str | None, question:
 
 @lru_cache(maxsize=64)
 def _postgres_client_options() -> tuple[ClientOption, ...]:
+    started = time.perf_counter()
     connection = _pg_connect()
+    connect_seconds = time.perf_counter() - started
+    print(f"[RAG_TIMING] pg_connect_seconds={connect_seconds:.3f} kind=client", flush=True)
     if connection is None:
         return ()
     cursor = connection.cursor()
     try:
+        execute_started = time.perf_counter()
         cursor.execute(
             """
             select
@@ -536,7 +597,12 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
             from public.instinct_owner_lookup_norm
             """
         )
+        execute_seconds = time.perf_counter() - execute_started
+        print(f"[RAG_TIMING] query_execute_seconds={execute_seconds:.3f} kind=client", flush=True)
+        fetch_started = time.perf_counter()
         rows = cursor.fetchall()
+        fetch_seconds = time.perf_counter() - fetch_started
+        print(f"[RAG_TIMING] fetch_seconds={fetch_seconds:.3f} kind=client count={len(rows)}", flush=True)
         return tuple(
             ClientOption(
                 id=str(row[0] or "").strip(),
@@ -553,16 +619,29 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
         connection.close()
 
 
+@lru_cache(maxsize=1)
+def _postgres_client_fragment_index() -> dict[str, set[str]]:
+    started = time.perf_counter()
+    index = _build_fragment_index(_postgres_client_options())
+    build_seconds = time.perf_counter() - started
+    print(f"[RAG_TIMING] fragment_index_build_seconds={build_seconds:.3f} kind=client fragment_count={len(index)}", flush=True)
+    return index
+
+
 @lru_cache(maxsize=256)
 def _postgres_pet_options(client_id: str) -> tuple[PetOption, ...]:
     client_id = str(client_id or "").strip()
     if not client_id:
         return ()
+    started = time.perf_counter()
     connection = _pg_connect()
+    connect_seconds = time.perf_counter() - started
+    print(f"[RAG_TIMING] pg_connect_seconds={connect_seconds:.3f} kind=pet client_id={client_id}", flush=True)
     if connection is None:
         return ()
     cursor = connection.cursor()
     try:
+        execute_started = time.perf_counter()
         cursor.execute(
             """
             select
@@ -577,7 +656,12 @@ def _postgres_pet_options(client_id: str) -> tuple[PetOption, ...]:
             """,
             [client_id],
         )
+        execute_seconds = time.perf_counter() - execute_started
+        print(f"[RAG_TIMING] query_execute_seconds={execute_seconds:.3f} kind=pet client_id={client_id}", flush=True)
+        fetch_started = time.perf_counter()
         rows = cursor.fetchall()
+        fetch_seconds = time.perf_counter() - fetch_started
+        print(f"[RAG_TIMING] fetch_seconds={fetch_seconds:.3f} kind=pet client_id={client_id} count={len(rows)}", flush=True)
         return tuple(
             PetOption(
                 id=str(row[0] or "").strip(),
@@ -607,9 +691,41 @@ def _postgres_pet_options(client_id: str) -> tuple[PetOption, ...]:
         connection.close()
 
 
+@lru_cache(maxsize=256)
+def _postgres_pet_fragment_index(client_id: str) -> dict[str, set[str]]:
+    started = time.perf_counter()
+    index = _build_fragment_index(_postgres_pet_options(client_id))
+    build_seconds = time.perf_counter() - started
+    print(f"[RAG_TIMING] fragment_index_build_seconds={build_seconds:.3f} kind=pet client_id={client_id} fragment_count={len(index)}", flush=True)
+    return index
+
+
+def _initialize_client_search() -> tuple[tuple[ClientOption, ...], dict[str, ClientOption], dict[str, set[str]]]:
+    started = time.perf_counter()
+    clients = _postgres_client_options()
+    client_by_id = {item.id: item for item in clients}
+    fragment_index = _build_fragment_index(clients)
+    build_seconds = time.perf_counter() - started
+    print(
+        f"[RAG_TIMING] client_search_init_seconds={build_seconds:.3f} "
+        f"client_count={len(clients)} fragment_count={len(fragment_index)}",
+        flush=True,
+    )
+    return clients, client_by_id, fragment_index
+
+
+if all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
+    CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX = _initialize_client_search()
+else:
+    CLIENTS = ()
+    CLIENT_BY_ID = {}
+    CLIENT_FRAGMENT_INDEX = {}
+
+
 def query_options_from_postgres(kind: str, query: str, client_id: str | None = None) -> list[dict[str, Any]]:
     kind = str(kind or "client").strip().lower()
     query_text = str(query or "").strip()
+    total_started = time.perf_counter()
 
     if kind == "pet":
         client_id = str(client_id or "").strip()
@@ -617,24 +733,69 @@ def query_options_from_postgres(kind: str, query: str, client_id: str | None = N
             return []
         pets = _postgres_pet_options(client_id)
         if not query_text:
+            print(f"[RAG_TIMING] ranking_seconds=0.000 kind=pet client_id={client_id} query={query_text!r}", flush=True)
+            print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=pet client_id={client_id} count={len(pets[:10])}", flush=True)
             return [item.as_dict() for item in pets[:10]]
-        index = _build_fragment_index(pets)
+        ranking_started = time.perf_counter()
+        index = _postgres_pet_fragment_index(client_id)
+        print(f"[RAG_TIMING] fragment_count={len(index)} kind=pet client_id={client_id}", flush=True)
         scores = _fragment_scores(query_text, index)
+        print(f"[RAG_TIMING] candidate_count={len(scores)} kind=pet client_id={client_id}", flush=True)
         if not scores:
+            ranking_seconds = time.perf_counter() - ranking_started
+            print(f"[RAG_TIMING] fragment_scores_seconds={ranking_seconds:.3f} kind=pet client_id={client_id}", flush=True)
+            print(f"[RAG_TIMING] candidate_lookup_seconds=0.000 kind=pet client_id={client_id}", flush=True)
+            print(f"[RAG_TIMING] top10_seconds=0.000 kind=pet client_id={client_id}", flush=True)
+            print(f"[RAG_TIMING] ranking_seconds={ranking_seconds:.3f} kind=pet client_id={client_id} query={query_text!r}", flush=True)
+            print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=pet client_id={client_id} count={len(pets[:10])}", flush=True)
             return [item.as_dict() for item in pets[:10]]
-        ranked = _rank_items(pets, scores)
-        results = [item.as_dict() for item in ranked if scores.get(str(item.id), 0) > 0]
+        pet_map = {item.id: item for item in pets}
+        lookup_started = time.perf_counter()
+        ranked = _rank_items(query_text, pet_map, scores)
+        candidate_lookup_seconds = time.perf_counter() - lookup_started
+        top10_started = time.perf_counter()
+        results = [item.as_dict() for item in ranked]
+        top10_seconds = time.perf_counter() - top10_started
+        ranking_seconds = time.perf_counter() - ranking_started
+        fragment_scores_seconds = ranking_seconds - candidate_lookup_seconds - top10_seconds
+        print(f"[RAG_TIMING] fragment_scores_seconds={fragment_scores_seconds:.3f} kind=pet client_id={client_id}", flush=True)
+        print(f"[RAG_TIMING] candidate_lookup_seconds={candidate_lookup_seconds:.3f} kind=pet client_id={client_id}", flush=True)
+        print(f"[RAG_TIMING] top10_seconds={top10_seconds:.3f} kind=pet client_id={client_id}", flush=True)
+        print(f"[RAG_TIMING] ranking_seconds={ranking_seconds:.3f} kind=pet client_id={client_id} query={query_text!r}", flush=True)
+        print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=pet client_id={client_id} count={len(results or pets[:10])}", flush=True)
         return results or [item.as_dict() for item in pets[:10]]
 
     clients = _postgres_client_options()
     if not query_text:
+        print(f"[RAG_TIMING] ranking_seconds=0.000 kind=client query={query_text!r}", flush=True)
+        print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
         return [item.as_dict() for item in clients[:10]]
-    index = _build_fragment_index(clients)
+    ranking_started = time.perf_counter()
+    index = CLIENT_FRAGMENT_INDEX or _postgres_client_fragment_index()
+    print(f"[RAG_TIMING] fragment_count={len(index)} kind=client", flush=True)
     scores = _fragment_scores(query_text, index)
+    print(f"[RAG_TIMING] candidate_count={len(scores)} kind=client", flush=True)
     if not scores:
+        ranking_seconds = time.perf_counter() - ranking_started
+        print(f"[RAG_TIMING] fragment_scores_seconds={ranking_seconds:.3f} kind=client", flush=True)
+        print(f"[RAG_TIMING] candidate_lookup_seconds=0.000 kind=client", flush=True)
+        print(f"[RAG_TIMING] top10_seconds=0.000 kind=client", flush=True)
+        print(f"[RAG_TIMING] ranking_seconds={ranking_seconds:.3f} kind=client query={query_text!r}", flush=True)
+        print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
         return [item.as_dict() for item in clients[:10]]
-    ranked = _rank_items(clients, scores)
-    results = [item.as_dict() for item in ranked if scores.get(str(item.id), 0) > 0]
+    lookup_started = time.perf_counter()
+    ranked = _rank_items(query_text, CLIENT_BY_ID or {item.id: item for item in clients}, scores)
+    candidate_lookup_seconds = time.perf_counter() - lookup_started
+    top10_started = time.perf_counter()
+    results = [item.as_dict() for item in ranked]
+    top10_seconds = time.perf_counter() - top10_started
+    ranking_seconds = time.perf_counter() - ranking_started
+    fragment_scores_seconds = ranking_seconds - candidate_lookup_seconds - top10_seconds
+    print(f"[RAG_TIMING] fragment_scores_seconds={fragment_scores_seconds:.3f} kind=client", flush=True)
+    print(f"[RAG_TIMING] candidate_lookup_seconds={candidate_lookup_seconds:.3f} kind=client", flush=True)
+    print(f"[RAG_TIMING] top10_seconds={top10_seconds:.3f} kind=client", flush=True)
+    print(f"[RAG_TIMING] ranking_seconds={ranking_seconds:.3f} kind=client query={query_text!r}", flush=True)
+    print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(results or clients[:10])}", flush=True)
     return results or [item.as_dict() for item in clients[:10]]
 
 def _client_display_name(account: dict[str, Any]) -> str:
