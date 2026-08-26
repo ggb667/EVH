@@ -50,11 +50,11 @@ class FakeClient:
         self._accounts = accounts or []
         self._patients = patients or []
 
-    def iter_accounts(self, updated_since):
-        return list(self._accounts)
+    def iter_accounts(self):
+        return list(self._accounts), 0.0
 
-    def iter_patients(self, updated_since):
-        return list(self._patients)
+    def iter_patients(self):
+        return list(self._patients), 0.0
 
 
 def test_instinct_api_sync_client_pages_accounts_and_patients(monkeypatch):
@@ -97,11 +97,13 @@ def test_instinct_api_sync_client_pages_accounts_and_patients(monkeypatch):
     monkeypatch.setattr(sync.urllib_request, "urlopen", fake_urlopen)
 
     client = sync.InstinctApiSyncClient("https://partner.instinctvet.com", "cid", "secret")
-    assert [row["id"] for row in client.iter_accounts("2026-08-01T00:00:00Z")] == ["acct-1", "acct-2"]
-    assert [row["id"] for row in client.iter_patients("2026-08-01T00:00:00Z")] == [1, 2]
-    assert calls[0][1]["updatedSince"] == "2026-08-01T00:00:00Z"
+    accounts, _ = client.iter_accounts()
+    patients, _ = client.iter_patients()
+    assert [row["id"] for row in accounts] == ["acct-1", "acct-2"]
+    assert [row["id"] for row in patients] == [1, 2]
+    assert calls[0][1]["limit"] == "100"
     assert "pageCursor" in calls[1][1]
-    assert calls[2][1]["updatedSince"] == "2026-08-01T00:00:00Z"
+    assert calls[2][1]["limit"] == "100"
     assert "pageCursor" in calls[3][1]
 
 
@@ -158,71 +160,35 @@ def test_patient_payload_preserves_merge_and_deleted():
     assert payload["deleted_at"].isoformat().startswith("2026-08-25T13:00:00")
 
 
-def test_sync_accounts_commits_before_advancing_watermark(monkeypatch, tmp_path):
+def test_refresh_identity_tables_builds_and_swaps_atomically(monkeypatch):
     conn = DummyConn()
     client = FakeClient(
         accounts=[
             {"id": "acct-1", "pimsCode": "P001", "updatedAt": "2026-08-25T12:34:56Z", "primaryContact": {"nameFirst": "Alpha", "nameLast": "One"}},
-        ]
-    )
-    watermark = sync.sync_accounts(client, conn, None)
-    assert conn.commit_count == 1
-    assert watermark == "2026-08-25T12:34:56Z"
-    assert "INSERT INTO public.instinct_owner_lookup" in conn.cursor_obj.sql[0][0]
-
-
-def test_sync_patients_commits_before_advancing_watermark():
-    conn = DummyConn()
-    client = FakeClient(
+        ],
         patients=[
             {"id": 11, "accountId": "acct-1", "name": "Milo", "updatedAt": "2026-08-25T12:34:56Z", "account": {"primaryContact": {"nameFirst": "Alpha", "nameLast": "One"}}},
         ]
     )
-    watermark = sync.sync_patients(client, conn, None)
-    assert conn.commit_count == 1
-    assert watermark == "2026-08-25T12:34:56Z"
-    assert "INSERT INTO public.instinct_patient_lookup" in conn.cursor_obj.sql[0][0]
+    result = sync.refresh_identity_tables(client, conn)
+    assert result["accounts"]["count"] == 1
+    assert result["patients"]["count"] == 1
+    assert conn.commit_count >= 2
+    sql = [stmt for stmt, _ in conn.cursor_obj.sql]
+    assert any("CREATE TABLE public.instinct_owner_lookup_refresh" in stmt for stmt in sql)
+    assert any("TRUNCATE public.instinct_owner_lookup, public.instinct_patient_lookup" in stmt for stmt in sql)
+    assert any("INSERT INTO public.instinct_owner_lookup_refresh" in stmt for stmt in sql)
+    assert any("INSERT INTO public.instinct_patient_lookup_refresh" in stmt for stmt in sql)
 
 
-def test_main_does_not_advance_watermark_on_failure(monkeypatch, tmp_path):
-    state = tmp_path / "state.json"
-    state.write_text(json.dumps({"accounts_watermark": "old", "patients_watermark": "old"}))
-
-    monkeypatch.setenv("INSTINCT_CLIENT_ID", "cid")
-    monkeypatch.setenv("INSTINCT_CLIENT_SECRET", "secret")
-
-    class DummySyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    monkeypatch.setattr(sync, "InstinctApiSyncClient", DummySyncClient)
-    monkeypatch.setattr(sync, "_connect", lambda: DummyConn())
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(sync, "sync_accounts", boom)
+def test_refresh_failure_leaves_previous_live_dataset_intact(monkeypatch):
+    conn = DummyConn()
+    client = FakeClient(
+        accounts=[{"id": "acct-1", "updatedAt": "2026-08-25T12:34:56Z", "primaryContact": {"nameFirst": "Alpha", "nameLast": "One"}}],
+        patients=[{"id": 11, "accountId": "acct-1", "name": "Milo", "updatedAt": "2026-08-25T12:34:56Z"}],
+    )
+    monkeypatch.setattr(sync, "_replace_live_tables", lambda conn: (_ for _ in ()).throw(RuntimeError("swap failed")))
     with pytest.raises(RuntimeError):
-        sync.main(["--state-file", str(state), "--accounts-only", "--base-url", "https://partner.instinctvet.com"])
-    saved = json.loads(state.read_text())
-    assert saved["accounts_watermark"] == "old"
-
-
-def test_sync_main_writes_watermarks_after_success(monkeypatch, tmp_path):
-    state = tmp_path / "state.json"
-    monkeypatch.setenv("INSTINCT_CLIENT_ID", "cid")
-    monkeypatch.setenv("INSTINCT_CLIENT_SECRET", "secret")
-
-    class DummySyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    monkeypatch.setattr(sync, "InstinctApiSyncClient", DummySyncClient)
-    monkeypatch.setattr(sync, "_connect", lambda: DummyConn())
-    monkeypatch.setattr(sync, "sync_accounts", lambda client, conn, watermark: "acct-watermark")
-    monkeypatch.setattr(sync, "sync_patients", lambda client, conn, watermark: "pat-watermark")
-    code = sync.main(["--state-file", str(state), "--base-url", "https://partner.instinctvet.com"])
-    assert code == 0
-    saved = json.loads(state.read_text())
-    assert saved["accounts_watermark"] == "acct-watermark"
-    assert saved["patients_watermark"] == "pat-watermark"
+        sync.refresh_identity_tables(client, conn)
+    sql = [stmt for stmt, _ in conn.cursor_obj.sql]
+    assert not any("TRUNCATE public.instinct_owner_lookup, public.instinct_patient_lookup" in stmt for stmt in sql)

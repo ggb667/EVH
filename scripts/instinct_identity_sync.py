@@ -3,12 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
-
 from urllib import request as urllib_request
-from urllib.error import HTTPError
 
 try:
     import psycopg
@@ -18,6 +16,10 @@ except Exception:  # pragma: no cover - optional in unit tests
 
 OWNER_TABLE = "public.instinct_owner_lookup"
 PATIENT_TABLE = "public.instinct_patient_lookup"
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -32,6 +34,13 @@ def _parse_dt(value: Any) -> datetime | None:
 
 def _as_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _merge_target_id(value: Any) -> int | None:
+    try:
+        return int(value)
+    except Exception:
+        return None
 
 
 def _pick_contact(account: dict[str, Any], kind: str) -> str:
@@ -79,13 +88,6 @@ def _owner_name(account: dict[str, Any]) -> str:
 
 def _patient_name(patient: dict[str, Any]) -> str:
     return _as_text(patient.get("name")) or _as_text(patient.get("pimsCode")) or _as_text(patient.get("id"))
-
-
-def _merge_target_id(value: Any) -> int | None:
-    try:
-        return int(value)
-    except Exception:
-        return None
 
 
 def _db_url() -> str:
@@ -151,13 +153,12 @@ class InstinctApiSyncClient:
         with urllib_request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def iter_accounts(self, updated_since: str | None) -> list[dict[str, Any]]:
+    def iter_accounts(self) -> tuple[list[dict[str, Any]], float]:
         after = None
         rows: list[dict[str, Any]] = []
+        started = time.perf_counter()
         while True:
-            params: dict[str, Any] = {"limit": 200}
-            if updated_since:
-                params["updatedSince"] = updated_since
+            params: dict[str, Any] = {"limit": 100}
             if after:
                 params["pageCursor"] = after
                 params["pageDirection"] = "after"
@@ -170,15 +171,14 @@ class InstinctApiSyncClient:
             after = metadata.get("after") if isinstance(metadata, dict) else None
             if not after:
                 break
-        return rows
+        return rows, time.perf_counter() - started
 
-    def iter_patients(self, updated_since: str | None) -> list[dict[str, Any]]:
+    def iter_patients(self) -> tuple[list[dict[str, Any]], float]:
         after = None
         rows: list[dict[str, Any]] = []
+        started = time.perf_counter()
         while True:
-            params: dict[str, Any] = {"limit": 200}
-            if updated_since:
-                params["updatedSince"] = updated_since
+            params: dict[str, Any] = {"limit": 100}
             if after:
                 params["pageCursor"] = after
                 params["pageDirection"] = "after"
@@ -191,12 +191,22 @@ class InstinctApiSyncClient:
             after = metadata.get("after") if isinstance(metadata, dict) else None
             if not after:
                 break
-        return rows
+        return rows, time.perf_counter() - started
 
 
 def _ensure_identity_schema(conn) -> None:
     with conn.cursor() as cur:
-        cur.execute("ALTER TABLE IF EXISTS public.instinct_owner_lookup_norm RENAME TO instinct_owner_lookup")
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+                IF to_regclass('public.instinct_owner_lookup_norm') IS NOT NULL
+                   AND to_regclass('public.instinct_owner_lookup') IS NULL THEN
+                    ALTER TABLE public.instinct_owner_lookup_norm RENAME TO instinct_owner_lookup;
+                END IF;
+            END$$
+            """
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS public.instinct_owner_lookup (
@@ -220,6 +230,17 @@ def _ensure_identity_schema(conn) -> None:
         )
         cur.execute(
             """
+            ALTER TABLE public.instinct_owner_lookup
+                ADD COLUMN IF NOT EXISTS owner_name_lower text,
+                ADD COLUMN IF NOT EXISTS owner_name_last_first text,
+                ADD COLUMN IF NOT EXISTS phone_digits text,
+                ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
+                ADD COLUMN IF NOT EXISTS merged_into_account_id text,
+                ADD COLUMN IF NOT EXISTS synced_at timestamptz NOT NULL DEFAULT now()
+            """
+        )
+        cur.execute(
+            """
             ALTER TABLE public.instinct_patient_lookup
                 ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
                 ADD COLUMN IF NOT EXISTS merged_into_patient_id bigint,
@@ -228,15 +249,18 @@ def _ensure_identity_schema(conn) -> None:
         )
         cur.execute(
             """
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_patient_lookup_account_patient_uniq'
-                ) THEN
-                    ALTER TABLE public.instinct_patient_lookup
-                        ADD CONSTRAINT instinct_patient_lookup_account_patient_uniq UNIQUE (account_id, patient_pims_code);
-                END IF;
-            END$$
+            ALTER TABLE public.instinct_patient_lookup
+                ADD COLUMN IF NOT EXISTS patient_pims_code text,
+                ADD COLUMN IF NOT EXISTS birthdate date,
+                ADD COLUMN IF NOT EXISTS species text,
+                ADD COLUMN IF NOT EXISTS breed text,
+                ADD COLUMN IF NOT EXISTS color text,
+                ADD COLUMN IF NOT EXISTS sex text,
+                ADD COLUMN IF NOT EXISTS weight numeric,
+                ADD COLUMN IF NOT EXISTS owner_name text,
+                ADD COLUMN IF NOT EXISTS phone_primary text,
+                ADD COLUMN IF NOT EXISTS address text,
+                ADD COLUMN IF NOT EXISTS city_state_zip text
             """
         )
         cur.execute(
@@ -248,6 +272,19 @@ def _ensure_identity_schema(conn) -> None:
                 ) THEN
                     ALTER TABLE public.instinct_owner_lookup
                         ADD CONSTRAINT instinct_owner_lookup_pkey PRIMARY KEY (account_id);
+                END IF;
+            END$$
+            """
+        )
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_patient_lookup_pkey'
+                ) THEN
+                    ALTER TABLE public.instinct_patient_lookup
+                        ADD CONSTRAINT instinct_patient_lookup_pkey PRIMARY KEY (patient_id);
                 END IF;
             END$$
             """
@@ -276,108 +313,41 @@ def _ensure_identity_schema(conn) -> None:
                 ON public.instinct_patient_lookup (account_id, lower(patient_name))
             """
         )
-        conn.commit()
-
-
-def _upsert_owner_rows(conn, rows: list[dict[str, Any]]) -> None:
-    sql = """
-        INSERT INTO public.instinct_owner_lookup (
-            account_id, pims_code, owner_name, phone_primary, phone_all, email, address,
-            city_state_zip, owner_name_lower, owner_name_last_first, phone_digits,
-            updated_at, deleted_at, merged_into_account_id, synced_at
-        ) VALUES (
-            %(account_id)s, %(pims_code)s, %(owner_name)s, %(phone_primary)s, %(phone_all)s, %(email)s, %(address)s,
-            %(city_state_zip)s, %(owner_name_lower)s, %(owner_name_last_first)s, %(phone_digits)s,
-            %(updated_at)s, %(deleted_at)s, %(merged_into_account_id)s, now()
-        )
-        ON CONFLICT (account_id) DO UPDATE SET
-            pims_code = EXCLUDED.pims_code,
-            owner_name = EXCLUDED.owner_name,
-            phone_primary = EXCLUDED.phone_primary,
-            phone_all = EXCLUDED.phone_all,
-            email = EXCLUDED.email,
-            address = EXCLUDED.address,
-            city_state_zip = EXCLUDED.city_state_zip,
-            owner_name_lower = EXCLUDED.owner_name_lower,
-            owner_name_last_first = EXCLUDED.owner_name_last_first,
-            phone_digits = EXCLUDED.phone_digits,
-            updated_at = EXCLUDED.updated_at,
-            deleted_at = EXCLUDED.deleted_at,
-            merged_into_account_id = EXCLUDED.merged_into_account_id,
-            synced_at = now()
-    """
-    with conn.cursor() as cur:
-        cur.executemany(sql, rows)
-
-
-def _upsert_patient_rows(conn, rows: list[dict[str, Any]]) -> None:
-    sql = """
-        INSERT INTO public.instinct_patient_lookup (
-            patient_id, account_id, patient_name, patient_pims_code, birthdate, species, breed, color, sex,
-            weight, owner_name, phone_primary, address, city_state_zip, updated_at, deleted_at,
-            merged_into_patient_id, synced_at
-        ) VALUES (
-            %(patient_id)s, %(account_id)s, %(patient_name)s, %(patient_pims_code)s, %(birthdate)s, %(species)s, %(breed)s, %(color)s, %(sex)s,
-            %(weight)s, %(owner_name)s, %(phone_primary)s, %(address)s, %(city_state_zip)s, %(updated_at)s, %(deleted_at)s,
-            %(merged_into_patient_id)s, now()
-        )
-        ON CONFLICT (patient_id) DO UPDATE SET
-            account_id = EXCLUDED.account_id,
-            patient_name = EXCLUDED.patient_name,
-            patient_pims_code = EXCLUDED.patient_pims_code,
-            birthdate = EXCLUDED.birthdate,
-            species = EXCLUDED.species,
-            breed = EXCLUDED.breed,
-            color = EXCLUDED.color,
-            sex = EXCLUDED.sex,
-            weight = EXCLUDED.weight,
-            owner_name = EXCLUDED.owner_name,
-            phone_primary = EXCLUDED.phone_primary,
-            address = EXCLUDED.address,
-            city_state_zip = EXCLUDED.city_state_zip,
-            updated_at = EXCLUDED.updated_at,
-            deleted_at = EXCLUDED.deleted_at,
-            merged_into_patient_id = EXCLUDED.merged_into_patient_id,
-            synced_at = now()
-    """
-    with conn.cursor() as cur:
-        cur.executemany(sql, rows)
-
-
-def _load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
-
-
-def _save_state(path: Path, state: dict[str, Any]) -> None:
-    path.write_text(json.dumps(state, indent=2, sort_keys=True, default=str))
+    conn.commit()
 
 
 def _account_payload(account: dict[str, Any]) -> dict[str, Any]:
-    updated = _parse_dt(account.get("updatedAt")) or datetime.now(timezone.utc)
+    updated = _parse_dt(account.get("updatedAt")) or _now()
+    owner_name = _owner_name(account)
     return {
         "account_id": _as_text(account.get("id")),
         "pims_code": _as_text(account.get("pimsCode")) or None,
-        "owner_name": _owner_name(account),
+        "owner_name": owner_name,
         "phone_primary": _pick_contact(account, "phone") or None,
         "phone_all": _all_contacts(account) or None,
         "email": _pick_contact(account, "email") or None,
         "address": _as_text(account.get("address")) or None,
         "city_state_zip": _as_text(account.get("cityStateZip")) or None,
-        "owner_name_lower": _owner_name(account).lower(),
+        "owner_name_lower": owner_name.lower(),
         "owner_name_last_first": " ".join(
-            part for part in [(_as_text((account.get("primaryContact") or {}).get("nameLast"))), (_as_text((account.get("primaryContact") or {}).get("nameFirst")))] if part
-        ).lower() or None,
+            part
+            for part in [
+                _as_text((account.get("primaryContact") or {}).get("nameLast")),
+                _as_text((account.get("primaryContact") or {}).get("nameFirst")),
+            ]
+            if part
+        ).lower()
+        or None,
         "phone_digits": "".join(ch for ch in (_pick_contact(account, "phone") or "") if ch.isdigit()) or None,
         "updated_at": updated,
         "deleted_at": _parse_dt(account.get("deletedAt")),
         "merged_into_account_id": _as_text(account.get("mergedIntoAccountId")) or None,
+        "synced_at": _now(),
     }
 
 
 def _patient_payload(patient: dict[str, Any]) -> dict[str, Any]:
-    updated = _parse_dt(patient.get("updatedAt")) or datetime.now(timezone.utc)
+    updated = _parse_dt(patient.get("updatedAt")) or _now()
     account = patient.get("account") or {}
     return {
         "patient_id": int(patient.get("id")),
@@ -397,45 +367,88 @@ def _patient_payload(patient: dict[str, Any]) -> dict[str, Any]:
         "updated_at": updated,
         "deleted_at": _parse_dt(patient.get("deletedAt")),
         "merged_into_patient_id": _merge_target_id(patient.get("mergedIntoPatientId")),
+        "synced_at": _now(),
     }
 
 
-def sync_accounts(client: InstinctApiSyncClient, conn, watermark_in: str | None) -> str | None:
-    latest = watermark_in
-    items = client.iter_accounts(watermark_in)
-    if not items:
-        return latest
-    rows = [_account_payload(item) for item in items]
-    _upsert_owner_rows(conn, rows)
+def _build_refresh_tables(conn):
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS public.instinct_owner_lookup_refresh")
+        cur.execute("DROP TABLE IF EXISTS public.instinct_patient_lookup_refresh")
+        cur.execute("CREATE TABLE public.instinct_owner_lookup_refresh (LIKE public.instinct_owner_lookup INCLUDING ALL)")
+        cur.execute("CREATE TABLE public.instinct_patient_lookup_refresh (LIKE public.instinct_patient_lookup INCLUDING ALL)")
     conn.commit()
-    page_max = max((_as_text(item.get("updatedAt")) for item in items), default=watermark_in or "")
-    if page_max:
-        latest = page_max
-    return latest
 
 
-def sync_patients(client: InstinctApiSyncClient, conn, watermark_in: str | None) -> str | None:
-    latest = watermark_in
-    items = client.iter_patients(watermark_in)
-    if not items:
-        return latest
-    rows = [_patient_payload(item) for item in items]
-    _upsert_patient_rows(conn, rows)
+def _replace_live_tables(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute("TRUNCATE public.instinct_owner_lookup, public.instinct_patient_lookup")
+        cur.execute(
+            """
+            INSERT INTO public.instinct_owner_lookup
+            SELECT * FROM public.instinct_owner_lookup_refresh
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO public.instinct_patient_lookup
+            SELECT * FROM public.instinct_patient_lookup_refresh
+            """
+        )
+        cur.execute("DROP TABLE public.instinct_owner_lookup_refresh")
+        cur.execute("DROP TABLE public.instinct_patient_lookup_refresh")
     conn.commit()
-    page_max = max((_as_text(item.get("updatedAt")) for item in items), default=watermark_in or "")
-    if page_max:
-        latest = page_max
-    return latest
+
+
+def _load_refresh_tables(conn, accounts: list[dict[str, Any]], patients: list[dict[str, Any]]) -> None:
+    _build_refresh_tables(conn)
+    owner_rows = [_account_payload(item) for item in accounts]
+    patient_rows = [_patient_payload(item) for item in patients]
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO public.instinct_owner_lookup_refresh (
+                account_id, pims_code, owner_name, phone_primary, phone_all, email, address, city_state_zip,
+                owner_name_lower, owner_name_last_first, phone_digits, updated_at, deleted_at, merged_into_account_id, synced_at
+            ) VALUES (
+                %(account_id)s, %(pims_code)s, %(owner_name)s, %(phone_primary)s, %(phone_all)s, %(email)s, %(address)s, %(city_state_zip)s,
+                %(owner_name_lower)s, %(owner_name_last_first)s, %(phone_digits)s, %(updated_at)s, %(deleted_at)s, %(merged_into_account_id)s, %(synced_at)s
+            )
+            """,
+            owner_rows,
+        )
+        cur.executemany(
+            """
+            INSERT INTO public.instinct_patient_lookup_refresh (
+                patient_id, account_id, patient_name, patient_pims_code, birthdate, species, breed, color, sex,
+                weight, owner_name, phone_primary, address, city_state_zip, updated_at, deleted_at, merged_into_patient_id, synced_at
+            ) VALUES (
+                %(patient_id)s, %(account_id)s, %(patient_name)s, %(patient_pims_code)s, %(birthdate)s, %(species)s, %(breed)s, %(color)s, %(sex)s,
+                %(weight)s, %(owner_name)s, %(phone_primary)s, %(address)s, %(city_state_zip)s, %(updated_at)s, %(deleted_at)s, %(merged_into_patient_id)s, %(synced_at)s
+            )
+            """,
+            patient_rows,
+        )
+    conn.commit()
+
+
+def refresh_identity_tables(client: InstinctApiSyncClient, conn) -> dict[str, Any]:
+    accounts, accounts_seconds = client.iter_accounts()
+    patients, patients_seconds = client.iter_patients()
+    _load_refresh_tables(conn, accounts, patients)
+    _replace_live_tables(conn)
+    return {
+        "accounts": {"count": len(accounts), "seconds": round(accounts_seconds, 3)},
+        "patients": {"count": len(patients), "seconds": round(patients_seconds, 3)},
+        "total_seconds": round(accounts_seconds + patients_seconds, 3),
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Incrementally sync Instinct identity tables into Aurora PostgreSQL.")
+    parser = argparse.ArgumentParser(description="Full refresh Instinct identity tables into Aurora PostgreSQL.")
     parser.add_argument("--base-url", default=os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com"))
     parser.add_argument("--client-id", default=os.environ.get("INSTINCT_CLIENT_ID", ""))
     parser.add_argument("--client-secret", default=os.environ.get("INSTINCT_CLIENT_SECRET", ""))
-    parser.add_argument("--state-file", type=Path, default=Path("/tmp/instinct_identity_sync_state.json"))
-    parser.add_argument("--accounts-only", action="store_true")
-    parser.add_argument("--patients-only", action="store_true")
     return parser
 
 
@@ -443,27 +456,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not args.client_id or not args.client_secret:
         raise SystemExit("INSTINCT client credentials are required")
-    if args.accounts_only and args.patients_only:
-        raise SystemExit("Choose only one of --accounts-only or --patients-only")
 
-    state = _load_state(args.state_file)
     client = InstinctApiSyncClient(args.base_url, args.client_id, args.client_secret)
 
     with _connect() as conn:
         _ensure_identity_schema(conn)
-
-        if not args.patients_only:
-            watermark = state.get("accounts_watermark")
-            next_watermark = sync_accounts(client, conn, watermark)
-            state["accounts_watermark"] = next_watermark
-            _save_state(args.state_file, state)
-
-        if not args.accounts_only:
-            watermark = state.get("patients_watermark")
-            next_watermark = sync_patients(client, conn, watermark)
-            state["patients_watermark"] = next_watermark
-            _save_state(args.state_file, state)
-
+        result = refresh_identity_tables(client, conn)
+        print(json.dumps(result, default=str))
     return 0
 
 
