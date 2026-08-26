@@ -22,37 +22,58 @@ def _search_tokens(value: Any) -> list[str]:
     return re.findall(r"[A-Z0-9]+", str(value or "").upper())
 
 
+def _query_tokens(value: Any) -> list[str]:
+    return [token for token in _search_tokens(value) if len(token) >= 3]
+
+
+def _token_fragments(token: str, min_len: int = 3, max_len: int = 7) -> set[str]:
+    token = re.sub(r"[^A-Z0-9]+", "", str(token or "").upper())
+    fragments: set[str] = set()
+    if len(token) < min_len:
+        return fragments
+    for length in range(min_len, min(7, len(token)) + 1):
+        fragments.add(token[:length])
+    for length in range(4, min(len(token), max_len) + 1):
+        for start in range(0, len(token) - length + 1):
+            fragments.add(token[start : start + length])
+    return fragments
+
+
 def _build_fragment_index(items: Iterable[Any], min_len: int = 3, max_len: int = 7) -> dict[str, set[str]]:
     index: dict[str, set[str]] = {}
     for item in items:
         item_id = str(item.id)
         for token in _search_tokens(getattr(item, "search_text", "")):
-            token_len = len(token)
-            for start in range(token_len):
-                stop = min(token_len, start + max_len)
-                for end in range(start + min_len, stop + 1):
-                    index.setdefault(token[start:end], set()).add(item_id)
+            for fragment in _token_fragments(token, min_len=min_len, max_len=max_len):
+                index.setdefault(fragment, set()).add(item_id)
     return index
 
 
 def _fragment_scores(query: str, index: dict[str, set[str]], min_len: int = 3, max_len: int = 7) -> dict[str, int]:
-    # Each query token contributes only its single longest match for a candidate.
-    # We remove characters from the front only.
     totals: dict[str, int] = {}
-    for token in _search_tokens(query):
+    for token in _query_tokens(query):
         per_token: dict[str, int] = {}
-        for start in range(max(0, len(token) - min_len + 1)):
-            suffix = token[start:]
-            key = suffix[:max_len]
-            if len(key) < min_len:
-                continue
-            for item_id in index.get(key, ()):
-                score = min(len(suffix), max_len)
+        for fragment in _token_fragments(token, min_len=min_len, max_len=max_len):
+            for item_id in index.get(fragment, ()): 
+                score = len(fragment)
                 if score > per_token.get(item_id, 0):
                     per_token[item_id] = score
         for item_id, score in per_token.items():
             totals[item_id] = totals.get(item_id, 0) + score
     return totals
+
+
+def _rank_items(items: list[Any], scores: dict[str, int], limit: int = 10) -> list[Any]:
+    return sorted(
+        items,
+        key=lambda item: (
+            -scores.get(str(item.id), 0),
+            len(str(item.label)),
+            str(item.label).upper()[::-1],
+            str(item.secondary).upper()[::-1],
+            str(item.id),
+        ),
+    )[:limit]
 
 
 def _join_non_empty(parts: Iterable[Any]) -> str:
@@ -499,87 +520,122 @@ def search_pet_chunks_by_embedding(client_id: str, pet_id: str | None, question:
     return chunks, {"total_seconds": elapsed}
 
 
-def query_options_from_postgres(kind: str, query: str, client_id: str | None = None) -> list[dict[str, Any]]:
+@lru_cache(maxsize=64)
+def _postgres_client_options() -> tuple[ClientOption, ...]:
     connection = _pg_connect()
     if connection is None:
-        return []
-
-    kind = str(kind or "client").strip().lower()
-    query_text = str(query or "").strip()
-    tokens = [term for term in re.findall(r"[A-Za-z0-9]+", query_text) if len(term) >= 3][:8]
+        return ()
     cursor = connection.cursor()
     try:
-        if kind == "pet":
-            client_id = str(client_id or "").strip()
-            if not client_id:
-                return []
-            sql = """
-                select
-                  patient_id::text as id,
-                  coalesce(nullif(patient_name, ''), nullif(patient_pims_code, ''), patient_id::text) as label,
-                  coalesce(nullif(patient_pims_code, ''), patient_id::text) as secondary,
-                  coalesce(nullif(species, ''), '') as species,
-                  coalesce(nullif(breed, ''), '') as breed,
-                  coalesce(owner_name, '') as owner_name
-                from public.instinct_patient_lookup
-                where account_id = %s
+        cursor.execute(
             """
-            params: list[Any] = [client_id]
-            if tokens:
-                likes = " and ".join(["(patient_name ilike %s or patient_pims_code ilike %s or owner_name ilike %s)"] * len(tokens))
-                sql += f" and ({likes})"
-                for term in tokens:
-                    params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
-            sql += " order by label asc limit 10"
-            cursor.execute(sql, params)
-            rows = cursor.fetchall()
-            return [
-                {
-                    "id": str(row[0] or "").strip(),
-                    "label": str(row[1] or "").strip(),
-                    "secondary": str(row[2] or "").strip(),
-                    "clientId": client_id,
-                    "clientLabel": str(row[5] or "").strip(),
-                    "species": str(row[3] or "").strip(),
-                    "breed": str(row[4] or "").strip(),
-                    "birthdate": "",
-                    "alertCount": 0,
-                    "microchipId": None,
-                }
-                for row in rows
-                if str(row[0] or "").strip()
-            ]
-
-        sql = """
             select
               account_id as id,
               coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id) as label,
               coalesce(nullif(pims_code, ''), account_id) as secondary
             from public.instinct_owner_lookup_norm
-        """
-        params = []
-        if tokens:
-            likes = " and ".join(["(owner_name ilike %s or pims_code ilike %s or account_id ilike %s)"] * len(tokens))
-            sql += f" where ({likes})"
-            for term in tokens:
-                params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
-        sql += " order by label asc limit 10"
-        cursor.execute(sql, params)
+            """
+        )
         rows = cursor.fetchall()
-        return [
-            {
-                "id": str(row[0] or "").strip(),
-                "label": str(row[1] or "").strip(),
-                "secondary": str(row[2] or "").strip(),
-                "petCount": 0,
-            }
+        return tuple(
+            ClientOption(
+                id=str(row[0] or "").strip(),
+                label=str(row[1] or "").strip(),
+                secondary=str(row[2] or "").strip(),
+                pet_count=0,
+                search_text=_normalize(" ".join([str(row[1] or "").strip(), str(row[2] or "").strip(), str(row[0] or "").strip()])),
+            )
             for row in rows
             if str(row[0] or "").strip()
-        ]
+        )
     finally:
         cursor.close()
         connection.close()
 
+
+@lru_cache(maxsize=256)
+def _postgres_pet_options(client_id: str) -> tuple[PetOption, ...]:
+    client_id = str(client_id or "").strip()
+    if not client_id:
+        return ()
+    connection = _pg_connect()
+    if connection is None:
+        return ()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """
+            select
+              patient_id::text as id,
+              coalesce(nullif(patient_name, ''), nullif(patient_pims_code, ''), patient_id::text) as label,
+              coalesce(nullif(patient_pims_code, ''), patient_id::text) as secondary,
+              coalesce(nullif(species, ''), '') as species,
+              coalesce(nullif(breed, ''), '') as breed,
+              coalesce(owner_name, '') as owner_name
+            from public.instinct_patient_lookup
+            where account_id = %s
+            """,
+            [client_id],
+        )
+        rows = cursor.fetchall()
+        return tuple(
+            PetOption(
+                id=str(row[0] or "").strip(),
+                label=str(row[1] or "").strip(),
+                secondary=str(row[2] or "").strip(),
+                client_id=client_id,
+                client_label=str(row[5] or "").strip(),
+                species=str(row[3] or "").strip(),
+                breed=str(row[4] or "").strip(),
+                birthdate="",
+                alert_count=0,
+                microchip_id="",
+                search_text=" ".join([
+                    str(row[1] or "").strip(),
+                    str(row[2] or "").strip(),
+                    str(row[3] or "").strip(),
+                    str(row[4] or "").strip(),
+                    str(row[5] or "").strip(),
+                    str(row[0] or "").strip(),
+                ]),
+            )
+            for row in rows
+            if str(row[0] or "").strip()
+        )
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def query_options_from_postgres(kind: str, query: str, client_id: str | None = None) -> list[dict[str, Any]]:
+    kind = str(kind or "client").strip().lower()
+    query_text = str(query or "").strip()
+
+    if kind == "pet":
+        client_id = str(client_id or "").strip()
+        if not client_id:
+            return []
+        pets = _postgres_pet_options(client_id)
+        if not query_text:
+            return [item.as_dict() for item in pets[:10]]
+        index = _build_fragment_index(pets)
+        scores = _fragment_scores(query_text, index)
+        if not scores:
+            return [item.as_dict() for item in pets[:10]]
+        ranked = _rank_items(pets, scores)
+        results = [item.as_dict() for item in ranked if scores.get(str(item.id), 0) > 0]
+        return results or [item.as_dict() for item in pets[:10]]
+
+    clients = _postgres_client_options()
+    if not query_text:
+        return [item.as_dict() for item in clients[:10]]
+    index = _build_fragment_index(clients)
+    scores = _fragment_scores(query_text, index)
+    if not scores:
+        return [item.as_dict() for item in clients[:10]]
+    ranked = _rank_items(clients, scores)
+    results = [item.as_dict() for item in ranked if scores.get(str(item.id), 0) > 0]
+    return results or [item.as_dict() for item in clients[:10]]
 
 def _client_display_name(account: dict[str, Any]) -> str:
     contact = account.get("primaryContact") or {}
