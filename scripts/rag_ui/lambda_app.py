@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -16,6 +17,7 @@ import boto3
 from scripts.rag_ui.catalog import load_catalog, load_patient_documents, query_options_from_postgres, search_pet_chunks_by_embedding
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+PDF_ICONS_PATH = STATIC_DIR / "PDFIcons.png"
 INDEX_PATH = Path(__file__).resolve().parents[2] / "website" / "EVHInstinctPDFRAG" / "index.html"
 
 
@@ -517,6 +519,8 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
             model=model_name,
             temperature=0.2,
             api_key=_openai_api_key(),
+            timeout=8,
+            max_retries=1,
         )
         response = model.invoke([
             SystemMessage(content="You are a precise RAG assistant."),
@@ -531,6 +535,8 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
                 flush=True,
             )
             return text.strip()
+    except TimeoutError as exc:
+        raise RuntimeError(f"OpenAI request timed out: {exc}") from exc
     except Exception:
         pass
 
@@ -640,6 +646,16 @@ def _query_params(event: dict) -> dict[str, str]:
 
 def _serve_index() -> dict:
     return _html_response(200, INDEX_PATH.read_text(encoding="utf-8"))
+
+def _serve_static_asset(path: str) -> dict:
+    if path == "/PDFIcons.png":
+        return {
+            "statusCode": 200,
+            "headers": _headers("image/png"),
+            "isBase64Encoded": True,
+            "body": base64.b64encode(PDF_ICONS_PATH.read_bytes()).decode("ascii"),
+        }
+    return _json_response(404, {"error": "not_found", "path": path})
 
 
 def _serve_version() -> dict:
@@ -897,6 +913,11 @@ def lambda_handler(event: dict, context: object | None = None) -> dict:
 
     if path == "/api/version":
         response = _serve_version()
+        print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
+        return response
+
+    if path == "/PDFIcons.png":
+        response = _serve_static_asset(path)
         print(f"[RAG_TIMING] request_seconds={time.perf_counter() - started:.3f} status={response['statusCode']} path={path}", flush=True)
         return response
 
