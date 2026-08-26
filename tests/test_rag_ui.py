@@ -431,13 +431,13 @@ def test_call_openai_answer_fast_fails_on_timeout(monkeypatch):
 @pytest.mark.unit
 def test_index_uses_request_driven_search_lifecycle():
     html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
-    assert 'const SEARCH_MIN=3;' in html
+    assert 'const SEARCH_MIN=1;' in html
     assert 'scheduleOptionSearch({' in html
     assert 'abortSearch(clientSearch);' in html
     assert 'abortSearch(petSearch);' in html
     assert 'no preload' in html
     assert 'no focus request' in html
-    assert '3-char minimum' in html
+    assert 'Searching…' in html
     assert 'debounce' in html
     assert 'abort superseded requests' in html
     assert 'backend fragment order preserved' in html

@@ -147,7 +147,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 "use strict";
 
 const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
-const SEARCH_MIN=3;
+const SEARCH_MIN=1;
 const SEARCH_DEBOUNCE_MS=200;
 
 const citationUrl=(documentId,pageNumber)=>
@@ -249,6 +249,30 @@ function searchOptions(kind,query,clientId="",signal){
   return api(`/api/options?${params.toString()}`,{signal});
 }
 
+async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick}){
+  abortSearch(search);
+  search.lastQuery="";
+  clearMenu(menu);
+  search.items=[];
+  status.textContent="Searching…";
+  const seq=search.seq;
+  const controller=new AbortController();
+  search.controller=controller;
+  try{
+    const data=await searchOptions(kind,"",clientId,controller.signal);
+    if(seq!==search.seq || controller.signal.aborted || input.value.trim()!==search.lastQuery)return;
+    const items=Array.isArray(data.items)?data.items:[];
+    search.items=items;
+    renderMenu(menu,items,onPick);
+    status.textContent=items.length?`${items.length} matches`:"No matches";
+  }catch(error){
+    if(error?.name==="AbortError")return;
+    status.textContent=`Unable to load ${kind==="client"?"clients":"patients"}: ${error.message}`;
+  }finally{
+    if(search.controller===controller)search.controller=null;
+  }
+}
+
 function scheduleOptionSearch({
   search,
   kind,
@@ -262,12 +286,12 @@ function scheduleOptionSearch({
   const q=query.trim();
 
   abortSearch(search);
-  clearMenu(menu);
-  search.items=[];
   search.lastQuery=q;
 
-  if(q.length<SEARCH_MIN){
-    status.textContent=q?`Type ${SEARCH_MIN}+ characters`:"";
+  if(!q){
+    clearMenu(menu);
+    search.items=[];
+    status.textContent="";
     return;
   }
 
@@ -299,8 +323,6 @@ function scheduleOptionSearch({
     }catch(error){
       if(error?.name==="AbortError")return;
       if(seq!==search.seq || input.value.trim()!==q)return;
-      clearMenu(menu);
-      search.items=[];
       status.textContent=`Unable to load ${kind==="client"?"clients":"patients"}: ${error.message}`;
     }finally{
       if(search.controller===controller)search.controller=null;
@@ -341,10 +363,19 @@ function chooseClient(item){
 
   resetPatientSelection();
   $("pet-input").disabled=false;
-  $("pet-input").placeholder="Type a patient name";
+  $("pet-input").placeholder="Pick a patient from the list";
 
   clearTranscript();
   updateAsk();
+  loadInitialOptions({
+    search:petSearch,
+    kind:"pet",
+    clientId:item.id,
+    input:$("pet-input"),
+    menu:$("pet-menu"),
+    status:$("pet-status"),
+    onPick:choosePet,
+  });
 }
 
 function choosePet(item){
