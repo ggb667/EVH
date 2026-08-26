@@ -146,7 +146,6 @@ def resolve_data_path(explicit_path: str | None = None) -> Path:
         "/home/ggb66/dev/EVH/exports/instinct_identity.sqlite",
         "/home/ggb66/dev/EVH/exports/instinct_identity.db",
         "/home/ggb66/dev/EVH/scripts/instinct_bulk_cache.json",
-        "/home/ggb66/dev/EVH/scripts/patients.json",
     )
 
     if explicit_path:
@@ -165,7 +164,7 @@ def resolve_data_path(explicit_path: str | None = None) -> Path:
 
 
 def _refresh_interval_seconds() -> float:
-    raw = os.environ.get("RAG_UI_REFRESH_SECONDS", "300").strip()
+    raw = os.environ.get("RAG_UI_REFRESH_SECONDS", "900").strip()
     try:
         value = float(raw)
     except ValueError:
@@ -910,7 +909,6 @@ def _load_catalog_from_sqlite(db_path: Path) -> RagCatalog:
     return _build_catalog(clients, patients)
 
 
-@lru_cache(maxsize=4)
 def load_catalog_from_file(data_path: str) -> RagCatalog:
     path = Path(data_path)
     if path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
@@ -1018,7 +1016,7 @@ def _load_catalog_from_postgres() -> RagCatalog:
 
 
 _CATALOG_CACHE: dict[str, tuple[float, float, RagCatalog]] = {}
-_CATALOG_MEMORY: RagCatalog | None = None
+_CATALOG_MEMORY: tuple[float, RagCatalog] | None = None
 
 
 def _load_cached_file_catalog(path: Path, force: bool = False) -> RagCatalog:
@@ -1057,8 +1055,23 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
 def load_catalog(data_path: str | None = None) -> RagCatalog:
     global _CATALOG_MEMORY
     if data_path is None and _CATALOG_MEMORY is not None:
-        return _CATALOG_MEMORY
+        cached_at, catalog = _CATALOG_MEMORY
+        if (time.time() - cached_at) < _refresh_interval_seconds():
+            return catalog
     catalog = refresh_catalog(data_path)
     if data_path is None:
-        _CATALOG_MEMORY = catalog
+        _CATALOG_MEMORY = (time.time(), catalog)
     return catalog
+
+
+def _prime_catalog_memory() -> None:
+    global _CATALOG_MEMORY
+    if _CATALOG_MEMORY is not None:
+        return
+    try:
+        _CATALOG_MEMORY = (time.time(), refresh_catalog())
+    except Exception:
+        _CATALOG_MEMORY = None
+
+
+_prime_catalog_memory()

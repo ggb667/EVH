@@ -32,6 +32,14 @@ def write_sample_catalog(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def write_test_patients_fixture(path: Path) -> None:
+    payload = [
+        {"client_name": "INSTINCT TEST", "patient_name": "INSTINCT 1", "patient_id": 1, "account_id": "05682212-3fd9-4928-a554-9e789b1e6a82", "pims_code": "INSTINCT001"},
+        {"client_name": "INSTINCT TEST", "patient_name": "INSTINCT 2", "patient_id": 2, "account_id": "12e01f5d-ddb2-40a1-a490-e44b797464b6", "pims_code": "INSTINCT002"},
+    ]
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def write_sample_sqlite_catalog(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:
@@ -156,6 +164,37 @@ def test_catalog_search_reads_sqlite_database(tmp_path, monkeypatch):
     assert [item["label"] for item in catalog.search_clients("alp")] == ["Alpha Client"]
     assert [item["label"] for item in catalog.search_pets("client-1", "")] == ["Milo", "Mika"]
     assert [item["label"] for item in catalog.search_pets("client-1", "mil")] == ["Milo"]
+
+
+@pytest.mark.unit
+def test_load_catalog_refreshes_after_fifteen_minutes(tmp_path, monkeypatch):
+    sample = tmp_path / "sample.json"
+    write_sample_catalog(sample)
+    monkeypatch.setenv("RAG_UI_DATA_PATH", str(sample))
+
+    timeline = [1000.0]
+    monkeypatch.setattr(rag_catalog.time, "time", lambda: timeline[0])
+
+    catalog1 = load_catalog()
+    assert [item["label"] for item in catalog1.search_clients("")] == ["Alpha Client", "Beta Buyer"]
+
+    refreshed = {
+        "accounts": [
+            {"id": "client-3", "pimsCode": "CCC003", "pimsId": None, "deletedAt": None, "primaryContact": {"nameFirst": "Gamma", "nameMiddle": None, "nameLast": "Caretaker"}},
+        ],
+        "patients": [],
+    }
+    sample.write_text(json.dumps(refreshed), encoding="utf-8")
+
+    timeline[0] += 899.0
+    catalog2 = load_catalog()
+    assert [item["label"] for item in catalog2.search_clients("")] == ["Alpha Client", "Beta Buyer"]
+
+    rag_catalog._CATALOG_MEMORY = (timeline[0] - 901.0, catalog1)
+    rag_catalog._CATALOG_CACHE.clear()
+    timeline[0] += 2.0
+    catalog3 = load_catalog()
+    assert [item["label"] for item in catalog3.search_clients("")] == ["Gamma Caretaker"]
 
 
 @pytest.mark.unit
