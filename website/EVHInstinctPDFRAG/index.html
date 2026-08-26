@@ -267,7 +267,7 @@ function searchOptions(kind,query,clientId="",signal){
 async function refreshBackendVersion(){
   try{
     const data=await api('/api/version');
-    const version=String(data?.lambda_version||data?.version||'').trim();
+    const version=String(data?.version||data?.lambda_version||'').trim();
     const backend=version ? ` (${version})` : '';
     backendVersionText=backend;
     const backendVersion=$('backend-version');
@@ -752,10 +752,16 @@ $("client-input").addEventListener("input",event=>{
   $("pet-input").placeholder="Select a client first";
   updateAsk();
 
+  const q=event.target.value.trim();
+  if(clientSearch.items.length){
+    renderMenu($("client-menu"),filterOptionsLocally(clientSearch.items,q),chooseClient);
+    $("client-status").textContent="Filtering…";
+  }
+
   scheduleOptionSearch({
     search:clientSearch,
     kind:"client",
-    query:event.target.value,
+    query:q,
     input:event.target,
     menu:$("client-menu"),
     status:$("client-status"),

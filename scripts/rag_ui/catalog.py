@@ -601,6 +601,7 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
               coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id) as label,
               coalesce(nullif(pims_code, ''), account_id) as secondary
             from public.instinct_owner_lookup
+            order by lower(coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id)), account_id
             """
         )
         execute_seconds = time.perf_counter() - execute_started
@@ -659,6 +660,7 @@ def _postgres_pet_options(client_id: str) -> tuple[PetOption, ...]:
               coalesce(owner_name, '') as owner_name
             from public.instinct_patient_lookup
             where account_id = %s
+            order by lower(coalesce(nullif(patient_name, ''), nullif(patient_pims_code, ''), patient_id::text)), patient_id
             """,
             [client_id],
         )
