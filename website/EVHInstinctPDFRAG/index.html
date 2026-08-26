@@ -26,6 +26,7 @@ body{margin:0;background:var(--bg);color:var(--text)}
 h1{margin:0 0 6px;font-size:28px;line-height:1.08}
 .sub{color:var(--muted);margin:0;max-width:900px;line-height:1.45}
 .meta{font-size:12px;line-height:1.35;color:#7a8490;text-align:right}
+.build-line{white-space:nowrap}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
 .selector-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
 .field{position:relative}
@@ -106,7 +107,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
       <p class="sub">Select a client and patient, then ask questions in a quiet transcript. Each answer keeps its own citations and the conversation grows downward as you go.</p>
     </div>
     <div class="meta">
-      <div>Build: __EVH_BUILD_STAMP__ - <span id="live-status">Ready</span></div>
+      <div class="build-line">Build: __EVH_BUILD_STAMP__ <span id="backend-version"></span> <span id="live-status">Ready</span></div>
     </div>
   </div>
 
@@ -148,6 +149,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
 const SEARCH_MIN=1;
+const PET_SEARCH_MIN=3;
 const SEARCH_DEBOUNCE_MS=200;
 
 const citationUrl=(documentId,pageNumber)=>
@@ -169,6 +171,7 @@ const state={
 const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 let sourcePopoverHideTimer=0;
+let backendVersionText="";
 
 const $=id=>document.getElementById(id);
 
@@ -244,8 +247,29 @@ async function api(path,options={}){
 
 function searchOptions(kind,query,clientId="",signal){
   const params=new URLSearchParams({kind,q:query});
-  if(clientId)params.set("clientId",clientId);
+  if(clientId){
+    params.set("clientId",clientId);
+    params.set("client_id",clientId);
+  }
   return api(`/api/options?${params.toString()}`,{signal});
+}
+
+async function refreshBackendVersion(){
+  try{
+    const data=await api('/api/version');
+    const version=String(data?.lambda_version||data?.version||'').trim();
+    const backend=version ? ` (${version})` : '';
+    backendVersionText=backend;
+    const backendVersion=$('backend-version');
+    if(backendVersion)backendVersion.textContent=backend;
+    const live=$('live-status');
+    if(live)live.textContent='Ready';
+  }catch{
+    const backendVersion=$('backend-version');
+    if(backendVersion)backendVersion.textContent='';
+    const live=$('live-status');
+    if(live)live.textContent='Ready';
+  }
 }
 
 async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick}){
@@ -254,6 +278,7 @@ async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick
   search.lastQuery=q;
   clearMenu(menu);
   search.items=[];
+  menu.style.display="block";
   status.textContent="Searching…";
   const seq=search.seq;
   const controller=new AbortController();
@@ -742,10 +767,24 @@ $("pet-input").addEventListener("input",event=>{
     return;
   }
 
+  const q=event.target.value.trim();
+  if(q.length<PET_SEARCH_MIN){
+    abortSearch(petSearch);
+    if(q){
+      $("pet-status").textContent=`Type ${PET_SEARCH_MIN} characters to search`;
+    }else if(petSearch.items.length){
+      $("pet-status").textContent=`${petSearch.items.length} matches`;
+    }else{
+      $("pet-status").textContent="";
+    }
+    renderMenu($("pet-menu"),petSearch.items,choosePet);
+    return;
+  }
+
   scheduleOptionSearch({
     search:petSearch,
     kind:"pet",
-    query:event.target.value,
+    query:q,
     clientId:state.client.id,
     input:event.target,
     menu:$("pet-menu"),
@@ -811,7 +850,7 @@ document.addEventListener("click",event=>{
 
 updateQuestionPrompt();
 clearTranscript();
-$("live-status").textContent="Ready";
+refreshBackendVersion();
 </script>
 </body>
 </html>
