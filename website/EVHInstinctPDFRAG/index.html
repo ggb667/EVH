@@ -1,1433 +1,182 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EVH Instinct PDF RAG | Pinkie</title>
-  <meta name="description" content="Pinkie PDF search prototype with client and pet combo boxes plus a document intent panel." />
-  <style>
-    :root{
-      --bg:#0c0f1d;
-      --card:#121732;
-      --card2:#171d3b;
-      --line:rgba(255,255,255,.10);
-      --line-strong:rgba(255,255,255,.16);
-      --text:#f7f8ff;
-      --muted:#a6b0d6;
-      --accent:#ff6fae;
-      --accent2:#ffcf6f;
-      --accent3:#7ce5ff;
-      --good:#7ef0b8;
-      --shadow:0 24px 70px rgba(0,0,0,.35);
-    }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0;
-      color:var(--text);
-      font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;
-      background:
-        radial-gradient(900px 500px at 15% 0%, rgba(255,111,174,.24), transparent 55%),
-        radial-gradient(900px 500px at 85% 10%, rgba(124,229,255,.18), transparent 55%),
-        radial-gradient(700px 500px at 50% 100%, rgba(255,207,111,.12), transparent 60%),
-        linear-gradient(180deg, #070914, var(--bg) 42%, #090b14);
-      overflow-x:hidden;
-    }
-    body:before{
-      content:"";
-      position:fixed;
-      inset:0;
-      pointer-events:none;
-      background:
-        linear-gradient(120deg, transparent 0 48%, rgba(255,255,255,.05) 49%, transparent 50%) 0 0/220px 220px,
-        linear-gradient(60deg, transparent 0 48%, rgba(255,255,255,.04) 49%, transparent 50%) 0 0/180px 180px;
-      mix-blend-mode:screen;
-      opacity:.35;
-    }
-    .wrap{
-      max-width:1280px;
-      margin:0 auto;
-      padding:28px 18px 56px;
-      position:relative;
-      z-index:1;
-    }
-    header, footer{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:12px;
-      flex-wrap:wrap;
-    }
-    header{padding-bottom:18px}
-    footer{
-      padding-top:18px;
-      margin-top:22px;
-      border-top:1px solid var(--line);
-      color:var(--muted);
-      font-size:13px;
-    }
-    .brand{
-      display:flex;
-      align-items:center;
-      gap:12px;
-    }
-    .orb{
-      width:40px;
-      height:40px;
-      border-radius:14px;
-      background:linear-gradient(135deg, rgba(255,111,174,.95), rgba(255,207,111,.9));
-      box-shadow:0 10px 30px rgba(255,111,174,.18);
-      position:relative;
-    }
-    .orb:after{
-      content:"";
-      position:absolute;
-      inset:9px;
-      border-radius:11px;
-      border:1px solid rgba(255,255,255,.4);
-      opacity:.8;
-    }
-    .brand h1{
-      font-size:20px;
-      margin:0;
-      letter-spacing:.3px;
-    }
-    .brand p{
-      margin:2px 0 0;
-      color:var(--muted);
-      font-size:13px;
-    }
-    .hero{
-      display:grid;
-      grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);
-      gap:18px;
-      align-items:start;
-      margin-top:10px;
-    }
-    @media (max-width: 1060px){
-      .hero{grid-template-columns:1fr}
-    }
-    .panel{
-      background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.03));
-      border:1px solid var(--line);
-      border-radius:22px;
-      box-shadow:var(--shadow);
-      overflow:visible;
-    }
-    .panel-inner{padding:22px}
-    .eyebrow{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:7px 10px;
-      border-radius:999px;
-      background:rgba(255,255,255,.05);
-      border:1px solid var(--line);
-      color:var(--muted);
-      font-size:12px;
-      margin-bottom:14px;
-    }
-    .eyebrow i{
-      width:8px;
-      height:8px;
-      border-radius:999px;
-      background:var(--accent);
-      box-shadow:0 0 0 5px rgba(255,111,174,.12);
-      display:inline-block;
-    }
-    h2{
-      margin:0 0 10px;
-      font-size:clamp(34px, 4.8vw, 58px);
-      line-height:1.02;
-      letter-spacing:-.7px;
-      max-width:16ch;
-    }
-    .lede{
-      margin:0;
-      color:var(--muted);
-      max-width:68ch;
-      font-size:16px;
-    }
-    .grid{
-      display:grid;
-      grid-template-columns:repeat(2, minmax(0, 1fr));
-      gap:14px;
-      margin-top:20px;
-      overflow:visible;
-    }
-    @media (max-width: 760px){
-      .grid{grid-template-columns:1fr}
-    }
-    .combo-shell{
-      padding:16px;
-      border-radius:18px;
-      background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
-      border:1px solid var(--line);
-      position:relative;
-      overflow:visible;
-    }
-    #pet-shell{
-      min-height: 520px;
-    }
-    #pet-shell .combo{
-      min-height: 54px;
-    }
-    .combo-shell[data-disabled="true"]{
-      opacity:.6;
-    }
-    .combo-top{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:10px;
-      margin-bottom:10px;
-    }
-    .combo-top h3{
-      margin:0;
-      font-size:16px;
-    }
-    .combo-top .hint{
-      color:var(--muted);
-      font-size:12px;
-      text-align:right;
-      max-width:18ch;
-    }
-    .combo{
-      position:relative;
-    }
-    .combo input{
-      width:100%;
-      border:1px solid var(--line-strong);
-      background:rgba(10,13,25,.72);
-      color:var(--text);
-      padding:14px 14px;
-      border-radius:14px;
-      font:inherit;
-      outline:none;
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
-    }
-    .combo input:focus{
-      border-color:rgba(255,111,174,.55);
-      box-shadow:0 0 0 4px rgba(255,111,174,.12);
-    }
-    .combo input:disabled{
-      cursor:not-allowed;
-      color:rgba(247,248,255,.55);
-    }
-    .selected-pill{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      margin-top:10px;
-      padding:9px 11px;
-      border-radius:999px;
-      background:rgba(255,255,255,.05);
-      border:1px solid var(--line);
-      color:var(--muted);
-      font-size:12px;
-      min-height:36px;
-    }
-    .selected-pill strong{color:var(--text)}
-    .dropdown{
-      position:absolute;
-      inset:calc(100% + 8px) 0 auto 0;
-      z-index:20;
-      display:none;
-      background:#10152b;
-      border:1px solid var(--line-strong);
-      border-radius:16px;
-      box-shadow:0 25px 60px rgba(0,0,0,.42);
-      overflow:visible;
-      min-width:100%;
-      max-width:min(720px, 95vw);
-    }
-    .dropdown[data-open="true"]{display:block}
-    .dropdown-inner{
-      max-height:min(72vh, 760px);
-      overflow:auto;
-      overscroll-behavior:contain;
-    }
-    .dropdown-note{
-      padding:10px 12px;
-      border-bottom:1px solid var(--line);
-      color:var(--muted);
-      font-size:12px;
-      background:rgba(255,255,255,.03);
-    }
-    .option{
-      width:100%;
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-      padding:12px 12px;
-      border:0;
-      border-bottom:1px solid rgba(255,255,255,.05);
-      text-align:left;
-      background:transparent;
-      color:var(--text);
-      cursor:pointer;
-    }
-    .option:hover, .option[aria-selected="true"]{
-      background:rgba(255,111,174,.12);
-    }
-    .option:last-child{border-bottom:0}
-    .option .primary{
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      align-items:flex-start;
-    }
-    .option .name{
-      font-weight:700;
-      line-height:1.2;
-    }
-    .option .meta{
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.35;
-    }
-    .badge{
-      display:inline-flex;
-      align-items:center;
-      padding:5px 8px;
-      border-radius:999px;
-      background:rgba(255,207,111,.14);
-      color:var(--accent2);
-      font-size:11px;
-      white-space:nowrap;
-    }
-    .status{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      margin-top:10px;
-      color:var(--muted);
-      font-size:12px;
-    }
-    .status i{
-      width:8px;
-      height:8px;
-      border-radius:999px;
-      background:var(--good);
-      box-shadow:0 0 0 5px rgba(126,240,184,.12);
-    }
-    .side{
-      display:grid;
-      gap:14px;
-    }
-    .summary-card{
-      padding:18px;
-      border-radius:20px;
-      background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
-      border:1px solid var(--line);
-      box-shadow:var(--shadow);
-    }
-    .summary-card h3{
-      margin:0 0 10px;
-      font-size:18px;
-    }
-    .summary-lines{
-      display:grid;
-      gap:10px;
-    }
-    .line{
-      padding:12px 13px;
-      border-radius:14px;
-      background:rgba(255,255,255,.05);
-      border:1px solid rgba(255,255,255,.07);
-    }
-    .line .k{
-      display:block;
-      color:var(--muted);
-      font-size:12px;
-      margin-bottom:3px;
-    }
-    .line .v{
-      display:block;
-      font-size:14px;
-      line-height:1.35;
-    }
-    .timeline{
-      display:grid;
-      gap:10px;
-      margin-top:12px;
-    }
-    .timeline-item{
-      padding:12px 13px;
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,.08);
-      background:rgba(10,13,25,.58);
-    }
-    .timeline-item .title{
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      font-weight:700;
-      margin-bottom:4px;
-    }
-    .timeline-item .body{
-      color:var(--muted);
-      font-size:13px;
-      line-height:1.45;
-    }
-    .footer-note{
-      color:var(--muted);
-      font-size:13px;
-      max-width:72ch;
-    }
-    .chat-card{
-      display:grid;
-      gap:14px;
-      padding:18px;
-      border-radius:20px;
-      background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
-      border:1px solid var(--line);
-      box-shadow:var(--shadow);
-    }
-    .chat-head{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:12px;
-      flex-wrap:wrap;
-    }
-    .chat-head h3{
-      margin:0;
-      font-size:18px;
-    }
-    .chat-head .small{
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.35;
-      max-width:42ch;
-    }
-    .composer{
-      display:grid;
-      gap:10px;
-      padding:14px;
-      border-radius:18px;
-      background:rgba(255,255,255,.05);
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .composer textarea{
-      width:100%;
-      min-height:54px;
-      max-height:180px;
-      resize:none;
-      border:1px solid var(--line-strong);
-      background:rgba(10,13,25,.72);
-      color:var(--text);
-      padding:14px;
-      border-radius:14px;
-      font:inherit;
-      outline:none;
-      line-height:1.45;
-      overflow:auto;
-    }
-    .composer-actions{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .primary-button{
-      appearance:none;
-      border:0;
-      background:linear-gradient(135deg, var(--accent), #ff8fc0);
-      color:#fff;
-      font-weight:700;
-      padding:12px 18px;
-      border-radius:14px;
-      cursor:pointer;
-      box-shadow:0 10px 24px rgba(255,111,174,.22);
-    }
-    .primary-button:disabled{
-      opacity:.45;
-      cursor:not-allowed;
-      box-shadow:none;
-    }
-    .composer-hint{
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.35;
-    }
-    .transcript{
-      display:grid;
-      gap:14px;
-    }
-    .turn{
-      padding:16px;
-      border-radius:18px;
-      background:rgba(255,255,255,.05);
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .turn + .turn{
-      margin-top:0;
-    }
-    .speaker{
-      color:var(--accent2);
-      font-size:11px;
-      font-weight:800;
-      letter-spacing:.14em;
-      text-transform:uppercase;
-      margin-bottom:10px;
-    }
-    .question-text,.answer-text{
-      margin:0;
-      white-space:pre-wrap;
-      line-height:1.6;
-      font-size:16px;
-    }
-    .answer-text{font-size:17px}
-    .answer-shell{
-      margin-top:12px;
-    }
-    .source-rail-wrap{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      margin:10px 0 12px;
-    }
-    .source-scroll-btn{
-      width:34px;
-      height:34px;
-      border-radius:999px;
-      border:1px solid var(--line-strong);
-      background:rgba(10,13,25,.72);
-      color:var(--text);
-      cursor:pointer;
-      display:grid;
-      place-items:center;
-      flex:0 0 auto;
-    }
-    .source-scroll-btn:disabled{
-      opacity:.25;
-      cursor:not-allowed;
-    }
-    .source-rail{
-      display:flex;
-      gap:8px;
-      overflow-x:auto;
-      flex:1;
-      padding:4px 2px;
-      scroll-behavior:smooth;
-      scrollbar-width:thin;
-    }
-    .source-chip{
-      position:relative;
-      flex:0 0 auto;
-      width:42px;
-      height:42px;
-      border-radius:12px;
-      border:1px solid var(--line-strong);
-      background:rgba(10,13,25,.8);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
-      overflow:hidden;
-      cursor:pointer;
-    }
-    .source-chip:hover,.source-chip:focus-visible{
-      border-color:rgba(255,111,174,.6);
-      box-shadow:0 0 0 3px rgba(255,111,174,.12);
-      outline:none;
-    }
-    .source-chip img{
-      display:block;
-      width:576px;
-      height:64px;
-      transform:scale(.25);
-      transform-origin:0 0;
-      image-rendering:auto;
-      pointer-events:none;
-    }
-    .source-count{
-      position:absolute;
-      right:-6px;
-      bottom:-6px;
-      min-width:18px;
-      height:18px;
-      padding:0 4px;
-      border-radius:999px;
-      background:var(--accent2);
-      color:#111;
-      border:2px solid var(--bg);
-      font-size:10px;
-      display:grid;
-      place-items:center;
-      font-weight:700;
-    }
-    .evidence-toggle{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      border:1px solid var(--line-strong);
-      background:rgba(10,13,25,.72);
-      color:var(--text);
-      border-radius:999px;
-      padding:9px 12px;
-      cursor:pointer;
-      font:inherit;
-      margin-top:12px;
-    }
-    .evidence-panel{
-      margin-top:12px;
-      display:none;
-      border-top:1px solid rgba(255,255,255,.08);
-      padding-top:12px;
-    }
-    .evidence-panel[data-open="true"]{display:grid;gap:12px}
-    .doc-block{
-      display:grid;
-      gap:8px;
-      padding:12px;
-      border-radius:14px;
-      background:rgba(10,13,25,.58);
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .doc-title{
-      font-weight:700;
-      font-size:14px;
-      line-height:1.35;
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-    }
-    .doc-badge{
-      color:var(--muted);
-      font-size:11px;
-      white-space:nowrap;
-    }
-    .passage{
-      padding:10px 11px;
-      border-left:3px solid rgba(124,229,255,.55);
-      background:rgba(255,255,255,.04);
-      border-radius:10px;
-      line-height:1.45;
-      font-size:14px;
-    }
-    .passage .muted{
-      display:block;
-      color:var(--muted);
-      font-size:11px;
-      margin-top:6px;
-    }
-    .term-date{color:#7ce5ff;font-weight:700}
-    .term-med{color:#ffcf6f;font-weight:700}
-    .term-proc{color:#7ef0b8;font-weight:700}
-    .term-lab{color:#ff8fc0;font-weight:700}
-    .term-anat{color:#b6a7ff;font-weight:700}
-    .turn-meta{
-      color:var(--muted);
-      font-size:12px;
-      margin-top:8px;
-    }
-    .chat-empty{
-      color:var(--muted);
-      font-size:14px;
-      line-height:1.45;
-      padding:14px;
-      border-radius:14px;
-      border:1px dashed rgba(255,255,255,.12);
-      background:rgba(255,255,255,.03);
-    }
-    .pop{
-      animation: rise .45s ease-out both;
-    }
-    @keyframes rise{
-      from{transform:translateY(10px); opacity:0}
-      to{transform:translateY(0); opacity:1}
-    }
-    .shake{
-      animation: wobble .5s ease-out both;
-    }
-    @keyframes wobble{
-      0%{transform:translateX(0)}
-      25%{transform:translateX(-2px)}
-      50%{transform:translateX(2px)}
-      75%{transform:translateX(-1px)}
-      100%{transform:translateX(0)}
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVH Patient Record Assistant</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color:#18212b;background:#f5f7f9;--bg:#f5f7f9;--card:#fff;--line:#dfe4e8;--line-strong:#bdc6ce;--text:#18212b;--muted:#66717d;--blue:#285f8f;--green:#2b7a63;--amber:#9a6a15;--rose:#8c4b69;--shadow:0 2px 10px #0000000a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text)}
+.wrap{max-width:1100px;margin:28px auto;padding:0 20px 28px}
+.header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px;flex-wrap:wrap}
+h1{margin:0 0 6px;font-size:28px;line-height:1.08}
+.sub{color:var(--muted);margin:0;max-width:900px;line-height:1.45}
+.meta{font-size:12px;line-height:1.35;color:#7a8490;text-align:right}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
+.selector-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+.field{position:relative}
+label{display:block;font-weight:650;margin-bottom:7px}
+input,textarea,button{font:inherit}
+input,textarea{width:100%;padding:11px 12px;border:1px solid var(--line-strong);border-radius:8px;background:white;color:var(--text)}
+textarea{min-height:110px;resize:vertical;line-height:1.45}
+.menu{position:absolute;z-index:20;top:100%;left:0;right:0;max-height:320px;overflow:auto;background:white;border:1px solid #cfd6dc;border-radius:8px;box-shadow:0 8px 24px #0002;display:none}
+.option{padding:9px 11px;cursor:pointer;border-bottom:1px solid #eef1f3}
+.option:hover{background:#f0f4f7}
+.secondary{font-size:12px;color:#6b7580}
+.status{font-size:13px;color:#68737e;margin-top:6px;min-height:18px}
+.ask-area{display:grid;gap:10px}
+.composer-box{position:relative}
+.question-label-row{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.question-wrap{position:relative}
+button{padding:10px 16px;border:0;border-radius:8px;background:#263746;color:white;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+.hint{font-size:12px;color:var(--muted);line-height:1.35}
+.transcript{display:grid;gap:14px;margin-top:18px}
+.turn{padding:16px;border-radius:12px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow)}
+.turn-question{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.question-text{margin:0;white-space:pre-wrap;line-height:1.55;font-size:16px;flex:1 1 auto}
+.question-meta{flex:0 0 auto;font-size:12px;color:var(--muted);white-space:nowrap;padding-top:2px}
+.turn-sources{margin:0 0 12px}
+.answer-body{margin-top:0;background:#E0ECFB;padding:14px 16px;border-radius:10px}
+.answer-text{margin:0;white-space:pre-wrap;line-height:1.55;font-size:17px}
+.source-navigator{display:flex;align-items:center;gap:8px;overflow-x:auto;padding:4px 0 2px;scroll-behavior:smooth}
+.source-nav-btn{width:30px;height:30px;border-radius:999px;border:1px solid #d6dde4;background:#fafbfc;color:#40505e;display:grid;place-items:center;flex:0 0 auto;padding:0}
+.source-nav-btn[disabled]{opacity:.28}
+.source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer}
+.source-chip:hover,.source-chip:focus-visible{border-color:#b8c8d8;box-shadow:0 0 0 3px rgba(40,95,143,.08);outline:none}
+.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
+.source-chip .count{position:absolute;right:-5px;bottom:-5px;min-width:18px;height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
+.source-popover{position:fixed;z-index:80;max-width:min(420px,calc(100vw - 24px));max-height:min(340px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
+.source-popover.open{display:block}
+.source-popover .title{font-size:13px;font-weight:700;line-height:1.35;margin-bottom:6px}
+.source-popover .meta{font-size:12px;color:var(--muted);text-align:left}
+.source-popover .snippet{margin-top:8px;font-size:13px;line-height:1.45;white-space:pre-wrap;color:#25313d}
+.source-popover .snippet + .snippet{margin-top:8px;padding-top:8px;border-top:1px solid #eef1f3}
+.highlight-term{font-weight:700;border-radius:4px;padding:0 1px;background:rgba(40,95,143,.10);color:#17466f}
+.doc-block{display:grid;gap:8px;padding:12px;border-radius:10px;border:1px solid #e4e9ee;background:#fbfcfd}
+.doc-title{font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.doc-title .family{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#607080;text-transform:uppercase;letter-spacing:.12em}
+.doc-title .family i{width:18px;height:18px;border-radius:5px;border:1px solid #d6dde4;background:#fff;display:block;overflow:hidden;flex:0 0 auto}
+.doc-title .family i::before{content:"";display:block;width:576px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.28);transform-origin:0 0}
+.passage{padding:9px 10px;border-left:3px solid #cfd8e1;background:#fff;border-radius:8px;line-height:1.45;font-size:14px}
+.passage .refmeta{display:block;margin-top:4px;color:#768394;font-size:11px}
+.refs{display:grid;gap:8px}
+.refs a{display:block;text-decoration:none;color:var(--blue);padding:9px 10px;border:1px solid #d6dde4;border-radius:8px;background:#fafbfc}
+.refs a:hover{background:#f3f7fb;border-color:#c8d6e2}
+.hidden{display:none}
+.empty{padding:16px;border:1px dashed #d6dde4;border-radius:12px;color:#6b7580;background:#fbfcfd}
+@media(max-width:760px){.selector-grid{grid-template-columns:1fr}.header{flex-direction:column}.meta{text-align:left}}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div class="brand">
-        <div class="orb" aria-hidden="true"></div>
-        <div>
-          <h1>EVH RAG Picker</h1>
-          <p>Pinkie combo-box prototype for client and pet lookup</p>
-        </div>
-      </div>
-      <div class="eyebrow"><i></i> Lambda backed, static page first</div>
-      <div class="footer-note" style="margin-top:10px;text-align:right">
-        Build: __EVH_BUILD_STAMP__
-      </div>
-    </header>
-
-    <main class="hero">
-      <section class="panel">
-        <div class="panel-inner">
-          <div class="eyebrow"><i></i> Search after 3 characters</div>
-          <h2>Select the client, then the pet.</h2>
-          <p class="lede">
-            The dropdowns stay broad until you type three characters. Once the threshold is reached,
-            the suggestions narrow to matching items from the cached catalog. The list stays scrollable. This slice is wired to the future PDF search flow.
-          </p>
-
-          <div class="grid">
-            <div class="combo-shell" id="client-shell">
-              <div class="combo-top">
-                <h3>Client</h3>
-                <div class="hint">Type 3 characters to filter.</div>
-              </div>
-              <div class="combo">
-                <input id="client-input" type="text" autocomplete="off" placeholder="Search clients by name or code" aria-label="Client" />
-                <div class="dropdown" id="client-dropdown" role="listbox" aria-label="Client suggestions">
-                  <div class="dropdown-note" id="client-note">Start typing to load choices.</div>
-                  <div class="dropdown-inner" id="client-list"></div>
-                </div>
-              </div>
-              <div class="selected-pill" id="client-pill"><strong>None selected</strong></div>
-              <div class="status"><i></i><span id="client-status">Top 10 client choices are visible with scrolling for the rest.</span></div>
-            </div>
-
-            <div class="combo-shell" id="pet-shell" data-disabled="true">
-              <div class="combo-top">
-                <h3>Pet</h3>
-                <div class="hint">Pick a client first.</div>
-              </div>
-              <div class="combo">
-                <input id="pet-input" type="text" autocomplete="off" placeholder="Select a client first" aria-label="Pet" disabled />
-                <div class="dropdown" id="pet-dropdown" role="listbox" aria-label="Pet suggestions">
-                  <div class="dropdown-note" id="pet-note">Select a client to unlock pet search.</div>
-                  <div class="dropdown-inner" id="pet-list"></div>
-                </div>
-              </div>
-              <div class="selected-pill" id="pet-pill"><strong>None selected</strong></div>
-              <div class="status"><i></i><span id="pet-status">Pet search is scoped to the selected client.</span></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <aside class="side">
-        <section class="summary-card">
-          <h3>Selection summary</h3>
-          <div class="summary-lines">
-            <div class="line">
-              <span class="k">Client</span>
-              <span class="v" id="summary-client">No client selected yet.</span>
-            </div>
-            <div class="line">
-              <span class="k">Pet</span>
-              <span class="v" id="summary-pet">No pet selected yet.</span>
-            </div>
-            <div class="line">
-              <span class="k">Pet ID</span>
-              <span class="v" id="summary-pet-id">No pet ID selected yet.</span>
-            </div>
-            <div class="line">
-              <span class="k">Preview intent</span>
-              <span class="v">This shell is ready for the RAG timeline pane and source PDF links once the backend contract lands.</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="summary-card">
-          <h3>What the page does</h3>
-          <div class="timeline">
-            <div class="timeline-item">
-              <div class="title"><span>Typeahead</span><span class="badge">3 char gate</span></div>
-              <div class="body">The list does not narrow until the query reaches three characters. After that, the API returns matches containing the typed text.</div>
-            </div>
-            <div class="timeline-item">
-              <div class="title"><span>Visible list</span><span class="badge">10 rows</span></div>
-              <div class="body">The dropdown keeps the first ten options in view and uses a scrollbar for anything beyond that.</div>
-            </div>
-            <div class="timeline-item">
-              <div class="title"><span>Two-stage selection</span><span class="badge">client -> pet</span></div>
-              <div class="body">Choosing a client unlocks the pet picker and scopes the pet search to that client only.</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="chat-card">
-          <div class="chat-head">
-            <div>
-              <h3>Patient conversation</h3>
-              <div class="small">Each assistant reply gets its own source rail. Older turns stay put; new turns append below like ChatGPT.</div>
-            </div>
-            <div class="small" id="conversation-status">Ready for a first question.</div>
-          </div>
-
-          <div class="composer">
-            <textarea id="question" placeholder="Ask about this patient's records..." aria-label="Question"></textarea>
-            <div class="composer-actions">
-              <div class="composer-hint">Enter submits • Ctrl+Enter inserts a newline • Shift+Enter can insert a newline too</div>
-              <button id="ask-button" type="button" class="primary-button" disabled>Ask</button>
-            </div>
-            <div class="status"><i></i><span id="ask-status">Select a client and patient to begin.</span></div>
-          </div>
-
-          <div id="transcript" class="transcript" aria-live="polite">
-            <div class="chat-empty">Your conversation will appear here as alternating USER and ASSISTANT turns.</div>
-          </div>
-        </section>
-      </aside>
-    </main>
-
-    <footer>
-      <div class="footer-note">
-        Pinkie prototype: lambda-served HTML plus server-side suggestions from the Instinct cache.
-      </div>
-    </footer>
+<main class="wrap">
+  <div class="header">
+    <div>
+      <h1>Patient Record Assistant</h1>
+      <p class="sub">Select a client and patient, then ask questions in a quiet transcript. Each answer keeps its own citations and the conversation grows downward as you go.</p>
+    </div>
+    <div class="meta">
+      <div>Build: __EVH_BUILD_STAMP__</div>
+      <div id="live-status">Loading clients…</div>
+    </div>
   </div>
 
-  <script>
-    const API_BASE = window.__EVH_API_BASE__ || new URL("/", window.location.href).origin;
-    const apiUrl = (path, params = {}) => {
-      const url = new URL(path, API_BASE);
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== null && value !== undefined && String(value).length > 0) {
-          url.searchParams.set(key, value);
-        }
-      });
-      return url.toString();
-    };
+  <div class="selector-grid">
+    <section class="card field">
+      <label for="client-input">Client</label>
+      <div class="field-wrap">
+        <input id="client-input" autocomplete="off" placeholder="Type a client name">
+        <div id="client-menu" class="menu"></div>
+      </div>
+      <div id="client-status" class="status">Loading clients…</div>
+    </section>
 
-    const api = (path, params = {}, options = {}) => {
-      const url = apiUrl(path, params);
-      const { headers = {}, ...rest } = options;
-      return fetch(url, {
-        ...rest,
-        headers: { accept: "application/json", ...headers },
-      }).then((response) => {
-        if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-        return response.json();
-      });
-    };
+    <section class="card field">
+      <label for="pet-input">Patient</label>
+      <div class="field-wrap">
+        <input id="pet-input" autocomplete="off" disabled placeholder="Select a client first">
+        <div id="pet-menu" class="menu"></div>
+      </div>
+      <div id="pet-status" class="status"></div>
+    </section>
+  </div>
 
-    const state = {
-      client: null,
-      pet: null,
-      clientQuery: "",
-      petQuery: "",
-      clientController: null,
-      petController: null,
-      clientItems: [],
-      allClients: [],
-      petItems: [],
-      allPets: [],
-      clientActiveIndex: -1,
-      petActiveIndex: -1,
-      transcript: [],
-      question: "",
-      asking: false,
-      hoverTimer: null,
-    };
+  <section id="composer" class="card ask-area">
+    <div class="question-label-row">
+      <label for="question">Question</label>
+      <div class="hint">Enter submits • Ctrl+Enter inserts a newline</div>
+    </div>
+    <div class="composer-box">
+      <textarea id="question" placeholder="When was the last dental cleaning?"></textarea>
+      <button id="ask" disabled style="position:absolute;right:10px;bottom:10px">Ask</button>
+    </div>
+    <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
+  </section>
 
-    const clientInput = document.getElementById("client-input");
-    const petInput = document.getElementById("pet-input");
-    const clientDropdown = document.getElementById("client-dropdown");
-    const petDropdown = document.getElementById("pet-dropdown");
-    const clientList = document.getElementById("client-list");
-    const petList = document.getElementById("pet-list");
-    const clientNote = document.getElementById("client-note");
-    const petNote = document.getElementById("pet-note");
-    const clientPill = document.getElementById("client-pill");
-    const petPill = document.getElementById("pet-pill");
-    const summaryClient = document.getElementById("summary-client");
-    const summaryPet = document.getElementById("summary-pet");
-    const summaryPetId = document.getElementById("summary-pet-id");
-    const clientShell = document.getElementById("client-shell");
-    const petShell = document.getElementById("pet-shell");
-    const clientStatus = document.getElementById("client-status");
-    const petStatus = document.getElementById("pet-status");
-    const questionBox = document.getElementById("question");
-    const askButton = document.getElementById("ask-button");
-    const askStatus = document.getElementById("ask-status");
-    const conversationStatus = document.getElementById("conversation-status");
-    const transcript = document.getElementById("transcript");
+  <section id="transcript" class="transcript" aria-live="polite"></section>
+</main>
 
-    const threshold = 3;
-    const debounce = (fn, wait = 150) => {
-      let timer = null;
-      return (...args) => {
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => fn(...args), wait);
-      };
-    };
-
-    function closeDropdown(dropdown) {
-      dropdown.dataset.open = "false";
-    }
-
-    function openDropdown(dropdown) {
-      dropdown.dataset.open = "true";
-    }
-
-    function setPill(node, label, secondary) {
-      node.innerHTML = `<strong>${escapeHtml(label)}</strong>${secondary ? ` <span>• ${escapeHtml(secondary)}</span>` : ""}`;
-    }
-
-    function formatPetLabel(item) {
-      return item?.label || "";
-    }
-
-    function escapeHtml(value) {
-      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[char]);
-    }
-
-    function highlightTerms(text, terms = []) {
-      let out = escapeHtml(text);
-      const patterns = [
-        { re: /\b\d{1,2}\/\d{1,2}\/\d{2,4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM)?)?\b/gi, cls: "term-date" },
-        { re: /\b\d{4}-\d{2}-\d{2}\b/g, cls: "term-date" },
-        { re: /\b(?:dental|cleaning|extraction|procedure|surgery|vaccine|vaccination|lab|cbc|x-ray|diagnos(?:is|es)|medication|prescription|anesthesia)\b/gi, cls: "term-proc" },
-        { re: /\b(?:mg|mcg|ml|g|units?|bpm|mmhg|%|hgb|wbc|rbc|platelets?)\b/gi, cls: "term-lab" },
-        { re: /\b(?:pain|swelling|fever|cough|nausea|rash|infection|fracture|tooth|jaw|gum|mouth)\b/gi, cls: "term-med" },
-      ];
-      patterns.forEach(({ re, cls }) => {
-        out = out.replace(re, (match) => `<span class="${cls}">${match}</span>`);
-      });
-      for (const term of terms) {
-        const safe = String(term || "").trim();
-        if (!safe) continue;
-        const re = new RegExp(`(${safe.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-        out = out.replace(re, `<span class="term-anat">$1</span>`);
-      }
-      return out;
-    }
-
-    function iconIndexFor(documentType) {
-      const type = String(documentType || "other").toLowerCase();
-      const map = {
-        medical_notes: 0,
-        antech_lab: 1,
-        labs: 1,
-        prescriptions: 2,
-        vaccine_history: 3,
-        communications: 4,
-        transaction_history: 5,
-        diagnoses: 6,
-        wellness: 7,
-        other: 8,
-      };
-      return map[type] ?? 8;
-    }
-
-    function documentUrlFor(doc) {
-      return doc.source_page_url || doc.document_url || "";
-    }
-
-    function normalizeSources(data) {
-      const sources = Array.isArray(data?.sources) ? data.sources : [];
-      return sources.map((source, sourceIndex) => {
-        const evidence = Array.isArray(source.evidence) ? source.evidence : [];
-        const grouped = evidence.map((item, evidenceIndex) => ({
-          text: String(item?.text || ""),
-          confidence: item?.confidence,
-          source_page_url: item?.source_page_url || source.source_page_url || source.document_url || "",
-          terms: Array.isArray(item?.terms) ? item.terms : [],
-          page_number: item?.page_number,
-          _key: `${source.document_id || sourceIndex}:${evidenceIndex}`,
-        }));
-        return {
-          document_id: String(source.document_id || `doc-${sourceIndex}`),
-          document_name: String(source.document_name || source.document_title || "Unknown document"),
-          document_type: String(source.document_type || "other"),
-          document_url: String(source.document_url || ""),
-          evidence: grouped,
-        };
-      });
-    }
-
-    function missingContractFields(data) {
-      const missing = [];
-      if (!Array.isArray(data?.sources)) missing.push("sources[]");
-      for (const [index, source] of (Array.isArray(data?.sources) ? data.sources : []).entries()) {
-        if (!source.document_id) missing.push(`sources[${index}].document_id`);
-        if (!source.document_name) missing.push(`sources[${index}].document_name`);
-        if (!source.document_type) missing.push(`sources[${index}].document_type`);
-        if (!source.document_url) missing.push(`sources[${index}].document_url`);
-        if (!Array.isArray(source.evidence)) missing.push(`sources[${index}].evidence[]`);
-        for (const [eIndex, evidence] of (Array.isArray(source.evidence) ? source.evidence : []).entries()) {
-          if (!evidence.text) missing.push(`sources[${index}].evidence[${eIndex}].text`);
-          if (evidence.confidence == null) missing.push(`sources[${index}].evidence[${eIndex}].confidence`);
-          if (!evidence.source_page_url) missing.push(`sources[${index}].evidence[${eIndex}].source_page_url`);
-          if (!Array.isArray(evidence.terms)) missing.push(`sources[${index}].evidence[${eIndex}].terms[]`);
-        }
-      }
-      return [...new Set(missing)];
-    }
-
-    function renderSourceRail(turn, turnIndex) {
-      const wrap = document.createElement("div");
-      wrap.className = "source-rail-wrap";
-      const prev = document.createElement("button");
-      prev.type = "button";
-      prev.className = "source-scroll-btn";
-      prev.textContent = "‹";
-      prev.setAttribute("aria-label", "Scroll sources left");
-      const next = document.createElement("button");
-      next.type = "button";
-      next.className = "source-scroll-btn";
-      next.textContent = "›";
-      next.setAttribute("aria-label", "Scroll sources right");
-      const rail = document.createElement("div");
-      rail.className = "source-rail";
-      rail.tabIndex = 0;
-      rail.setAttribute("aria-label", "Source documents");
-      const docs = turn.sources || [];
-      docs.forEach((doc, docIndex) => {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "source-chip";
-        chip.title = doc.document_name;
-        chip.__doc = doc;
-        const img = document.createElement("img");
-        img.alt = doc.document_name;
-        img.src = "./PDFIcons.png";
-        img.style.objectFit = "none";
-        img.style.objectPosition = `${-(iconIndexFor(doc.document_type) * 64)}px 0px`;
-        chip.appendChild(img);
-        if ((doc.evidence || []).length > 1) {
-          const count = document.createElement("span");
-          count.className = "source-count";
-          count.textContent = doc.evidence.length;
-          chip.appendChild(count);
-        }
-        chip.addEventListener("mouseenter", () => showPopover(chip, doc, turnIndex));
-        chip.addEventListener("mouseleave", scheduleHidePopover);
-        chip.addEventListener("focus", () => showPopover(chip, doc, turnIndex));
-        chip.addEventListener("click", () => openSource(doc));
-        rail.appendChild(chip);
-      });
-      const updateButtons = () => {
-        prev.disabled = rail.scrollLeft <= 0;
-        next.disabled = rail.scrollLeft + rail.clientWidth >= rail.scrollWidth - 1;
-      };
-      prev.addEventListener("click", () => rail.scrollBy({ left: -260, behavior: "smooth" }));
-      next.addEventListener("click", () => rail.scrollBy({ left: 260, behavior: "smooth" }));
-      rail.addEventListener("scroll", updateButtons);
-      rail.addEventListener("wheel", (event) => {
-        if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-          rail.scrollLeft += event.deltaY;
-          event.preventDefault();
-          updateButtons();
-        }
-      }, { passive: false });
-      requestAnimationFrame(updateButtons);
-      wrap.append(prev, rail, next);
-      return wrap;
-    }
-
-    function renderEvidencePanel(turn) {
-      const panel = document.createElement("div");
-      panel.className = "evidence-panel";
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "evidence-toggle";
-      toggle.textContent = "Show evidence ▾";
-      toggle.addEventListener("click", () => {
-        const open = panel.dataset.open === "true";
-        panel.dataset.open = open ? "false" : "true";
-        toggle.textContent = open ? "Show evidence ▾" : "Hide evidence ▴";
-      });
-      const docs = turn.sources || [];
-      docs.forEach((doc) => {
-        const block = document.createElement("div");
-        block.className = "doc-block";
-        const header = document.createElement("div");
-        header.className = "doc-title";
-        header.innerHTML = `<span>${escapeHtml(doc.document_name)}</span><span class="doc-badge">${escapeHtml(doc.document_type)}</span>`;
-        block.appendChild(header);
-        (doc.evidence || []).forEach((evidence) => {
-          const passage = document.createElement("div");
-          passage.className = "passage";
-          passage.innerHTML = `${highlightTerms(evidence.text, evidence.terms)}${isFinite(evidence.confidence) ? `<span class="muted">Relevance: ${(Number(evidence.confidence) * 100).toFixed(1)}%</span>` : ""}`;
-          block.appendChild(passage);
-        });
-        const meta = document.createElement("div");
-        meta.className = "turn-meta";
-        meta.textContent = doc.document_url ? "Click the icon to open the source document." : "No document URL provided; click-through uses the page URL when available.";
-        block.appendChild(meta);
-        panel.appendChild(block);
-      });
-      panel.dataset.open = "false";
-      return { toggle, panel };
-    }
-
-    function showPopover(anchor, doc) {
-      clearTimeout(state.hoverTimer);
-      let pop = document.getElementById("popover");
-      if (!pop) {
-        pop = document.createElement("div");
-        pop.id = "popover";
-        pop.className = "summary-card pop";
-        pop.style.position = "fixed";
-        pop.style.zIndex = "1000";
-        pop.style.maxWidth = "460px";
-        document.body.appendChild(pop);
-      }
-      pop.innerHTML = "";
-      const title = document.createElement("div");
-      title.className = "doc-title";
-      title.style.marginBottom = "8px";
-      title.innerHTML = `<span>${escapeHtml(doc.document_name)}</span><span class="doc-badge">${escapeHtml(doc.document_type)}</span>`;
-      pop.appendChild(title);
-      (doc.evidence || []).forEach((evidence) => {
-        const passage = document.createElement("div");
-        passage.className = "passage";
-        passage.innerHTML = `${highlightTerms(evidence.text, evidence.terms)}${isFinite(evidence.confidence) ? `<span class="muted">Relevance: ${(Number(evidence.confidence) * 100).toFixed(1)}%</span>` : ""}`;
-        pop.appendChild(passage);
-      });
-      const rect = anchor.getBoundingClientRect();
-      pop.style.left = `${Math.min(window.innerWidth - 20, rect.left)}px`;
-      pop.style.top = `${Math.min(window.innerHeight - 20, rect.bottom + 10)}px`;
-      pop.dataset.open = "true";
-      pop.onmouseenter = () => clearTimeout(state.hoverTimer);
-      pop.onmouseleave = scheduleHidePopover;
-    }
-
-    function scheduleHidePopover() {
-      clearTimeout(state.hoverTimer);
-      state.hoverTimer = window.setTimeout(() => {
-        const pop = document.getElementById("popover");
-        if (pop) pop.remove();
-      }, 100);
-    }
-
-    function openSource(doc) {
-      const target = documentUrlFor(doc);
-      if (target) window.open(target, "_blank", "noopener");
-    }
-
-    function updateSelectedPreview() {
-      if (state.client) {
-        setPill(clientPill, state.client.label, state.client.secondary);
-        summaryClient.textContent = `${state.client.label} (${state.client.secondary || "no code"})`;
-        clientStatus.textContent = `Client selected. ${state.client.petCount} pets available in the current cache.`;
-      } else {
-        clientPill.innerHTML = "<strong>None selected</strong>";
-        summaryClient.textContent = "No client selected yet.";
-        clientStatus.textContent = "Client choices are visible from the cached list with scrolling for the rest.";
-      }
-
-      if (state.pet) {
-        const petBits = [state.pet.species, state.pet.breed, state.pet.birthdate].filter(Boolean).join(" | ");
-        setPill(petPill, formatPetLabel(state.pet), petBits || state.pet.secondary);
-        summaryPet.textContent = `${formatPetLabel(state.pet)} (${petBits || state.pet.secondary || "no details"})`;
-        summaryPetId.textContent = `#${state.pet.id}`;
-        petStatus.textContent = `Pet selected for ${state.pet.clientLabel}.`;
-      } else {
-        petPill.innerHTML = "<strong>None selected</strong>";
-        summaryPet.textContent = "No pet selected yet.";
-        summaryPetId.textContent = "No pet ID selected yet.";
-        petStatus.textContent = state.client ? "Pick a pet from the selected client." : "Pet search is scoped to the selected client.";
-      }
-      updateAskButton();
-    }
-
-    function filterClientsLocally(query) {
-      const normalized = query.trim().toLowerCase();
-      if (normalized.length < threshold) {
-        return state.allClients;
-      }
-      return state.allClients.filter((item) => {
-        const haystack = [item.label, item.secondary, item.id].filter(Boolean).join(" ").toLowerCase();
-        return haystack.includes(normalized);
-      });
-    }
-
-    function filterPetsLocally(query) {
-      const normalized = query.trim().toLowerCase();
-      if (normalized.length < threshold) {
-        return state.allPets;
-      }
-      return state.allPets.filter((item) => {
-        const haystack = [item.label, item.secondary, item.clientLabel, item.id, item.species, item.breed].filter(Boolean).join(" ").toLowerCase();
-        return haystack.includes(normalized);
-      });
-    }
-
-    function renderOptions(kind, items) {
-      const list = kind === "client" ? clientList : petList;
-      const note = kind === "client" ? clientNote : petNote;
-      const dropdown = kind === "client" ? clientDropdown : petDropdown;
-      const activeIndexKey = kind === "client" ? "clientActiveIndex" : "petActiveIndex";
-      const shell = kind === "client" ? clientShell : petShell;
-      list.innerHTML = "";
-      if (!items.length) {
-        list.innerHTML = '<div class="option" style="cursor:default"><span class="name">No matches</span><span class="meta">Try a different search term.</span></div>';
-        note.textContent = "Nothing matched this search.";
-        openDropdown(dropdown);
-        shell.classList.remove("shake");
-        void shell.offsetWidth;
-        shell.classList.add("shake");
-        state[activeIndexKey] = -1;
-        return;
-      }
-      note.textContent = `${items.length} matches loaded.`;
-      openDropdown(dropdown);
-      items.forEach((item) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "option";
-        button.setAttribute("role", "option");
-        button.setAttribute("aria-selected", "false");
-        button.innerHTML = `
-          <div class="primary">
-            <span class="name">${escapeHtml(kind === "pet" ? formatPetLabel(item) : item.label)}</span>
-            <span class="badge">${escapeHtml(kind === "client" ? `${item.petCount} pets` : item.breed || item.species || "pet")}</span>
-          </div>
-          <div class="meta">${escapeHtml(kind === "pet" ? [item.clientLabel, `ID #${item.id}`, item.secondary].filter(Boolean).join(" • ") : item.secondary || "")}</div>
-        `;
-        button.addEventListener("click", () => selectItem(kind, item));
-        list.appendChild(button);
-      });
-      state[activeIndexKey] = 0;
-    }
-
-    function renderTranscript() {
-      transcript.innerHTML = "";
-      if (!state.transcript.length) {
-        transcript.innerHTML = '<div class="chat-empty">Your conversation will appear here as alternating USER and ASSISTANT turns.</div>';
-        conversationStatus.textContent = "Ready for a first question.";
-        return;
-      }
-      state.transcript.forEach((turn, index) => {
-        const turnNode = document.createElement("section");
-        turnNode.className = "turn";
-        if (turn.role === "user") {
-          turnNode.innerHTML = `<div class="speaker">USER</div><p class="question-text">${escapeHtml(turn.text)}</p>`;
-        } else {
-          const sourceRail = renderSourceRail(turn, index);
-          const evidenceUI = renderEvidencePanel(turn);
-          turnNode.innerHTML = `<div class="speaker">ASSISTANT</div><p class="answer-text">${escapeHtml(turn.text)}</p>`;
-          turnNode.appendChild(sourceRail);
-          turnNode.appendChild(evidenceUI.toggle);
-          turnNode.appendChild(evidenceUI.panel);
-          if (turn.elapsed_seconds != null) {
-            const meta = document.createElement("div");
-            meta.className = "turn-meta";
-            meta.textContent = `Completed in ${turn.elapsed_seconds}s`;
-            turnNode.appendChild(meta);
-          }
-          if (turn.missing?.length) {
-            const missing = document.createElement("div");
-            missing.className = "turn-meta";
-            missing.textContent = `Missing contract fields: ${turn.missing.join(", ")}`;
-            turnNode.appendChild(missing);
-          }
-        }
-        transcript.appendChild(turnNode);
-      });
-      conversationStatus.textContent = `${state.transcript.filter((turn) => turn.role === "assistant").length} assistant reply${state.transcript.filter((turn) => turn.role === "assistant").length === 1 ? "" : "s"} in this conversation.`;
-      transcript.scrollTop = transcript.scrollHeight;
-    }
-
-    function updateAskButton() {
-      askButton.disabled = !state.client || !state.pet || !questionBox.value.trim() || state.asking;
-    }
-
-    function resetConversation() {
-      state.transcript = [];
-      renderTranscript();
-      updateAskButton();
-    }
-
-    function clearPetSelection() {
-      state.pet = null;
-      petInput.value = "";
-      state.petQuery = "";
-      updateSelectedPreview();
-      resetConversation();
-    }
-
-    function selectItem(kind, item) {
-      if (kind === "client") {
-        state.client = item;
-        clientInput.value = item.label;
-        clearPetSelection();
-        setPetEnabled(true);
-        closeDropdown(clientDropdown);
-        updateSelectedPreview();
-        loadPetsOnce(item.id).catch(() => {
-          petStatus.textContent = "Pet search is unavailable right now.";
-        });
-      } else {
-        state.pet = item;
-        petInput.value = item.label;
-        closeDropdown(petDropdown);
-        updateSelectedPreview();
-        resetConversation();
-      }
-    }
-
-    async function fetchClients(query = "") {
-      state.clientItems = filterClientsLocally(query);
-      clientStatus.textContent = query.length >= threshold ? "Filtering loaded client catalog..." : "Showing the full client catalog...";
-      renderOptions("client", state.clientItems);
-    }
-
-    async function fetchPets(query = "") {
-      if (!state.client) {
-        renderOptions("pet", []);
-        return;
-      }
-      state.petItems = filterPetsLocally(query);
-      petStatus.textContent = query.length >= threshold ? "Filtering loaded pet list..." : "Showing the full pet list for this client...";
-      renderOptions("pet", state.petItems);
-    }
-
-    async function loadClientsOnce() {
-      if (state.clientController) state.clientController.abort();
-      state.clientController = new AbortController();
-      clientStatus.textContent = "Loading full client catalog...";
-      const payload = await api("/api/options", { kind: "client" }, { signal: state.clientController.signal });
-      state.allClients = payload.items || [];
-      state.clientItems = state.allClients.slice();
-      renderOptions("client", state.clientItems);
-    }
-
-    async function loadPetsOnce(clientId) {
-      if (!clientId) return;
-      if (state.petController) state.petController.abort();
-      state.petController = new AbortController();
-      petStatus.textContent = "Loading all pets for this client...";
-      const payload = await api("/api/options", { kind: "pet", clientId }, { signal: state.petController.signal });
-      state.allPets = payload.items || [];
-      state.petItems = state.allPets.slice();
-      renderOptions("pet", state.petItems);
-    }
-
-    function setPetEnabled(enabled) {
-      petInput.disabled = !enabled;
-      petShell.dataset.disabled = enabled ? "false" : "true";
-      petInput.placeholder = enabled ? "Search pets by name or code" : "Select a client first";
-      if (!enabled) closeDropdown(petDropdown);
-    }
-
-    async function askQuestion() {
-      const text = questionBox.value.trim();
-      if (!state.client || !state.pet || !text || state.asking) return;
-      state.asking = true;
-      askButton.disabled = true;
-      askStatus.textContent = "Searching records and preparing the reply...";
-      state.transcript.push({ role: "user", text });
-      renderTranscript();
-      try {
-        const payload = await api("/api/rag/answer", {}, {
-          method: "POST",
-          body: JSON.stringify({
-            client_id: state.client.id,
-            pet_id: state.pet.id,
-            question: text,
-          }),
-        });
-        const assistant = {
-          role: "assistant",
-          text: payload.answer || "",
-          elapsed_seconds: payload.elapsed_seconds,
-          sources: normalizeSources(payload),
-          missing: missingContractFields(payload),
-        };
-        state.transcript.push(assistant);
-        questionBox.value = "";
-        autoGrow(questionBox);
-        askStatus.textContent = "Answer added to the conversation.";
-      } catch (error) {
-        state.transcript.push({
-          role: "assistant",
-          text: `I couldn’t fetch an answer right now: ${error.message}`,
-          elapsed_seconds: null,
-          sources: [],
-          missing: [],
-        });
-        askStatus.textContent = "The request failed.";
-      } finally {
-        state.asking = false;
-        renderTranscript();
-        updateAskButton();
-      }
-    }
-
-    function autoGrow(el) {
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
-    }
-
-    const onClientInput = debounce(() => {
-      state.clientQuery = clientInput.value.trim();
-      fetchClients(state.clientQuery).catch(() => {
-        clientStatus.textContent = "Client search is unavailable right now.";
-      });
-    }, 150);
-
-    const onPetInput = debounce(() => {
-      if (!state.client) return;
-      state.petQuery = petInput.value.trim();
-      fetchPets(state.petQuery).catch(() => {
-        petStatus.textContent = "Pet search is unavailable right now.";
-      });
-    }, 150);
-
-    clientInput.addEventListener("input", onClientInput);
-    petInput.addEventListener("input", onPetInput);
-    clientInput.addEventListener("focus", () => {
-      openDropdown(clientDropdown);
-      if (!state.clientItems.length) fetchClients(clientInput.value.trim()).catch(() => {});
-    });
-    petInput.addEventListener("focus", () => {
-      if (!state.client) return;
-      openDropdown(petDropdown);
-      if (!state.allPets.length) loadPetsOnce(state.client.id).catch(() => {});
-      else fetchPets(petInput.value.trim()).catch(() => {});
-    });
-    document.addEventListener("click", (event) => {
-      if (!clientShell.contains(event.target)) closeDropdown(clientDropdown);
-      if (!petShell.contains(event.target)) closeDropdown(petDropdown);
-    });
-    clientInput.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeDropdown(clientDropdown);
-    });
-    petInput.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeDropdown(petDropdown);
-    });
-    questionBox.addEventListener("input", () => {
-      autoGrow(questionBox);
-      updateAskButton();
-    });
-    questionBox.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && event.ctrlKey) {
-        event.preventDefault();
-        const start = questionBox.selectionStart;
-        const end = questionBox.selectionEnd;
-        questionBox.value = `${questionBox.value.slice(0, start)}\n${questionBox.value.slice(end)}`;
-        questionBox.selectionStart = questionBox.selectionEnd = start + 1;
-        autoGrow(questionBox);
-        updateAskButton();
-      } else if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey) {
-        event.preventDefault();
-        askQuestion();
-      }
-    });
-    askButton.addEventListener("click", askQuestion);
-
-    setPetEnabled(false);
-    updateSelectedPreview();
-    renderTranscript();
-    loadClientsOnce().catch(() => {
-      clientStatus.textContent = "Client search is unavailable right now.";
-    });
-  </script>
+<script>
+const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
+const threshold=3;
+const citationUrl=(documentId,pageNumber)=>`${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
+const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other"];
+const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
+const normalizeFamily=(family)=>familyOrder.includes(family)?family:"other";
+const familySpritePos=(family)=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
+const state={clients:[],pets:[],client:null,pet:null,turns:[],loading:false,firstAnswerSubmitted:false};
+let clientSearchSeq=0;
+let petSearchSeq=0;
+let sourcePopoverHideTimer=0;
+const $=id=>document.getElementById(id);
+const normalize=v=>String(v??"").toLowerCase().trim();
+function escapeHtml(v){const d=document.createElement("div");d.textContent=String(v??"");return d.innerHTML;}
+function localFilter(items,query,fields){const q=normalize(query);if(q.length<threshold)return items;return items.filter(item=>fields.some(f=>normalize(item[f]).includes(q))||normalize(fields.map(f=>item[f]).join(" ")).includes(q));}
+function render(menu,items,onPick){menu.innerHTML="";if(!items.length){menu.style.display="none";return;}items.slice(0,100).forEach(item=>{const el=document.createElement("div");el.className="option";el.innerHTML=`<div>${escapeHtml(item.label)}</div><div class="secondary">${escapeHtml(item.secondary||"")}</div>`;el.onclick=()=>onPick(item);menu.appendChild(el)});menu.style.display="block";}
+async function api(path,options={}){
+  const url=path.startsWith("http")?path:`${API_BASE}${path}`;
+  const response=await fetch(url,{headers:{"content-type":"application/json",...(options.headers||{})},...options});
+  if(!response.ok){
+    const body=await response.text();
+    const message=body&&body.trim()?body.trim():response.statusText||"Request failed";
+    throw new Error(`${response.status}: ${message}`);
+  }
+  return response.json();
+}
+function searchOptions(kind,query,clientId=""){const params=new URLSearchParams({kind});if(query)params.set("q",query);if(clientId)params.set("clientId",clientId);return api(`/api/options?${params.toString()}`);}
+function updateAsk(){const ok=!!(state.client&&state.pet&&$("question").value.trim()&&!state.loading);$("ask").disabled=!ok;}
+function clearTranscript(){state.turns=[];$("transcript").innerHTML='<div class="empty">Ask a question to begin a patient-specific conversation.</div>';}
+function updateQuestionPrompt(){
+  $("question").placeholder = state.firstAnswerSubmitted ? "Ask another question…" : "When was the last dental cleaning?";
+}
+function clearClientMenu(){const menu=$("client-menu");menu.innerHTML="";menu.style.display="none";}
+function clearPetMenu(){const menu=$("pet-menu");menu.innerHTML="";menu.style.display="none";}
+function chooseClient(item){state.client=item;state.pet=null;$("client-input").value=item.label;$("client-menu").style.display="none";$("pet-input").value="";$("pet-input").disabled=true;$("pet-status").textContent="Loading patients…";clearTranscript();updateAsk();searchOptions("pet","",item.id).then(p=>{state.pets=p.items||[];$("pet-input").disabled=false;$("pet-input").placeholder="Type a patient name";$("pet-status").textContent=`${state.pets.length} patients loaded`;}).catch(e=>$("pet-status").textContent=`Unable to load patients: ${e.message}`);}
+function choosePet(item){state.pet=item;$("pet-input").value=item.label;$("pet-menu").style.display="none";$("pet-status").textContent=[item.species,item.breed].filter(Boolean).join(" · ");clearTranscript();updateAsk();}
+function citationLink(ref){const docId=ref.document_id||ref.documentId||"";const page=ref.page_number||ref.pageNumber||1;const label=ref.document_title||ref.documentTitle||ref.page_label||`Page ${page}`;const a=document.createElement("a");a.textContent=`${label} — Page ${page}`;if(docId){a.href=citationUrl(docId,page);a.target="_blank";a.rel="noopener";}return a;}
+function groupedRefs(turn){const refs=(turn.citations||turn.references||[]).map(ref=>({document_id:ref.document_id||ref.documentId||"",page_number:ref.page_number||ref.pageNumber||1,document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",snippet:ref.snippet||"",terms:Array.isArray(ref.terms)?ref.terms:[],source_page_url:ref.source_page_url||""}));const byId=new Map();refs.forEach(ref=>{const id=ref.document_id||`${ref.document_title}-${ref.page_number}`;const existing=byId.get(id)||{document_id:ref.document_id,document_title:ref.document_title,pages:[],snippets:[],terms:[]};existing.pages.push(ref.page_number);if(ref.snippet)existing.snippets.push(ref.snippet);if(ref.terms.length)existing.terms.push(...ref.terms);if(!existing.document_title||existing.document_title==="Source PDF")existing.document_title=ref.document_title;byId.set(id,existing);});return [...byId.values()].map(doc=>({...doc,terms:[...new Set(doc.terms.map(t=>String(t||"").trim()).filter(Boolean))]}));}
+function createSourcePopover(){let pop=$("source-popover");if(pop)return pop;pop=document.createElement("div");pop.id="source-popover";pop.className="source-popover";pop.innerHTML='<div class="title"></div><div class="meta"></div><div class="snippets"></div>';document.body.appendChild(pop);pop.addEventListener("mouseenter",()=>{clearTimeout(sourcePopoverHideTimer);pop.classList.add("open");});pop.addEventListener("mouseleave",hideSourcePopover);return pop;}
+function highlightText(text, terms=[]){let out=escapeHtml(text);const mappings=[...new Set((terms||[]).map(t=>String(t||"").trim()).filter(Boolean))].sort((a,b)=>b.length-a.length);for(const term of mappings){const safe=term.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");const re=new RegExp(`(${safe})`,"gi");out=out.replace(re,'<span class="highlight-term">$1</span>');}return out;}
+function questionTerms(question){return [...new Set(String(question||"").toLowerCase().split(/[^a-z0-9]+/).map(t=>t.trim()).filter(t=>t.length>2 && !new Set(['what','when','where','which','who','whom','whose','was','were','are','is','the','and','for','with','that','this','have','has','had','last','date','does','did','his','her','him','she','him','from','about','into','after','before','who']).has(t)))];}
+function showSourcePopover(anchor,doc,terms=[]){const pop=createSourcePopover();pop.querySelector(".title").textContent=doc.document_title||"Source PDF";pop.querySelector(".meta").textContent=`${doc.pages.length} page${doc.pages.length===1?"":"s"}`;const snippets=pop.querySelector(".snippets");snippets.innerHTML="";doc.snippets.slice(0,5).forEach((snippet,idx)=>{const div=document.createElement("div");div.className="snippet";div.innerHTML=`<div class="meta">Page ${escapeHtml(doc.pages[idx]||doc.pages[0]||1)}</div>${highlightText(snippet,[...(doc.terms||[]),...terms])}`;snippets.appendChild(div);});const r=anchor.getBoundingClientRect();const left=Math.min(window.innerWidth-24-pop.offsetWidth,Math.max(12,r.left));const top=Math.min(window.innerHeight-24-pop.offsetHeight,Math.max(12,r.bottom+8));pop.style.left=`${left}px`;pop.style.top=`${top}px`;pop.classList.add("open");}
+function hideSourcePopover(){clearTimeout(sourcePopoverHideTimer);sourcePopoverHideTimer=setTimeout(()=>{const pop=$("source-popover");if(pop)pop.classList.remove("open");},120);}
+function sourceChip(doc,terms){const btn=document.createElement("button");btn.type="button";btn.className="source-chip";btn.title=doc.document_title||"Source PDF";btn.dataset.docId=doc.document_id||"";btn.dataset.page=doc.pages[0]||1;btn.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos('other')}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;btn.addEventListener("click",()=>{if(doc.document_id)window.open(citationUrl(doc.document_id,doc.pages[0]||1),"_blank","noopener");});btn.addEventListener("mouseenter",()=>showSourcePopover(btn,doc,terms));btn.addEventListener("mouseleave",hideSourcePopover);btn.addEventListener("focus",()=>showSourcePopover(btn,doc,terms));btn.addEventListener("blur",hideSourcePopover);return btn;}
+function renderTurn(turn){const section=document.createElement("section");section.className="turn";const docs=groupedRefs(turn);const terms=questionTerms(turn.question);section.innerHTML=`<div class="turn-question"><p class="question-text">${escapeHtml(turn.question)}</p><div class="question-meta">${escapeHtml(turn.when)}</div></div>`;if(docs.length){const wrap=document.createElement("div");wrap.className="turn-sources";const row=document.createElement("div");row.style.display="flex";row.style.alignItems="center";row.style.gap="8px";const prev=document.createElement("button");prev.type="button";prev.className="source-nav-btn";prev.textContent="‹";const next=document.createElement("button");next.type="button";next.className="source-nav-btn";next.textContent="›";const rail=document.createElement("div");rail.className="source-navigator";docs.forEach(doc=>rail.appendChild(sourceChip(doc,terms)));const updateButtons=()=>{prev.disabled=rail.scrollLeft<=0;next.disabled=rail.scrollLeft>=rail.scrollWidth-rail.clientWidth-1;};prev.addEventListener("click",()=>rail.scrollBy({left:-260,behavior:"smooth"}));next.addEventListener("click",()=>rail.scrollBy({left:260,behavior:"smooth"}));rail.addEventListener("scroll",updateButtons);rail.addEventListener("wheel",e=>{if(Math.abs(e.deltaY)>Math.abs(e.deltaX)){rail.scrollLeft+=e.deltaY;e.preventDefault();updateButtons();}},{passive:false});setTimeout(updateButtons,0);row.appendChild(prev);row.appendChild(rail);row.appendChild(next);wrap.appendChild(row);section.appendChild(wrap);}else{const refs=turn.references||[];if(refs.length){const wrap=document.createElement("div");wrap.className="turn-sources";const list=document.createElement("div");list.className="refs";refs.forEach(ref=>list.appendChild(citationLink(ref)));wrap.appendChild(list);section.appendChild(wrap);}}const answer=document.createElement("div");answer.className="answer-body";answer.innerHTML=`<p class="answer-text">${escapeHtml(turn.answer)}</p>`;section.appendChild(answer);return section;}
+function appendTurn(turn){state.turns.push(turn);const transcript=$("transcript");if(transcript.querySelector(".empty"))transcript.innerHTML="";const composer=$("composer");transcript.appendChild(renderTurn(turn));transcript.appendChild(composer);transcript.lastElementChild?.scrollIntoView({behavior:"smooth",block:"end"});}
+async function submitQuestion(){if(state.loading)return;const question=$("question").value.trim();if(!(state.client&&state.pet&&question))return;state.loading=true;updateAsk();$("ask-status").textContent="Searching patient records and answering…";try{const params=new URLSearchParams({client_id:state.client.id,pet_id:state.pet.id,question});const data=await api(`/api/rag/answer?${params.toString()}`,{method:"POST"});appendTurn({when:new Date().toLocaleString([], {hour:'numeric',minute:'2-digit',month:'short',day:'numeric'}),question,answer:data.answer||"",citations:(data.citations||[]),references:(data.references||[])});$("question").value="";autoResize($("question"));state.firstAnswerSubmitted=true;updateQuestionPrompt();$("ask-status").textContent=`Completed in ${data.elapsed_seconds??"?"}s`;}catch(e){$("ask-status").textContent=`Unable to answer: ${e.message}`;}finally{state.loading=false;updateAsk();}}
+function autoResize(el){el.style.height="auto";el.style.height=Math.min(el.scrollHeight,180)+"px";}
+$("client-input").addEventListener("input",e=>{state.client=null;state.pet=null;$("pet-input").disabled=true;clearPetMenu();const q=e.target.value.trim();const seq=++clientSearchSeq;clearClientMenu();if(q.length<threshold){$("client-status").textContent=q?"Type 3+ characters":"";updateAsk();return;}searchOptions("client",q).then(data=>{if(seq!==clientSearchSeq)return;state.clients=data.items||[];render($("client-menu"),state.clients,chooseClient);$("client-status").textContent=state.clients.length?`${state.clients.length} matches`:"No matches";}).catch(err=>{if(seq!==clientSearchSeq)return;clearClientMenu();$("client-status").textContent=`Unable to load clients: ${err.message}`;});updateAsk();});
+$("client-input").addEventListener("focus",()=>{const q=$("client-input").value.trim();if(q.length<threshold){clearClientMenu();return;}searchOptions("client",q).then(data=>{state.clients=data.items||[];render($("client-menu"),state.clients,chooseClient);$("client-status").textContent=state.clients.length?`${state.clients.length} matches`:"No matches";}).catch(e=>{clearClientMenu();$("client-status").textContent=`Unable to load clients: ${e.message}`;});});
+$("pet-input").addEventListener("input",e=>{state.pet=null;const q=e.target.value.trim();const clientId=state.client&&state.client.id?state.client.id:"";const seq=++petSearchSeq;clearPetMenu();if(!clientId){$("pet-status").textContent="Select a client first";return;}if(q.length<threshold){$("pet-status").textContent=q?"Type 3+ characters":"";updateAsk();return;}searchOptions("pet",q,clientId).then(data=>{if(seq!==petSearchSeq)return;state.pets=data.items||[];render($("pet-menu"),state.pets,choosePet);$("pet-status").textContent=state.pets.length?`${state.pets.length} matches`:"No matches";}).catch(err=>{if(seq!==petSearchSeq)return;clearPetMenu();$("pet-status").textContent=`Unable to load patients: ${err.message}`;});updateAsk();});
+$("pet-input").addEventListener("focus",()=>{const q=$("pet-input").value.trim();const clientId=state.client&&state.client.id?state.client.id:"";if(!clientId||q.length<threshold){clearPetMenu();return;}searchOptions("pet",q,clientId).then(data=>{state.pets=data.items||[];render($("pet-menu"),state.pets,choosePet);$("pet-status").textContent=state.pets.length?`${state.pets.length} matches`:"No matches";}).catch(err=>{clearPetMenu();$("pet-status").textContent=`Unable to load patients: ${err.message}`;});});
+$("question").addEventListener("input",e=>{autoResize(e.target);updateAsk();});
+$("question").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.ctrlKey){e.preventDefault();const el=e.target;const s=el.selectionStart,e2=el.selectionEnd;el.value=el.value.slice(0,s)+"\n"+el.value.slice(e2);el.selectionStart=el.selectionEnd=s+1;autoResize(el);updateAsk();}else if(e.key==="Enter"&&!e.shiftKey&&!e.ctrlKey){e.preventDefault();submitQuestion();}});
+$("ask").onclick=submitQuestion;
+document.addEventListener("click",e=>{if(!e.target.closest(".field")){$("client-menu").style.display="none";$("pet-menu").style.display="none";hideSourcePopover();}});
+updateQuestionPrompt();
+searchOptions("client","").then(data=>{state.clients=data.items||[];$("client-status").textContent=`${state.clients.length} clients loaded`;$("live-status").textContent="Ready";clearTranscript();}).catch(e=>$("client-status").textContent=`Unable to load clients: ${e.message}`);
+clearTranscript();
+</script>
 </body>
 </html>
