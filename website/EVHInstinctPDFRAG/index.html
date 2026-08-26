@@ -150,7 +150,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
 const SEARCH_MIN=1;
 const PET_SEARCH_MIN=3;
-const SEARCH_DEBOUNCE_MS=200;
+const SEARCH_DEBOUNCE_MS=25;
 
 const citationUrl=(documentId,pageNumber)=>
   `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
@@ -229,6 +229,16 @@ function renderMenu(menu,items,onPick){
 
   menu.appendChild(fragment);
   menu.style.display="block";
+}
+
+function filterOptionsLocally(items,query){
+  const q=query.trim().toLowerCase();
+  if(!q)return items.slice();
+  const terms=q.split(/\s+/).filter(Boolean);
+  return items.filter(item=>{
+    const haystack=`${item.label||""} ${item.secondary||""}`.toLowerCase();
+    return terms.every(term=>haystack.includes(term));
+  });
 }
 
 async function api(path,options={}){
@@ -321,6 +331,13 @@ function scheduleOptionSearch({
   }
   if(menu.children.length){
     menu.style.display="block";
+  }
+  if(search.items.length){
+    const localItems=filterOptionsLocally(search.items,q);
+    renderMenu(menu,localItems,onPick);
+    if(localItems.length){
+      status.textContent=`Filtering…`;
+    }
   }
 
   const seq=search.seq;
@@ -779,6 +796,10 @@ $("pet-input").addEventListener("input",event=>{
     }
     renderMenu($("pet-menu"),petSearch.items,choosePet);
     return;
+  }
+  if(petSearch.items.length){
+    renderMenu($("pet-menu"),filterOptionsLocally(petSearch.items,q),choosePet);
+    $("pet-status").textContent="Filtering…";
   }
 
   scheduleOptionSearch({
