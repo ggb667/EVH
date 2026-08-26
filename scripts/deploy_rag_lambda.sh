@@ -27,7 +27,7 @@ echo "[preflight] rag ui tests"
 python -m pytest tests/test_rag_ui.py -q
 
 echo "[package] build lambda zip"
-python - <<'PY'
+ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
 import os
 import shutil
 import subprocess
@@ -36,11 +36,12 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-root = Path("/home/ggb66/dev/EVH")
+root = Path(os.environ["ROOT_DIR"])
 zip_path = root / "deploy/evh_instinct_rag_search.zip"
 build_dir = Path(tempfile.mkdtemp(prefix="evh-rag-lambda-build-"))
 staging = build_dir
-package_root = root / "pony/worktrees/pinkie"
+package_root = root
+zip_path.parent.mkdir(parents=True, exist_ok=True)
 
 subprocess.check_call([
     sys.executable,
