@@ -23,6 +23,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 rm -f "$OUTPUT_ZIP"
 mkdir -p "$TMP_DIR/$TARGET_PAGE"
 sed "s/__EVH_BUILD_STAMP__/$BUILD_STAMP/g" "$SITE_DIR/$TARGET_PAGE/index.html" > "$TMP_DIR/$TARGET_PAGE/index.html"
+if [ -f "$SITE_DIR/favicon.ico" ]; then
+  cp "$SITE_DIR/favicon.ico" "$TMP_DIR/favicon.ico"
+fi
 
 if grep -q '__EVH_BUILD_STAMP__' "$TMP_DIR/$TARGET_PAGE/index.html"; then
   echo "ERROR: build stamp placeholder still present after substitution" >&2
