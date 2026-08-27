@@ -197,7 +197,7 @@ test('patient list is loaded once per client and reused locally after clear', as
 
   await expect(pet).toBeEnabled();
   await expect(pet).toHaveAttribute('placeholder', 'Type a patient name');
-  await expect.poll(() => requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(1);
+  await expect.poll(() => requests.filter(r => r.kind === 'pet').length).toBe(1);
   await expect(petMenu).toContainText('Lassie');
   await expect(petMenu).toContainText('Minnie');
 
@@ -208,7 +208,7 @@ test('patient list is loaded once per client and reused locally after clear', as
   await pet.fill('La');
   await expect(petMenu).toContainText('Lassie');
   await expect(petMenu).not.toContainText('Minnie');
-  await expect(requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(1);
+  await expect(requests.filter(r => r.kind === 'pet').length).toBe(1);
   await page.getByText('Lassie').click();
   await expect(pet).toHaveValue('Lassie');
   await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
@@ -225,13 +225,13 @@ test('patient list is loaded once per client and reused locally after clear', as
   await expect(pet).toBeEnabled();
   await expect(pet).toHaveAttribute('placeholder', 'Type a patient name');
   await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
-  await expect.poll(() => requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(2);
+  await expect.poll(() => requests.filter(r => r.kind === 'pet').length).toBe(2);
   await pet.focus();
   await expect(petMenu).toContainText('Lassie');
   await expect(petMenu).toContainText('Minnie');
   await pet.fill('Min');
   await expect(petMenu).toContainText('Minnie');
-  await expect(requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(2);
+  await expect(requests.filter(r => r.kind === 'pet').length).toBe(2);
 });
 
 test('clearing client disables patient input and resets prompt', async ({ page }) => {

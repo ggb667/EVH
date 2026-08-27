@@ -165,8 +165,7 @@ const state={
   turns:[],
   loading:false,
   firstAnswerSubmitted:false,
-  patientCacheByClient:new Map(),
-  patientLoadPromisesByClient:new Map()
+  patientCacheByClient:new Map()
 };
 
 const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
@@ -259,6 +258,47 @@ function filterOptionsLocally(items,query){
   });
 }
 
+function levenshteinDistance(a,b){
+  const left=String(a||"").toLowerCase();
+  const right=String(b||"").toLowerCase();
+  if(left===right)return 0;
+  if(!left.length)return right.length;
+  if(!right.length)return left.length;
+  const prev=Array.from({length:right.length+1},(_,i)=>i);
+  const curr=new Array(right.length+1).fill(0);
+  for(let i=1;i<=left.length;i++){
+    curr[0]=i;
+    for(let j=1;j<=right.length;j++){
+      const cost=left[i-1]===right[j-1]?0:1;
+      curr[j]=Math.min(prev[j]+1,curr[j-1]+1,prev[j-1]+cost);
+    }
+    for(let j=0;j<=right.length;j++) prev[j]=curr[j];
+  }
+  return prev[right.length];
+}
+
+function rankOptionsLocally(items,query){
+  const q=query.trim().toLowerCase();
+  if(!q)return items.slice();
+  const scored=items.map(item=>{
+    const label=String(item.label||"").toLowerCase();
+    const secondary=String(item.secondary||"").toLowerCase();
+    const haystack=`${label} ${secondary}`.trim();
+    let score=0;
+    if(haystack.includes(q)) score=1000 - Math.max(0,haystack.indexOf(q));
+    else {
+      const words=[...new Set((label+" "+secondary).split(/\s+/).filter(Boolean))];
+      for(const word of words){
+        if(word.startsWith(q)) score=Math.max(score,700 - word.length);
+        else score=Math.max(score,300 - levenshteinDistance(word,q)*20);
+      }
+    }
+    return {item,score};
+  }).sort((a,b)=>b.score-a.score || String(a.item.label||"").localeCompare(String(b.item.label||"")));
+  const positive=scored.filter(entry=>entry.score>0).map(entry=>entry.item);
+  return positive.length?positive:items.slice();
+}
+
 function shouldRenderSearchResponse(search,input,q,seq){
   return seq===search.seq && search.authoritativeQuery===q && input.value.trim()===q;
 }
@@ -339,23 +379,11 @@ async function loadPatientOptionsOnce(clientId){
     petSearch.loadedClientId=key;
     return cachedPatientsFor(key);
   }
-  if(state.patientLoadPromisesByClient.has(key)){
-    petSearch.loadedClientId=key;
-    return state.patientLoadPromisesByClient.get(key);
-  }
-  const pending=(async()=>{
-    const data=await searchOptions("pet","",key);
-    const items=Array.isArray(data.items)?data.items:[];
-    storeCachedPatients(key,items);
-    petSearch.loadedClientId=key;
-    return items;
-  })();
-  state.patientLoadPromisesByClient.set(key,pending);
-  return pending.finally(()=>{
-    if(state.patientLoadPromisesByClient.get(key)===pending){
-      state.patientLoadPromisesByClient.delete(key);
-    }
-  });
+  const data=await searchOptions("pet","",key);
+  const items=Array.isArray(data.items)?data.items:[];
+  storeCachedPatients(key,items);
+  petSearch.loadedClientId=key;
+  return items;
 }
 
 function scheduleOptionSearch({
@@ -390,7 +418,7 @@ function scheduleOptionSearch({
       return;
     }
     clearMenu(menu);
-    renderMenu(menu,filterOptionsLocally(cachedItems,q),onPick,"No matches");
+    renderMenu(menu,rankOptionsLocally(cachedItems,q),onPick,"No matches");
     status.textContent="Filtering…";
     return;
   }
@@ -470,7 +498,7 @@ function clearPatientSelection(){
   state.pet=null;
   $("pet-input").value="";
   $("pet-status").textContent="";
-  $("pet-input").disabled=false;
+  $("pet-input").disabled=!state.client;
   $("pet-input").placeholder=state.client?"Type a patient name":"Select a client first";
   $("composer").style.display=state.client ? "" : "none";
   updateAsk();
@@ -501,7 +529,6 @@ function chooseClient(item){
   state.client=item;
   $("client-input").value=item.label||"";
   $("client-status").textContent="";
-
   clearPatientSelection();
   $("pet-input").disabled=false;
   $("pet-input").placeholder="Type a patient name";
@@ -513,10 +540,9 @@ function chooseClient(item){
     .then(items=>{
       if(!state.client || String(state.client.id||"")!==String(item.id||""))return;
       petSearch.items=items;
-      if(!$("pet-input").value.trim()){
-        clearPetMenu();
-        renderMenu($("pet-menu"),items,choosePet);
-      }
+      const q=$("pet-input").value.trim();
+      clearPetMenu();
+      renderMenu($("pet-menu"),rankOptionsLocally(items,q),choosePet,q ? "No matches" : "No matches");
       $("pet-status").textContent=items.length?`${items.length} matches`:"No matches";
     })
     .catch(error=>{
@@ -824,9 +850,6 @@ function appendTurn(turn){
   if(transcript.querySelector(".empty"))transcript.replaceChildren();
 
   transcript.appendChild(renderTurn(turn));
-
-  // Composer always remains after the latest turn.
-  transcript.appendChild($("composer"));
   $("composer").scrollIntoView({behavior:"smooth",block:"end"});
 }
 
@@ -987,15 +1010,11 @@ $("pet-input").addEventListener("input",event=>{
 $("pet-input").addEventListener("focus",()=>{
   if(!state.client)return;
   const q=$("pet-input").value.trim();
-  if(!cachedPatientsFor(state.client.id).length && petSearch.loadedClientId!==String(state.client.id||"")){
-    loadPatientOptionsOnce(state.client.id).then(()=>showCachedPatients()).catch(()=>{});
-    return;
-  }
   if(!q){
     showCachedPatients();
     return;
   }
-  renderMenu($("pet-menu"),filterOptionsLocally(cachedPatientsFor(state.client.id),q),choosePet);
+  renderMenu($("pet-menu"),rankOptionsLocally(cachedPatientsFor(state.client.id),q),choosePet);
 });
 
 $("question").addEventListener("input",event=>{
