@@ -80,7 +80,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer;padding:0}
 .source-chip:hover,.source-chip:focus-visible{border-color:#b8c8d8;box-shadow:0 0 0 3px rgba(40,95,143,.08);outline:none}
 .source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
-.source-chip .count{position:absolute;right:-5px;bottom:-5px;min-width:18px;height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
+.source-chip .count{position:absolute;right:-4px;bottom:-4px;min-width:18px;height:18px;line-height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
 .source-popover{position:fixed;z-index:80;max-width:min(460px,calc(100vw - 24px));max-height:min(380px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
 .source-popover.open{display:block}
 .source-popover .title{font-size:13px;font-weight:700;line-height:1.35;margin-bottom:6px}
@@ -713,8 +713,33 @@ async function submitQuestion(){
       pet_id:state.pet.id,
       question
     });
+    const patientContext={
+      client_id:state.client.id,
+      client_label:state.client.label||"",
+      patient_id:state.pet.id,
+      patient_name:state.pet.label||"",
+      species:state.pet.species||"",
+      breed:state.pet.breed||"",
+      birthdate:state.pet.birthdate||"",
+      owner:state.client.label||"",
+      pims_code:state.pet.microchipId||"",
+      microchip_id:state.pet.microchipId||"",
+    };
+    const conversation=state.turns.map(turn=>({
+      role:"user",
+      content:turn.question||"",
+      answer:turn.answer||"",
+      citations:turn.citations||[],
+      references:turn.references||[]
+    }));
 
-    const data=await api(`/api/rag/answer?${params.toString()}`,{method:"POST"});
+    const data=await api(`/api/rag/answer?${params.toString()}`,{
+      method:"POST",
+      body:JSON.stringify({
+        patient_context:patientContext,
+        conversation
+      })
+    });
 
     appendTurn({
       when:new Date().toLocaleString([],{

@@ -450,6 +450,130 @@ def test_call_openai_answer_uses_timeout_and_single_retry(monkeypatch):
 
 
 @pytest.mark.unit
+def test_call_openai_answer_includes_patient_metadata_and_history(monkeypatch):
+    captured = {}
+
+    fake_langchain_openai = types.ModuleType("langchain_openai")
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return type("Resp", (), {"content": "Minnie is a canine."})()
+
+    fake_langchain_openai.ChatOpenAI = FakeChatOpenAI
+
+    fake_messages = types.ModuleType("langchain_core.messages")
+    fake_messages.HumanMessage = lambda content: {"role": "user", "content": content}
+    fake_messages.SystemMessage = lambda content: {"role": "system", "content": content}
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_langchain_openai)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_messages)
+    monkeypatch.setattr(lambda_app, "_openai_api_key", lambda: "test-key")
+
+    answer = lambda_app._call_openai_answer(
+        "What species is Minnie?",
+        [{"document_title": "Patient Note", "page_label": "Page 2", "source_page_url": "", "snippet": "Minnie is a pup with a playful gait."}],
+        patient_context={
+            "patient_name": "Minnie",
+            "species": "Canine",
+            "breed": "Yorkshire Terrier",
+            "sex": "Female",
+            "birthdate": "2020-05-01",
+            "owner_name": "Deborah Burchill",
+        },
+        conversation_turns=[
+            {"role": "user", "content": "What species is Minnie?"},
+            {"role": "assistant", "content": "Minnie is likely a dog.", "citations": [{"document_id": "doc-1", "page_number": 2}], "references": [{"document_id": "doc-1", "page_number": 2, "document_title": "Patient Note"}]},
+            {"role": "user", "content": "Clearly its a canine"},
+            {"role": "assistant", "content": "Yes, canine is the supported inference.", "citations": [{"document_id": "doc-1", "page_number": 2}]},
+            {"role": "user", "content": "I'm asking if it's a dog or cat"},
+            {"role": "assistant", "content": "It is best read as a dog.", "citations": [{"document_id": "doc-1", "page_number": 2}]},
+        ],
+    )
+
+    assert answer == "Minnie is a canine."
+    system_text = captured["messages"][0]["content"]
+    user_text = captured["messages"][1]["content"]
+    assert "selected patient metadata is authoritative context" in system_text.lower()
+    assert "explicit structured fact" in system_text.lower()
+    assert "strong inference" in system_text.lower()
+    assert "Do not require exact wording" in system_text
+    assert '"patient_name": "Minnie"' in user_text
+    assert '"species": "Canine"' in user_text
+    assert '"breed": "Yorkshire Terrier"' in user_text
+    assert "Clearly its a canine" in user_text
+    assert "I'm asking if it's a dog or cat" in user_text
+    assert '"citations":' in user_text
+    assert '"references":' in user_text
+
+
+@pytest.mark.integration
+def test_lambda_serves_rag_answer_with_patient_context_and_history(monkeypatch):
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
+        {"document_id": "doc-1", "document_title": "Source PDF One", "source_uri": "https://example.test/doc-1", "page_number": 1, "page_label": "Page 1", "source_page_url": "https://example.test/doc-1#page=1"},
+    ])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([
+        {
+            "document_id": "doc-1",
+            "document_title": "Source PDF One",
+            "page_number": 1,
+            "page_label": "Page 1",
+            "source_page_url": "https://example.test/doc-1#page=1",
+            "snippet": "The patient received Convenia on 2026-08-01.",
+            "confidence": 0.93,
+            "date": "2026-08-01",
+        }
+    ], {"total_seconds": 0.012, "pg_connect_seconds": 0.001, "embedding_seconds": 0.002, "execute_seconds": 0.003, "fetch_seconds": 0.004, "materialize_seconds": 0.002}))
+
+    captured = {}
+    def fake_answer(question, chunks, **kwargs):
+        captured["question"] = question
+        captured["chunks"] = chunks
+        captured["kwargs"] = kwargs
+        return "The patient received Convenia on 2026-08-01."
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._create_chart_file_url", lambda document_id, inline=True: "https://instinct.test/file.pdf")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What species is Minnie?"},
+            "body": json.dumps({
+                "patient_context": {
+                    "patient_name": "Minnie",
+                    "species": "Canine",
+                    "breed": "Yorkshire Terrier",
+                    "birthdate": "2020-05-01",
+                    "owner_name": "Deborah Burchill",
+                },
+                "conversation": [
+                    {"role": "user", "content": "What species is Minnie?"},
+                    {"role": "assistant", "content": "Minnie is likely a dog.", "citations": [{"document_id": "doc-1", "page_number": 1}], "references": [{"document_id": "doc-1", "page_number": 1, "document_title": "Source PDF One"}]},
+                    {"role": "user", "content": "Clearly its a canine"},
+                    {"role": "assistant", "content": "Yes, canine is the supported inference.", "citations": [{"document_id": "doc-1", "page_number": 1}]},
+                    {"role": "user", "content": "I'm asking if it's a dog or cat"},
+                ]
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "The patient received Convenia on 2026-08-01."
+    assert captured["kwargs"]["patient_context"]["species"] == "Canine"
+    assert captured["kwargs"]["conversation_turns"][0]["content"] == "What species is Minnie?"
+    assert "Clearly its a canine" in captured["kwargs"]["conversation_turns"][2]["content"]
+    assert "citations" in captured["kwargs"]["conversation_turns"][1]["content"]
+    assert "references" in captured["kwargs"]["conversation_turns"][1]["content"]
+    assert captured["question"] == "What species is Minnie?"
+    assert payload["citations"][0]["document_id"] == "doc-1"
+    assert payload["references"][0]["document_id"] == "doc-1"
+
+
+@pytest.mark.unit
 def test_call_openai_answer_fast_fails_on_timeout(monkeypatch):
     fake_langchain_openai = types.ModuleType("langchain_openai")
 

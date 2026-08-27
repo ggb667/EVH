@@ -212,6 +212,93 @@ def _summarize_context_chunks(chunks: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+def _selected_patient_context_from_event(event: dict) -> dict[str, str]:
+    body = _event_json_body(event)
+    candidate = {}
+    if isinstance(body, dict):
+        candidate = body.get("patient_context") or body.get("patient") or {}
+    if not isinstance(candidate, dict):
+        candidate = {}
+    params = _query_params(event)
+    merged = dict(candidate)
+    for key, fallback_key in (
+        ("client_id", "client_id"),
+        ("clientId", "clientId"),
+        ("client_label", "client_label"),
+        ("clientLabel", "clientLabel"),
+        ("patient_id", "pet_id"),
+        ("patientId", "petId"),
+        ("pet_id", "pet_id"),
+        ("petId", "petId"),
+        ("patient_name", "patient_name"),
+        ("name", "name"),
+        ("species", "species"),
+        ("breed", "breed"),
+        ("sex", "sex"),
+        ("birthdate", "birthdate"),
+        ("owner", "owner"),
+        ("owner_name", "owner_name"),
+        ("pims_code", "pims_code"),
+        ("microchip_id", "microchip_id"),
+    ):
+        if not merged.get(key):
+            value = params.get(fallback_key) or params.get(fallback_key.lower()) or ""
+            if value:
+                merged[key] = value
+    normalized: dict[str, str] = {}
+    for key, value in merged.items():
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            normalized[key] = text
+    return normalized
+
+
+def _conversation_turns_from_event(event: dict) -> list[dict[str, str]]:
+    body = _event_json_body(event)
+    turns = []
+    if isinstance(body, dict):
+        turns = body.get("conversation") or body.get("turns") or body.get("history") or []
+    if not isinstance(turns, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or turn.get("speaker") or "user").strip().lower()
+        if role not in {"user", "assistant", "system"}:
+            role = "user"
+        content = str(turn.get("content") or turn.get("text") or turn.get("message") or "").strip()
+        if not content:
+            continue
+        evidence_parts = []
+        for key in ("answer", "citations", "references"):
+            value = turn.get(key)
+            if value in (None, "", [], {}):
+                continue
+            evidence_parts.append(f"{key}: {json.dumps(value, sort_keys=True)}")
+        if evidence_parts:
+            content = f"{content}\n" + "\n".join(evidence_parts)
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _event_json_body(event: dict) -> dict | list | None:
+    body = event.get("body")
+    if body in (None, ""):
+        return None
+    if isinstance(body, (dict, list)):
+        return body
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, (dict, list)) else None
+    return None
+
+
 def _extract_citations(chunks: list[dict]) -> list[dict]:
     return [
         {
@@ -492,14 +579,63 @@ def _execute_planned_retrieval(question: str, client_id: str, pet_id: str) -> tu
     return hits, timing, plan
 
 
-def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
+def _answer_messages(question: str, context_chunks: list[dict], *, patient_context: dict[str, str] | None = None, conversation_turns: list[dict[str, str]] | None = None) -> list[dict]:
+    patient_context = patient_context or {}
+    conversation_turns = conversation_turns or []
+    structured_patient = {
+        "patient_name": patient_context.get("patient_name") or patient_context.get("name") or "",
+        "species": patient_context.get("species") or "",
+        "breed": patient_context.get("breed") or "",
+        "sex": patient_context.get("sex") or "",
+        "birthdate": patient_context.get("birthdate") or "",
+        "owner": patient_context.get("owner_name") or patient_context.get("owner") or patient_context.get("client_label") or "",
+        "client_id": patient_context.get("client_id") or patient_context.get("clientId") or "",
+        "patient_id": patient_context.get("patient_id") or patient_context.get("patientId") or patient_context.get("pet_id") or patient_context.get("petId") or "",
+        "pims_code": patient_context.get("pims_code") or "",
+        "microchip_id": patient_context.get("microchip_id") or "",
+    }
+    patient_text = json.dumps(structured_patient, indent=2, sort_keys=True)
+    history_text = json.dumps(conversation_turns, indent=2, sort_keys=True)
     context_text = _summarize_context_chunks(context_chunks)
-    prompt = (
-        "You answer questions using only the provided context. "
-        "If the context does not contain the answer, say you cannot find it in the retrieved documents. "
-        "Return a concise answer and mention source page numbers in parentheses.\n\n"
-        f"Question: {question}\n\nRetrieved context:\n{context_text}"
+    system_text = (
+        "You are a careful patient-record assistant.\n"
+        "Selected patient metadata is authoritative context and may be used even when no retrieved document says the same thing verbatim.\n"
+        "Conversation history and its cited evidence are part of the same patient conversation, not independent prompts.\n"
+        "Distinguish these evidence levels explicitly when relevant:\n"
+        "- explicit structured fact\n"
+        "- explicit document fact\n"
+        "- strong inference\n"
+        "- genuinely unknown\n"
+        "You may make reasonable evidence-based inferences from the selected patient metadata and retrieved context.\n"
+        "Do not require an exact sentence in a retrieved document before answering.\n"
+        "Use the prior conversation turns to resolve follow-up questions in context.\n"
+        "Treat follow-up phrases like 'clearly it's a canine' or 'I'm asking if it's a dog or cat' as contextual continuation, not new document-search tasks.\n"
+        "Do not invent facts.\n"
+        "If the evidence is insufficient, say what is unknown and what would be needed.\n"
+        "When useful, mention the source document(s) and page number(s).\n"
+        "Keep the answer concise and clinically useful.\n"
+        "If multiple documents support the answer, synthesize them clearly.\n"
+        "Do not require exact wording from a retrieved document when a reasonable evidence-based inference is supported."
     )
+    user_text = (
+        f"Selected patient metadata:\n{patient_text}\n\n"
+        f"Prior conversation turns:\n{history_text}\n\n"
+        f"Current question:\n{question}\n\n"
+        f"Retrieved context:\n{context_text}"
+    )
+    return [
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": user_text},
+    ]
+
+
+def _call_openai_answer(
+    question: str,
+    context_chunks: list[dict],
+    *,
+    patient_context: dict[str, str] | None = None,
+    conversation_turns: list[dict[str, str]] | None = None,
+) -> str:
     model_name = _llm_model()
     started = time.perf_counter()
     print(f"[RAG_TIMING] answer_model={model_name} answer_request_start", flush=True)
@@ -514,9 +650,10 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
             timeout=8,
             max_retries=1,
         )
+        messages = _answer_messages(question, context_chunks, patient_context=patient_context, conversation_turns=conversation_turns)
         response = model.invoke([
-            SystemMessage(content="You are a precise RAG assistant."),
-            HumanMessage(content=prompt),
+            SystemMessage(content=messages[0]["content"]),
+            HumanMessage(content=messages[1]["content"]),
         ])
         text = getattr(response, "content", "")
         if isinstance(text, str) and text.strip():
@@ -532,30 +669,17 @@ def _call_openai_answer(question: str, context_chunks: list[dict]) -> str:
     except Exception:
         pass
 
+    messages = _answer_messages(question, context_chunks, patient_context=patient_context, conversation_turns=conversation_turns)
     payload = {
         "model": model_name,
         "input": [
             {
                 "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "You answer questions using only the provided context. "
-                            "If the context does not contain the answer, say you cannot find it in the retrieved documents. "
-                            "Be concise and cite the most relevant source page numbers in parentheses."
-                        ),
-                    }
-                ],
+                "content": [{"type": "input_text", "text": messages[0]["content"]}],
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": f"Question: {question}\n\nRetrieved context:\n{context_text}",
-                    }
-                ],
+                "content": [{"type": "input_text", "text": messages[1]["content"]}],
             },
         ],
         "temperature": 0.2,
@@ -764,13 +888,15 @@ def _serve_rag_answer(event: dict) -> dict:
     started = time.perf_counter()
     print(f"[RAG_TIMING] answer_start client_id={client_id} pet_id={pet_id} qlen={len(question)}")
     try:
+        patient_context = _selected_patient_context_from_event(event)
+        conversation_turns = _conversation_turns_from_event(event)
         patient_documents = load_patient_documents(client_id, pet_id or None)
         retrieval_started = time.perf_counter()
         context_chunks, retrieval_timing, retrieval_plan = _execute_planned_retrieval(question, client_id, pet_id)
         retrieval_elapsed = time.perf_counter() - retrieval_started
         print(f"[RAG_TIMING] retrieval_seconds={retrieval_elapsed:.3f} chunks={len(context_chunks)}")
         llm_started = time.perf_counter()
-        answer = _call_openai_answer(question, context_chunks)
+        answer = _call_openai_answer(question, context_chunks, patient_context=patient_context, conversation_turns=conversation_turns)
         llm_elapsed = time.perf_counter() - llm_started
         total_elapsed = time.perf_counter() - started
         print(f"[RAG_TIMING] llm_seconds={llm_elapsed:.3f} total_seconds={total_elapsed:.3f}")
