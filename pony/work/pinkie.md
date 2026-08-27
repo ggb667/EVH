@@ -6,6 +6,11 @@ Branch: pony/pinkie/main
 Status: in_progress
 Scope: Weave Contacts
 Permissions granted: none recorded
+Restart capsule:
+- task: none recorded
+- why: none recorded
+- next: none recorded
+- blocker: none recorded
 Notes:
 - primary area: Weave contacts workflows and related EVH integration work
 - owned script directory: `scripts/contacts/`

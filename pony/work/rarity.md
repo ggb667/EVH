@@ -6,6 +6,11 @@ Branch: pony/rarity/main
 Status: assigned
 Scope: Stockroom
 Permissions granted: none recorded
+Restart capsule:
+- task: none recorded
+- why: none recorded
+- next: none recorded
+- blocker: none recorded
 Notes:
 - primary area: stockroom workflows and related EVH integration work
 - owned script directory: `scripts/stockroom/`
