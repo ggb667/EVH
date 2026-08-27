@@ -148,9 +148,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 "use strict";
 
 const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
-const SEARCH_MIN=1;
+const SEARCH_MIN=3;
 const PET_SEARCH_MIN=3;
-const SEARCH_DEBOUNCE_MS=25;
+const SEARCH_DEBOUNCE_MS=250;
 
 const citationUrl=(documentId,pageNumber)=>
   `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
@@ -241,6 +241,10 @@ function filterOptionsLocally(items,query){
   });
 }
 
+function shouldRenderSearchResponse(search,input,q,seq){
+  return seq===search.seq && search.authoritativeQuery===q && input.value.trim()===q;
+}
+
 async function api(path,options={}){
   const url=path.startsWith("http")?path:`${API_BASE}${path}`;
   const response=await fetch(url,{
@@ -285,6 +289,7 @@ async function refreshBackendVersion(){
 async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick}){
   abortSearch(search);
   const q=input.value.trim();
+  search.authoritativeQuery=q;
   search.lastQuery=q;
   clearMenu(menu);
   search.items=[];
@@ -294,10 +299,11 @@ async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick
   const controller=new AbortController();
   search.controller=controller;
   try{
-    const data=await searchOptions(kind,"",clientId,controller.signal);
-    if(seq!==search.seq || controller.signal.aborted || input.value.trim()!==q)return;
+  const data=await searchOptions(kind,"",clientId,controller.signal);
+    if(!shouldRenderSearchResponse(search,input,q,seq))return;
     const items=Array.isArray(data.items)?data.items:[];
     search.items=items;
+    clearMenu(menu);
     renderMenu(menu,items,onPick);
     status.textContent=items.length?`${items.length} matches`:"No matches";
   }catch(error){
@@ -321,9 +327,10 @@ function scheduleOptionSearch({
   const q=query.trim();
 
   abortSearch(search);
+  search.authoritativeQuery=q;
   search.lastQuery=q;
 
-  if(!q){
+  if(q.length<SEARCH_MIN){
     clearMenu(menu);
     search.items=[];
     status.textContent="";
@@ -334,6 +341,7 @@ function scheduleOptionSearch({
   }
   if(search.items.length){
     const localItems=filterOptionsLocally(search.items,q);
+    clearMenu(menu);
     renderMenu(menu,localItems,onPick);
     if(localItems.length){
       status.textContent=`Filtering…`;
@@ -343,7 +351,7 @@ function scheduleOptionSearch({
   const seq=search.seq;
   search.timer=setTimeout(async()=>{
     // Input may have changed during debounce.
-    if(seq!==search.seq || input.value.trim()!==q)return;
+    if(!shouldRenderSearchResponse(search,input,q,seq))return;
 
     const controller=new AbortController();
     search.controller=controller;
@@ -356,18 +364,19 @@ function scheduleOptionSearch({
       //   1) not superseded,
       //   2) not aborted,
       //   3) response still belongs to the exact visible query.
-      if(seq!==search.seq || controller.signal.aborted || input.value.trim()!==q)return;
+      if(!shouldRenderSearchResponse(search,input,q,seq))return;
 
       const items=Array.isArray(data.items)?data.items:[];
       search.items=items;
       search.lastQuery=q;
 
       // Backend fragment ranking is authoritative. Do not re-sort or locally filter.
+      clearMenu(menu);
       renderMenu(menu,items,onPick);
       status.textContent=items.length?`${items.length} matches`:"No matches";
     }catch(error){
       if(error?.name==="AbortError")return;
-      if(seq!==search.seq || input.value.trim()!==q)return;
+      if(!shouldRenderSearchResponse(search,input,q,seq))return;
       status.textContent=`Unable to load ${kind==="client"?"clients":"patients"}: ${error.message}`;
     }finally{
       if(search.controller===controller)search.controller=null;
@@ -753,6 +762,12 @@ $("client-input").addEventListener("input",event=>{
   updateAsk();
 
   const q=event.target.value.trim();
+  if(q.length<SEARCH_MIN){
+    abortSearch(clientSearch);
+    clearClientMenu();
+    $("client-status").textContent="";
+    return;
+  }
   if(clientSearch.items.length){
     renderMenu($("client-menu"),filterOptionsLocally(clientSearch.items,q),chooseClient);
     $("client-status").textContent="Filtering…";
@@ -774,7 +789,7 @@ $("client-input").addEventListener("focus",()=>{
   // to the exact current query.
   const q=$("client-input").value.trim();
   if(q.length>=SEARCH_MIN && q===clientSearch.lastQuery && clientSearch.items.length){
-    renderMenu($("client-menu"),clientSearch.items,chooseClient);
+    renderMenu($("client-menu"),filterOptionsLocally(clientSearch.items,q),chooseClient);
   }
 });
 
@@ -793,6 +808,7 @@ $("pet-input").addEventListener("input",event=>{
   const q=event.target.value.trim();
   if(q.length<PET_SEARCH_MIN){
     abortSearch(petSearch);
+    clearPetMenu();
     if(q){
       $("pet-status").textContent=`Type ${PET_SEARCH_MIN} characters to search`;
     }else if(petSearch.items.length){

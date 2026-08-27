@@ -8,6 +8,7 @@ import time
 import types
 import base64
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -485,8 +486,8 @@ def test_call_openai_answer_fast_fails_on_timeout(monkeypatch):
 @pytest.mark.unit
 def test_index_uses_request_driven_search_lifecycle():
     html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
-    assert 'const SEARCH_MIN=1;' in html
-    assert 'const SEARCH_DEBOUNCE_MS=25;' in html
+    assert 'const SEARCH_MIN=3;' in html
+    assert 'const SEARCH_DEBOUNCE_MS=250;' in html
     assert 'scheduleOptionSearch({' in html
     assert 'abortSearch(clientSearch);' in html
     assert 'abortSearch(petSearch);' in html
@@ -499,8 +500,8 @@ def test_index_uses_request_driven_search_lifecycle():
     assert 'Focus does not hit the backend' in html
     assert 'filterOptionsLocally' in html
     assert 'Filtering…' in html
+    assert 'if(q.length<SEARCH_MIN)' in html
     assert 'if(q.length>=SEARCH_MIN && q===clientSearch.lastQuery && clientSearch.items.length)' in html
-    assert 'q.length>=SEARCH_MIN' in html
     assert 'q===petSearch.lastQuery' in html
     assert 'petSearch.items.length' in html
     assert 'Searching…' in html
