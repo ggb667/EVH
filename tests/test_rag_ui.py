@@ -393,7 +393,7 @@ def test_lambda_serves_rag_answer_with_citations(monkeypatch):
             "date": "2026-08-01",
         }
     ], {"total_seconds": 0.012, "pg_connect_seconds": 0.001, "embedding_seconds": 0.002, "execute_seconds": 0.003, "fetch_seconds": 0.004, "materialize_seconds": 0.002}))
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks: "The patient received Convenia on 2026-08-01.")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks, **kwargs: "The patient received Convenia on 2026-08-01.")
     monkeypatch.setattr("scripts.rag_ui.lambda_app._create_chart_file_url", lambda document_id, inline=True: "https://instinct.test/file.pdf")
 
     response = lambda_handler(
