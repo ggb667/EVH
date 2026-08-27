@@ -599,6 +599,10 @@ def _answer_messages(question: str, context_chunks: list[dict], *, patient_conte
     context_text = _summarize_context_chunks(context_chunks)
     system_text = (
         "You are a careful patient-record assistant.\n"
+        "The practice stack includes Weave and Instinct EMR, so general questions about those technologies are in-scope.\n"
+        "You may answer general how-to or where-to-look questions about Weave and Instinct EMR when the user is asking about the technology itself.\n"
+        "Do not use that general guidance to override patient-specific truth.\n"
+        "Patient facts like species, breed, sex, birthdate, owner, and microchip stay authoritative only from the selected patient record and retrieved chart evidence.\n"
         "Selected patient metadata is authoritative context and may be used even when no retrieved document says the same thing verbatim.\n"
         "Conversation history and its cited evidence are part of the same patient conversation, not independent prompts.\n"
         "Distinguish these evidence levels explicitly when relevant:\n"
