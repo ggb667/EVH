@@ -8,7 +8,7 @@ import time
 import traceback
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from pathlib import Path
 from urllib import request as urllib_request
 
@@ -284,6 +284,41 @@ def _conversation_turns_from_event(event: dict) -> list[dict[str, str]]:
     return normalized
 
 
+def _conversation_citation_refs_from_event(event: dict) -> list[dict[str, str]]:
+    body = _event_json_body(event)
+    turns = []
+    if isinstance(body, dict):
+        turns = body.get("conversation") or body.get("turns") or body.get("history") or []
+    if not isinstance(turns, list):
+        return []
+    refs: list[dict[str, str]] = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        for key in ("citations", "references"):
+            values = turn.get(key) or []
+            if not isinstance(values, list):
+                continue
+            for ref in values:
+                if not isinstance(ref, dict):
+                    continue
+                document_id = str(ref.get("document_id") or ref.get("documentId") or "").strip()
+                if not document_id:
+                    continue
+                page_number = int(ref.get("page_number") or ref.get("pageNumber") or ref.get("page") or 1)
+                title = str(ref.get("document_title") or ref.get("documentTitle") or ref.get("page_label") or "Source PDF").strip()
+                source_uri = str(ref.get("source_uri") or ref.get("sourcePageUrl") or ref.get("source_page_url") or "").strip()
+                if not source_uri and isinstance(ref.get("source_page_url"), str):
+                    source_uri = str(ref.get("source_page_url") or "").strip()
+                refs.append({
+                    "document_id": document_id,
+                    "page_number": str(page_number),
+                    "document_title": title,
+                    "source_uri": source_uri,
+                })
+    return refs
+
+
 def _event_json_body(event: dict) -> dict | list | None:
     body = event.get("body")
     if body in (None, ""):
@@ -310,6 +345,39 @@ def _extract_citations(chunks: list[dict]) -> list[dict]:
         }
         for hit in chunks
     ]
+
+
+def _build_document_url_map(documents: list[dict], conversation_refs: list[dict] | None = None) -> dict[str, dict]:
+    def _canonical_url(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        parts = urlsplit(raw)
+        if not parts.scheme and not parts.netloc:
+            return raw.split("#", 1)[0]
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
+
+    entries: dict[tuple[str, int], dict[str, str]] = {}
+    for item in list(documents or []) + list(conversation_refs or []):
+        if not isinstance(item, dict):
+            continue
+        document_id = str(item.get("document_id") or item.get("documentId") or "").strip()
+        if not document_id:
+            continue
+        try:
+            page_number = int(item.get("page_number") or item.get("pageNumber") or item.get("page") or 1)
+        except (TypeError, ValueError):
+            page_number = 1
+        key = (document_id, page_number)
+        if key in entries:
+            continue
+        entries[key] = {
+            "document_id": document_id,
+            "page_number": page_number,
+            "document_title": str(item.get("document_title") or item.get("documentTitle") or item.get("page_label") or "Source PDF").strip() or "Source PDF",
+            "source_uri": _canonical_url(item.get("source_uri") or item.get("sourcePageUrl") or item.get("source_page_url") or ""),
+        }
+    return {f"{document_id}:{page_number}": value for (document_id, page_number), value in entries.items()}
 
 
 def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict]:
@@ -579,9 +647,17 @@ def _execute_planned_retrieval(question: str, client_id: str, pet_id: str) -> tu
     return hits, timing, plan
 
 
-def _answer_messages(question: str, context_chunks: list[dict], *, patient_context: dict[str, str] | None = None, conversation_turns: list[dict[str, str]] | None = None) -> list[dict]:
+def _answer_messages(
+    question: str,
+    context_chunks: list[dict],
+    *,
+    patient_context: dict[str, str] | None = None,
+    conversation_turns: list[dict[str, str]] | None = None,
+    conversation_refs: list[dict[str, str]] | None = None,
+) -> list[dict]:
     patient_context = patient_context or {}
     conversation_turns = conversation_turns or []
+    conversation_refs = conversation_refs or []
     structured_patient = {
         "patient_name": patient_context.get("patient_name") or patient_context.get("name") or "",
         "species": patient_context.get("species") or "",
@@ -596,6 +672,28 @@ def _answer_messages(question: str, context_chunks: list[dict], *, patient_conte
     }
     patient_text = json.dumps(structured_patient, indent=2, sort_keys=True)
     history_text = json.dumps(conversation_turns, indent=2, sort_keys=True)
+    evidence_refs = [
+        {
+            "document_id": str(item.get("document_id") or "").strip(),
+            "page_number": int(item.get("page_number") or 1),
+            "document_title": str(item.get("document_title") or "Source PDF").strip() or "Source PDF",
+            "source_uri": str(item.get("source_page_url") or "").strip(),
+        }
+        for item in context_chunks
+        if str(item.get("document_id") or "").strip()
+    ]
+    for ref in conversation_refs:
+        document_id = str(ref.get("document_id") or "").strip()
+        if not document_id:
+            continue
+        evidence_refs.append(
+            {
+                "document_id": document_id,
+                "page_number": int(ref.get("page_number") or 1),
+                "document_title": str(ref.get("document_title") or "Source PDF").strip() or "Source PDF",
+                "source_uri": str(ref.get("source_uri") or "").strip(),
+            }
+        )
     context_text = _summarize_context_chunks(context_chunks)
     system_text = (
         "You are a careful patient-record assistant.\n"
@@ -619,11 +717,13 @@ def _answer_messages(question: str, context_chunks: list[dict], *, patient_conte
         "When useful, mention the source document(s) and page number(s).\n"
         "Keep the answer concise and clinically useful.\n"
         "If multiple documents support the answer, synthesize them clearly.\n"
-        "Do not require exact wording from a retrieved document when a reasonable evidence-based inference is supported."
+        "Do not require exact wording from a retrieved document when a reasonable evidence-based inference is supported.\n"
+        "When citing a source, emit machine-readable markers like [CITE document_id=\"61173\" page=\"1\"] and do not invent URLs."
     )
     user_text = (
         f"Selected patient metadata:\n{patient_text}\n\n"
         f"Prior conversation turns:\n{history_text}\n\n"
+        f"Evidence reference map:\n{json.dumps(evidence_refs, indent=2, sort_keys=True)}\n\n"
         f"Current question:\n{question}\n\n"
         f"Retrieved context:\n{context_text}"
     )
@@ -639,6 +739,7 @@ def _call_openai_answer(
     *,
     patient_context: dict[str, str] | None = None,
     conversation_turns: list[dict[str, str]] | None = None,
+    conversation_refs: list[dict[str, str]] | None = None,
 ) -> str:
     model_name = _llm_model()
     started = time.perf_counter()
@@ -654,7 +755,13 @@ def _call_openai_answer(
             timeout=8,
             max_retries=1,
         )
-        messages = _answer_messages(question, context_chunks, patient_context=patient_context, conversation_turns=conversation_turns)
+        messages = _answer_messages(
+            question,
+            context_chunks,
+            patient_context=patient_context,
+            conversation_turns=conversation_turns,
+            conversation_refs=conversation_refs,
+        )
         response = model.invoke([
             SystemMessage(content=messages[0]["content"]),
             HumanMessage(content=messages[1]["content"]),
@@ -673,7 +780,13 @@ def _call_openai_answer(
     except Exception:
         pass
 
-    messages = _answer_messages(question, context_chunks, patient_context=patient_context, conversation_turns=conversation_turns)
+    messages = _answer_messages(
+        question,
+        context_chunks,
+        patient_context=patient_context,
+        conversation_turns=conversation_turns,
+        conversation_refs=conversation_refs,
+    )
     payload = {
         "model": model_name,
         "input": [
@@ -894,22 +1007,34 @@ def _serve_rag_answer(event: dict) -> dict:
     try:
         patient_context = _selected_patient_context_from_event(event)
         conversation_turns = _conversation_turns_from_event(event)
+        conversation_refs = _conversation_citation_refs_from_event(event)
         patient_documents = load_patient_documents(client_id, pet_id or None)
         retrieval_started = time.perf_counter()
         context_chunks, retrieval_timing, retrieval_plan = _execute_planned_retrieval(question, client_id, pet_id)
         retrieval_elapsed = time.perf_counter() - retrieval_started
         print(f"[RAG_TIMING] retrieval_seconds={retrieval_elapsed:.3f} chunks={len(context_chunks)}")
         llm_started = time.perf_counter()
-        answer = _call_openai_answer(question, context_chunks, patient_context=patient_context, conversation_turns=conversation_turns)
+        answer = _call_openai_answer(
+            question,
+            context_chunks,
+            patient_context=patient_context,
+            conversation_turns=conversation_turns,
+            conversation_refs=conversation_refs,
+        )
         llm_elapsed = time.perf_counter() - llm_started
         total_elapsed = time.perf_counter() - started
         print(f"[RAG_TIMING] llm_seconds={llm_elapsed:.3f} total_seconds={total_elapsed:.3f}")
+        citation_map = _build_document_url_map(
+            list(patient_documents or []) + list(context_chunks or []),
+            conversation_refs,
+        )
         payload = {
             "answer": answer,
             "context": context_chunks,
             "patient_documents": patient_documents,
             "references": _build_reference_map(patient_documents, context_chunks),
             "citations": _extract_citations(context_chunks),
+            "citation_map": citation_map,
             "retrieval": {
                 "matched_documents": len({hit["document_id"] for hit in context_chunks}),
                 "matched_pages": len(context_chunks),

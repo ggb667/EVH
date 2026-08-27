@@ -575,6 +575,54 @@ def test_lambda_serves_rag_answer_with_patient_context_and_history(monkeypatch):
     assert payload["references"][0]["document_id"] == "doc-1"
 
 
+@pytest.mark.integration
+def test_lambda_answer_includes_conversation_citation_map(monkeypatch):
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
+        {"document_id": "doc-b", "document_title": "Current Doc", "source_uri": "https://example.test/doc-b", "page_number": 2, "page_label": "Page 2", "source_page_url": "https://example.test/doc-b#page=2"},
+    ])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([
+        {
+            "document_id": "doc-b",
+            "document_title": "Current Doc",
+            "page_number": 2,
+            "page_label": "Page 2",
+            "source_page_url": "https://example.test/doc-b#page=2",
+            "snippet": "Current turn evidence from B.",
+            "confidence": 0.92,
+            "date": "2026-08-02",
+        }
+    ], {"total_seconds": 0.01}))
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks, **kwargs: 'The earlier record supports this [CITE document_id="doc-a" page="1"].')
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._create_chart_file_url", lambda document_id, inline=True: f"https://instinct.test/{document_id}.pdf")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "Follow-up question?"},
+            "body": json.dumps({
+                "patient_context": {
+                    "patient_name": "Minnie",
+                    "species": "Canine",
+                    "breed": "Yorkshire Terrier",
+                    "owner_name": "Deborah Burchill",
+                },
+                "conversation": [
+                    {"role": "user", "content": "What species is Minnie?"},
+                    {"role": "assistant", "content": "Minnie is likely a dog.", "citations": [{"document_id": "doc-a", "page_number": 1, "document_title": "Prior Doc", "source_page_url": "https://example.test/doc-a#page=1"}], "references": [{"document_id": "doc-a", "page_number": 1, "document_title": "Prior Doc", "source_uri": "https://example.test/doc-a"}]},
+                ],
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["citation_map"]["doc-a:1"]["source_uri"] == "https://example.test/doc-a"
+    assert payload["citation_map"]["doc-a:1"]["document_title"] == "Prior Doc"
+    assert payload["citation_map"]["doc-b:2"]["source_uri"] == "https://example.test/doc-b"
+    assert payload["answer"] == 'The earlier record supports this [CITE document_id="doc-a" page="1"].'
+
+
 @pytest.mark.unit
 def test_call_openai_answer_fast_fails_on_timeout(monkeypatch):
     fake_langchain_openai = types.ModuleType("langchain_openai")

@@ -458,6 +458,38 @@ function citationLink(ref){
   return link;
 }
 
+function citationMarkerLink(match,citationMap){
+  const docId=match[1]||"";
+  const page=Number.parseInt(match[2]||"1",10)||1;
+  const key=`${docId}:${page}`;
+  const ref=citationMap?.[key]||{};
+  const link=document.createElement("a");
+  link.textContent=`${docId} p.${page}`;
+  if(ref.document_title)link.title=ref.document_title;
+  link.href=docId?citationUrl(docId,page):"#";
+  link.target="_blank";
+  link.rel="noopener";
+  return link;
+}
+
+function renderAnswerWithCitations(answer,citationMap){
+  const fragment=document.createDocumentFragment();
+  const text=String(answer||"");
+  const marker=/\[CITE\s+document_id="([^"]+)"\s+page="([^"]+)"\]/g;
+  let last=0;
+  for(const match of text.matchAll(marker)){
+    if(match.index>last){
+      fragment.appendChild(document.createTextNode(text.slice(last,match.index)));
+    }
+    fragment.appendChild(citationMarkerLink(match,citationMap));
+    last=match.index+match[0].length;
+  }
+  if(last<text.length){
+    fragment.appendChild(document.createTextNode(text.slice(last)));
+  }
+  return fragment;
+}
+
 function groupedRefs(turn){
   const refs=(turn.citations||turn.references||[]).map(ref=>({
     document_id:ref.document_id||ref.documentId||"",
@@ -678,7 +710,7 @@ function renderTurn(turn){
   answer.className="answer-body";
   const answerText=document.createElement("p");
   answerText.className="answer-text";
-  answerText.textContent=turn.answer||"";
+  answerText.appendChild(renderAnswerWithCitations(turn.answer||"",turn.citation_map||{}));
   answer.appendChild(answerText);
   section.appendChild(answer);
 
@@ -751,7 +783,8 @@ async function submitQuestion(){
       question,
       answer:data.answer||"",
       citations:data.citations||[],
-      references:data.references||[]
+      references:data.references||[],
+      citation_map:data.citation_map||{}
     });
 
     $("question").value="";
