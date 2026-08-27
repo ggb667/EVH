@@ -149,7 +149,6 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 const API_BASE="https://9ntl11qsjh.execute-api.us-east-1.amazonaws.com";
 const SEARCH_MIN=3;
-const PET_SEARCH_MIN=3;
 const SEARCH_DEBOUNCE_MS=250;
 
 const citationUrl=(documentId,pageNumber)=>
@@ -165,11 +164,13 @@ const state={
   pet:null,
   turns:[],
   loading:false,
-  firstAnswerSubmitted:false
+  firstAnswerSubmitted:false,
+  patientCacheByClient:new Map(),
+  patientLoadPromisesByClient:new Map()
 };
 
 const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
-const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
+const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[],loadedClientId:""};
 let sourcePopoverHideTimer=0;
 let backendVersionText="";
 
@@ -199,8 +200,25 @@ function clearMenu(menu){
 function clearClientMenu(){clearMenu($("client-menu"));}
 function clearPetMenu(){clearMenu($("pet-menu"));}
 
-function renderMenu(menu,items,onPick){
-  if(!items.length)return;
+function cachedPatientsFor(clientId){
+  return state.patientCacheByClient.get(String(clientId||"")) || [];
+}
+
+function storeCachedPatients(clientId,items){
+  state.patientCacheByClient.set(String(clientId||""), Array.isArray(items)?items.slice():[]);
+}
+
+function renderMenu(menu,items,onPick,emptyMessage=""){
+  if(!items.length){
+    if(!emptyMessage)return;
+    menu.replaceChildren();
+    const option=document.createElement("div");
+    option.className="option";
+    option.textContent=emptyMessage;
+    menu.appendChild(option);
+    menu.style.display="block";
+    return;
+  }
 
   const fragment=document.createDocumentFragment();
   for(const item of items.slice(0,100)){
@@ -314,6 +332,32 @@ async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick
   }
 }
 
+async function loadPatientOptionsOnce(clientId){
+  const key=String(clientId||"");
+  if(!key)return [];
+  if(state.patientCacheByClient.has(key)){
+    petSearch.loadedClientId=key;
+    return cachedPatientsFor(key);
+  }
+  if(state.patientLoadPromisesByClient.has(key)){
+    petSearch.loadedClientId=key;
+    return state.patientLoadPromisesByClient.get(key);
+  }
+  const pending=(async()=>{
+    const data=await searchOptions("pet","",key);
+    const items=Array.isArray(data.items)?data.items:[];
+    storeCachedPatients(key,items);
+    petSearch.loadedClientId=key;
+    return items;
+  })();
+  state.patientLoadPromisesByClient.set(key,pending);
+  return pending.finally(()=>{
+    if(state.patientLoadPromisesByClient.get(key)===pending){
+      state.patientLoadPromisesByClient.delete(key);
+    }
+  });
+}
+
 function scheduleOptionSearch({
   search,
   kind,
@@ -329,6 +373,27 @@ function scheduleOptionSearch({
   abortSearch(search);
   search.authoritativeQuery=q;
   search.lastQuery=q;
+
+  if(kind==="pet"){
+    if(!clientId){
+      clearMenu(menu);
+      search.items=[];
+      status.textContent="";
+      return;
+    }
+    const cachedItems=cachedPatientsFor(clientId);
+    search.items=cachedItems;
+    if(!q){
+      clearMenu(menu);
+      renderMenu(menu,cachedItems,onPick,"No matches");
+      status.textContent=cachedItems.length?`${cachedItems.length} matches`:"No matches";
+      return;
+    }
+    clearMenu(menu);
+    renderMenu(menu,filterOptionsLocally(cachedItems,q),onPick,"No matches");
+    status.textContent="Filtering…";
+    return;
+  }
 
   if(q.length<SEARCH_MIN){
     clearMenu(menu);
@@ -399,12 +464,34 @@ function updateQuestionPrompt(){
     :"When was the last dental cleaning?";
 }
 
-function resetPatientSelection(){
+function clearPatientSelection(){
   abortSearch(petSearch);
   clearPetMenu();
   state.pet=null;
   $("pet-input").value="";
   $("pet-status").textContent="";
+  $("pet-input").disabled=false;
+  $("pet-input").placeholder=state.client?"Type a patient name":"Select a client first";
+  $("composer").style.display=state.client ? "" : "none";
+  updateAsk();
+}
+
+function clearClientSelection(){
+  abortSearch(clientSearch);
+  clearClientMenu();
+  state.client=null;
+  state.pet=null;
+  petSearch.loadedClientId="";
+  state.patientCacheByClient.clear();
+  petSearch.items=[];
+  $("client-input").value="";
+  $("client-status").textContent="";
+  clearPatientSelection();
+  $("pet-input").disabled=true;
+  $("pet-input").placeholder="Select a client first";
+  $("composer").style.display="none";
+  clearTranscript();
+  updateAsk();
 }
 
 function chooseClient(item){
@@ -415,21 +502,27 @@ function chooseClient(item){
   $("client-input").value=item.label||"";
   $("client-status").textContent="";
 
-  resetPatientSelection();
+  clearPatientSelection();
   $("pet-input").disabled=false;
-  $("pet-input").placeholder="Pick a patient from the list";
+  $("pet-input").placeholder="Type a patient name";
 
   clearTranscript();
   updateAsk();
-  loadInitialOptions({
-    search:petSearch,
-    kind:"pet",
-    clientId:item.id,
-    input:$("pet-input"),
-    menu:$("pet-menu"),
-    status:$("pet-status"),
-    onPick:choosePet,
-  });
+  $("pet-status").textContent="Loading patients…";
+  loadPatientOptionsOnce(item.id)
+    .then(items=>{
+      if(!state.client || String(state.client.id||"")!==String(item.id||""))return;
+      petSearch.items=items;
+      if(!$("pet-input").value.trim()){
+        clearPetMenu();
+        renderMenu($("pet-menu"),items,choosePet);
+      }
+      $("pet-status").textContent=items.length?`${items.length} matches`:"No matches";
+    })
+    .catch(error=>{
+      if(!state.client || String(state.client.id||"")!==String(item.id||""))return;
+      $("pet-status").textContent=`Unable to load patients: ${error.message}`;
+    });
 }
 
 function choosePet(item){
@@ -442,6 +535,14 @@ function choosePet(item){
 
   clearTranscript();
   updateAsk();
+}
+
+function showCachedPatients(){
+  if(!state.client)return;
+  const items=cachedPatientsFor(state.client.id);
+  clearPetMenu();
+  renderMenu($("pet-menu"),items,choosePet,"No matches");
+  $("pet-status").textContent=items.length?`${items.length} matches`:"No matches";
 }
 
 function citationLink(ref){
@@ -813,13 +914,17 @@ function autoResize(element){
    - abort superseded requests
    - backend fragment order preserved */
 $("client-input").addEventListener("input",event=>{
+  const q=event.target.value.trim();
+  if(!q){
+    clearClientSelection();
+    $("client-status").textContent="";
+    return;
+  }
   state.client=null;
-  resetPatientSelection();
+  clearPatientSelection();
   $("pet-input").disabled=true;
   $("pet-input").placeholder="Select a client first";
   updateAsk();
-
-  const q=event.target.value.trim();
   if(q.length<SEARCH_MIN){
     abortSearch(clientSearch);
     clearClientMenu();
@@ -851,59 +956,46 @@ $("client-input").addEventListener("focus",()=>{
   }
 });
 
-/* Patient search uses the exact same lifecycle, scoped to the selected client. */
+/* Patient search is cached per client and filtered locally after the first load. */
 $("pet-input").addEventListener("input",event=>{
-  state.pet=null;
-  updateAsk();
-
   if(!state.client){
     abortSearch(petSearch);
     clearPetMenu();
     $("pet-status").textContent="Select a client first";
+    $("pet-input").disabled=true;
+    $("pet-input").placeholder="Select a client first";
+    clearTranscript();
     return;
   }
 
   const q=event.target.value.trim();
-  if(q.length<PET_SEARCH_MIN){
-    abortSearch(petSearch);
-    clearPetMenu();
-    if(q){
-      $("pet-status").textContent=`Type ${PET_SEARCH_MIN} characters to search`;
-    }else if(petSearch.items.length){
-      $("pet-status").textContent=`${petSearch.items.length} matches`;
-    }else{
-      $("pet-status").textContent="";
-    }
-    renderMenu($("pet-menu"),petSearch.items,choosePet);
+  state.pet=null;
+  $("pet-input").disabled=false;
+  $("pet-input").placeholder="Type a patient name";
+  updateAsk();
+  const cachedItems=cachedPatientsFor(state.client.id);
+  petSearch.items=cachedItems;
+  if(!q){
+    showCachedPatients();
     return;
   }
-  if(petSearch.items.length){
-    renderMenu($("pet-menu"),filterOptionsLocally(petSearch.items,q),choosePet);
-    $("pet-status").textContent="Filtering…";
-  }
-
-  scheduleOptionSearch({
-    search:petSearch,
-    kind:"pet",
-    query:q,
-    clientId:state.client.id,
-    input:event.target,
-    menu:$("pet-menu"),
-    status:$("pet-status"),
-    onPick:choosePet
-  });
+  clearPetMenu();
+  renderMenu($("pet-menu"),filterOptionsLocally(cachedItems,q),choosePet,"No matches");
+  $("pet-status").textContent="Filtering…";
 });
 
 $("pet-input").addEventListener("focus",()=>{
+  if(!state.client)return;
   const q=$("pet-input").value.trim();
-  if(
-    state.client &&
-    q.length>=SEARCH_MIN &&
-    q===petSearch.lastQuery &&
-    petSearch.items.length
-  ){
-    renderMenu($("pet-menu"),petSearch.items,choosePet);
+  if(!cachedPatientsFor(state.client.id).length && petSearch.loadedClientId!==String(state.client.id||"")){
+    loadPatientOptionsOnce(state.client.id).then(()=>showCachedPatients()).catch(()=>{});
+    return;
   }
+  if(!q){
+    showCachedPatients();
+    return;
+  }
+  renderMenu($("pet-menu"),filterOptionsLocally(cachedPatientsFor(state.client.id),q),choosePet);
 });
 
 $("question").addEventListener("input",event=>{

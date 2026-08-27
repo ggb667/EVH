@@ -127,3 +127,162 @@ test('source PDF page-count badge keeps 1-2 digit counts fully visible', async (
     await chip.dispose();
   }
 });
+
+test('patient list is loaded once per client and reused locally after clear', async ({ page }) => {
+  const requests = [];
+
+  await page.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.endsWith('/api/version')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 'test-sha', lambda_version: '$LATEST' }),
+      });
+      return;
+    }
+    if (url.includes('/api/options')) {
+      const query = new URL(url).searchParams.get('q') || '';
+      const kind = new URL(url).searchParams.get('kind') || '';
+      const clientId = new URL(url).searchParams.get('clientId') || '';
+      requests.push({ kind, query, clientId });
+      const bodyFor = () => {
+        if (kind === 'client') {
+          if (query === '') return { items: [{ id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762', pet_count: 2 }] };
+          if (query.toLowerCase() === 'mary') return { items: [{ id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762', pet_count: 2 }] };
+          return { items: [] };
+        }
+        if (kind === 'pet' && clientId === 'client-1') {
+          if (query === '') {
+            return { items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }, { id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' }] };
+          }
+          if (query.toLowerCase() === 'las' || query.toLowerCase() === 'lassie') {
+            return { items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }] };
+          }
+          return { items: [{ id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' }] };
+        }
+        return { items: [] };
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(bodyFor()),
+      });
+      return;
+    }
+    if (url === 'https://example.test/' || url === 'http://example.test/' || url.endsWith('/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: html,
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
+  });
+
+  await page.goto('https://example.test/');
+  await expect(page.locator('#live-status')).toHaveText('Ready');
+
+  const client = page.locator('#client-input');
+  const clientMenu = page.locator('#client-menu');
+  const pet = page.locator('#pet-input');
+  const petMenu = page.locator('#pet-menu');
+  const transcript = page.locator('#transcript');
+
+  await client.fill('Mary');
+  await expect(clientMenu).toContainText('Mary Theresa Jeffries');
+  await page.getByText('Mary Theresa Jeffries').click();
+  await expect(client).toHaveValue('Mary Theresa Jeffries');
+
+  await expect(pet).toBeEnabled();
+  await expect(pet).toHaveAttribute('placeholder', 'Type a patient name');
+  await expect.poll(() => requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(1);
+  await expect(petMenu).toContainText('Lassie');
+  await expect(petMenu).toContainText('Minnie');
+
+  await pet.focus();
+  await expect(petMenu).toContainText('Lassie');
+  await expect(petMenu).toContainText('Minnie');
+
+  await pet.fill('La');
+  await expect(petMenu).toContainText('Lassie');
+  await expect(petMenu).not.toContainText('Minnie');
+  await expect(requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(1);
+  await page.getByText('Lassie').click();
+  await expect(pet).toHaveValue('Lassie');
+  await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
+
+  await client.fill('');
+  await expect(client).toHaveValue('');
+  await expect(pet).toBeDisabled();
+  await expect(pet).toHaveAttribute('placeholder', 'Select a client first');
+  await expect(page.locator('#client-status')).toHaveText('');
+
+  await client.fill('Mary');
+  await page.getByText('Mary Theresa Jeffries').click();
+  await expect(client).toHaveValue('Mary Theresa Jeffries');
+  await expect(pet).toBeEnabled();
+  await expect(pet).toHaveAttribute('placeholder', 'Type a patient name');
+  await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
+  await expect.poll(() => requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(2);
+  await pet.focus();
+  await expect(petMenu).toContainText('Lassie');
+  await expect(petMenu).toContainText('Minnie');
+  await pet.fill('Min');
+  await expect(petMenu).toContainText('Minnie');
+  await expect(requests.filter(r => r.kind === 'pet' && r.clientId === 'client-1').length).toBe(2);
+});
+
+test('clearing client disables patient input and resets prompt', async ({ page }) => {
+  await page.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.endsWith('/api/version')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 'test-sha', lambda_version: '$LATEST' }),
+      });
+      return;
+    }
+    if (url.includes('/api/options')) {
+      const query = new URL(url).searchParams.get('q') || '';
+      const kind = new URL(url).searchParams.get('kind') || '';
+      const clientId = new URL(url).searchParams.get('clientId') || '';
+      const body = kind === 'client'
+        ? { items: [{ id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762', pet_count: 2 }] }
+        : clientId === 'client-1'
+          ? { items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }] }
+          : { items: [] };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+      return;
+    }
+    if (url === 'https://example.test/' || url === 'http://example.test/' || url.endsWith('/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: html,
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
+  });
+
+  await page.goto('https://example.test/');
+  const client = page.locator('#client-input');
+  const pet = page.locator('#pet-input');
+
+  await client.fill('Mary');
+  await page.getByText('Mary Theresa Jeffries').click();
+  await pet.fill('Las');
+  await page.getByText('Lassie').click();
+
+  await client.fill('');
+  await expect(client).toHaveValue('');
+  await expect(pet).toBeDisabled();
+  await expect(pet).toHaveAttribute('placeholder', 'Select a client first');
+});

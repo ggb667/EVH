@@ -676,10 +676,12 @@ def test_index_uses_request_driven_search_lifecycle():
     assert 'Filtering…' in html
     assert 'if(q.length<SEARCH_MIN)' in html
     assert 'if(q.length>=SEARCH_MIN && q===clientSearch.lastQuery && clientSearch.items.length)' in html
-    assert 'q===petSearch.lastQuery' in html
-    assert 'petSearch.items.length' in html
+    assert 'patientCacheByClient:new Map()' in html
+    assert 'loadPatientOptionsOnce(clientId)' in html
+    assert 'cachedPatientsFor(state.client.id)' in html
+    assert 'showCachedPatients()' in html
     assert 'Searching…' in html
-    assert 'no initial/default client list is loaded' in html or 'Clear menus' in html or 'clearClientMenu()' in html
+    assert 'clearClientMenu()' in html
 
 
 @pytest.mark.integration

@@ -725,15 +725,21 @@ def _initialize_client_search() -> tuple[tuple[ClientOption, ...], dict[str, Cli
 CLIENTS: tuple[ClientOption, ...] = ()
 CLIENT_BY_ID: dict[str, ClientOption] = {}
 CLIENT_FRAGMENT_INDEX: dict[str, set[str]] = {}
+CLIENT_SEARCH_INITIALIZED = False
 
 
 def _ensure_client_search_initialized() -> None:
-    global CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX
-    if CLIENTS or CLIENT_BY_ID or CLIENT_FRAGMENT_INDEX:
+    global CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX, CLIENT_SEARCH_INITIALIZED
+    if CLIENT_SEARCH_INITIALIZED and (CLIENTS or CLIENT_BY_ID or CLIENT_FRAGMENT_INDEX):
+        print("[RAG_TIMING] client_catalog_cache_hit=1", flush=True)
         return
     if not all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
         return
+    load_started = time.perf_counter()
     CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX = _initialize_client_search()
+    load_seconds = time.perf_counter() - load_started
+    CLIENT_SEARCH_INITIALIZED = True
+    print(f"[RAG_TIMING] client_catalog_load_seconds={load_seconds:.3f} client_count={len(CLIENTS)}", flush=True)
 
 
 def query_options_from_postgres(kind: str, query: str, client_id: str | None = None) -> list[dict[str, Any]]:
@@ -783,7 +789,7 @@ def query_options_from_postgres(kind: str, query: str, client_id: str | None = N
     clients = CLIENTS or _postgres_client_options()
     if not query_text:
         print(f"[RAG_TIMING] ranking_seconds=0.000 kind=client query={query_text!r}", flush=True)
-        print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
+        print(f"[RAG_TIMING] request_total_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
         return [item.as_dict() for item in clients[:10]]
     ranking_started = time.perf_counter()
     index = CLIENT_FRAGMENT_INDEX or _postgres_client_fragment_index()
@@ -796,7 +802,7 @@ def query_options_from_postgres(kind: str, query: str, client_id: str | None = N
         print(f"[RAG_TIMING] candidate_lookup_seconds=0.000 kind=client", flush=True)
         print(f"[RAG_TIMING] top10_seconds=0.000 kind=client", flush=True)
         print(f"[RAG_TIMING] ranking_seconds={ranking_seconds:.3f} kind=client query={query_text!r}", flush=True)
-        print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
+        print(f"[RAG_TIMING] request_total_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(clients[:10])}", flush=True)
         return [item.as_dict() for item in clients[:10]]
     lookup_started = time.perf_counter()
     ranked = _rank_items(query_text, CLIENT_BY_ID or {item.id: item for item in clients}, scores)
@@ -810,7 +816,7 @@ def query_options_from_postgres(kind: str, query: str, client_id: str | None = N
     print(f"[RAG_TIMING] candidate_lookup_seconds={candidate_lookup_seconds:.3f} kind=client", flush=True)
     print(f"[RAG_TIMING] top10_seconds={top10_seconds:.3f} kind=client", flush=True)
     print(f"[RAG_TIMING] ranking_seconds={ranking_seconds:.3f} kind=client query={query_text!r}", flush=True)
-    print(f"[RAG_TIMING] total_options_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(results or clients[:10])}", flush=True)
+    print(f"[RAG_TIMING] request_total_seconds={time.perf_counter() - total_started:.3f} kind=client count={len(results or clients[:10])}", flush=True)
     return results or [item.as_dict() for item in clients[:10]]
 
 def _client_display_name(account: dict[str, Any]) -> str:
