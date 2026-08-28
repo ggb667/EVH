@@ -414,6 +414,8 @@ def _build_catalog(clients: list[dict[str, Any]], patients: list[dict[str, Any]]
             id=str(item["id"]),
             label=str(item["label"]),
             secondary=str(item["secondary"]),
+            primary_phone=str(item.get("primary_phone", "") or ""),
+            email=str(item.get("email", "") or ""),
             pet_count=sum(1 for patient in patients if patient["client_id"] == str(item["id"])),
             search_text=str(item["search_text"]),
         )
