@@ -28,6 +28,11 @@ class _InstinctUrlCacheEntry:
 
 
 _INSTINCT_URL_CACHE: dict[tuple[str, int], _InstinctUrlCacheEntry] = {}
+DEFAULT_PRACTICE_STACK_CONTEXT = (
+    "The practice stack uses Instinct EMS and Weave. "
+    "General questions about those systems are in-scope, and the assistant may answer how-to or where-to-look questions about the technology itself. "
+    "Do not use that general guidance to override patient-specific truth."
+)
 
 
 def _app_version() -> str:
@@ -651,6 +656,7 @@ def _answer_messages(
     question: str,
     context_chunks: list[dict],
     *,
+    practice_stack_context: str | None = None,
     patient_context: dict[str, str] | None = None,
     conversation_turns: list[dict[str, str]] | None = None,
     conversation_refs: list[dict[str, str]] | None = None,
@@ -695,11 +701,10 @@ def _answer_messages(
             }
         )
     context_text = _summarize_context_chunks(context_chunks)
+    practice_stack_context = (practice_stack_context or DEFAULT_PRACTICE_STACK_CONTEXT).strip()
     system_text = (
         "You are a careful patient-record assistant.\n"
-        "The practice stack includes Weave and Instinct EMR, so general questions about those technologies are in-scope.\n"
-        "You may answer general how-to or where-to-look questions about Weave and Instinct EMR when the user is asking about the technology itself.\n"
-        "Do not use that general guidance to override patient-specific truth.\n"
+        f"{practice_stack_context}\n"
         "Patient facts like species, breed, sex, birthdate, owner, and microchip stay authoritative only from the selected patient record and retrieved chart evidence.\n"
         "Selected patient metadata is authoritative context and may be used even when no retrieved document says the same thing verbatim.\n"
         "Conversation history and its cited evidence are part of the same patient conversation, not independent prompts.\n"
@@ -737,6 +742,7 @@ def _call_openai_answer(
     question: str,
     context_chunks: list[dict],
     *,
+    practice_stack_context: str | None = None,
     patient_context: dict[str, str] | None = None,
     conversation_turns: list[dict[str, str]] | None = None,
     conversation_refs: list[dict[str, str]] | None = None,
@@ -758,6 +764,7 @@ def _call_openai_answer(
         messages = _answer_messages(
             question,
             context_chunks,
+            practice_stack_context=practice_stack_context,
             patient_context=patient_context,
             conversation_turns=conversation_turns,
             conversation_refs=conversation_refs,
@@ -783,6 +790,7 @@ def _call_openai_answer(
     messages = _answer_messages(
         question,
         context_chunks,
+        practice_stack_context=practice_stack_context,
         patient_context=patient_context,
         conversation_turns=conversation_turns,
         conversation_refs=conversation_refs,
