@@ -62,7 +62,10 @@ textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
 .status{font-size:12px;color:#68737e;margin-top:6px;min-height:18px;line-height:1.35}
 .ask-area{display:grid;gap:10px}
 .composer-box{position:relative}
-.question-label-row{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.question-label-row{display:flex;align-items:baseline;gap:12px}
+.question-label-row .question-label{flex:0 0 auto}
+.question-label-row .question-helper{flex:1 1 auto;font-size:12px;line-height:1.35;color:var(--muted);text-align:left}
+.question-label-row .hint{flex:0 0 auto;margin-left:auto;text-align:right}
 #corner-quote{
   font-size:12px;
   line-height:1.35;
@@ -145,7 +148,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
   <section id="composer" class="card ask-area">
     <div class="question-label-row">
-      <label for="question">Question</label>
+      <label class="question-label" for="question">Question</label>
+      <div class="question-helper">Ask a question to begin a patient-specific conversation.</div>
       <div class="hint">Enter submits • Ctrl+Enter inserts a newline</div>
     </div>
     <div class="composer-box">
