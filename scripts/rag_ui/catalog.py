@@ -592,6 +592,7 @@ def search_pet_chunks_by_embedding(client_id: str, pet_id: str | None, question:
 @lru_cache(maxsize=64)
 def _postgres_client_options() -> tuple[ClientOption, ...]:
     started = time.perf_counter()
+    print("[RAG_TIMING] postgres_client_options_enter kind=client", flush=True)
     connection = _pg_connect()
     connect_seconds = time.perf_counter() - started
     print(f"[RAG_TIMING] pg_connect_seconds={connect_seconds:.3f} kind=client", flush=True)
@@ -618,7 +619,8 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
         rows = cursor.fetchall()
         fetch_seconds = time.perf_counter() - fetch_started
         print(f"[RAG_TIMING] fetch_seconds={fetch_seconds:.3f} kind=client count={len(rows)}", flush=True)
-        return tuple(
+        materialize_started = time.perf_counter()
+        options = tuple(
             ClientOption(
                 id=str(row[0] or "").strip(),
                 label=str(row[1] or "").strip(),
@@ -631,6 +633,10 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
             for row in rows
             if str(row[0] or "").strip()
         )
+        materialize_seconds = time.perf_counter() - materialize_started
+        print(f"[RAG_TIMING] postgres_client_options_materialize_seconds={materialize_seconds:.3f} kind=client count={len(options)}", flush=True)
+        print(f"[RAG_TIMING] postgres_client_options_exit kind=client elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        return options
     finally:
         cursor.close()
         connection.close()
@@ -639,9 +645,16 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
 @lru_cache(maxsize=1)
 def _postgres_client_fragment_index() -> dict[str, set[str]]:
     started = time.perf_counter()
-    index = _build_fragment_index(_postgres_client_options())
-    build_seconds = time.perf_counter() - started
+    print("[RAG_TIMING] postgres_client_fragment_index_enter kind=client", flush=True)
+    clients_started = time.perf_counter()
+    clients = _postgres_client_options()
+    clients_seconds = time.perf_counter() - clients_started
+    print(f"[RAG_TIMING] postgres_client_fragment_index_clients_seconds={clients_seconds:.3f} kind=client client_count={len(clients)}", flush=True)
+    build_started = time.perf_counter()
+    index = _build_fragment_index(clients)
+    build_seconds = time.perf_counter() - build_started
     print(f"[RAG_TIMING] fragment_index_build_seconds={build_seconds:.3f} kind=client fragment_count={len(index)}", flush=True)
+    print(f"[RAG_TIMING] postgres_client_fragment_index_exit kind=client elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     return index
 
 
@@ -720,15 +733,23 @@ def _postgres_pet_fragment_index(client_id: str) -> dict[str, set[str]]:
 
 def _initialize_client_search() -> tuple[tuple[ClientOption, ...], dict[str, ClientOption], dict[str, set[str]]]:
     started = time.perf_counter()
+    print("[RAG_TIMING] initialize_client_search_enter kind=client", flush=True)
+    clients_started = time.perf_counter()
     clients = _postgres_client_options()
+    clients_seconds = time.perf_counter() - clients_started
+    print(f"[RAG_TIMING] initialize_client_search_clients_seconds={clients_seconds:.3f} kind=client client_count={len(clients)}", flush=True)
     client_by_id = {item.id: item for item in clients}
+    build_started = time.perf_counter()
     fragment_index = _build_fragment_index(clients)
+    build_seconds = time.perf_counter() - build_started
+    print(f"[RAG_TIMING] initialize_client_search_fragment_index_seconds={build_seconds:.3f} kind=client fragment_count={len(fragment_index)}", flush=True)
     build_seconds = time.perf_counter() - started
     print(
         f"[RAG_TIMING] client_search_init_seconds={build_seconds:.3f} "
         f"client_count={len(clients)} fragment_count={len(fragment_index)}",
         flush=True,
     )
+    print(f"[RAG_TIMING] initialize_client_search_exit kind=client elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     return clients, client_by_id, fragment_index
 
 
@@ -740,16 +761,20 @@ CLIENT_SEARCH_INITIALIZED = False
 
 def _ensure_client_search_initialized() -> None:
     global CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX, CLIENT_SEARCH_INITIALIZED
+    started = time.perf_counter()
+    print("[RAG_TIMING] client_search_init_enter", flush=True)
     if CLIENT_SEARCH_INITIALIZED and (CLIENTS or CLIENT_BY_ID or CLIENT_FRAGMENT_INDEX):
-        print("[RAG_TIMING] client_catalog_cache_hit=1", flush=True)
+        print(f"[RAG_TIMING] client_catalog_cache_hit=1 elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return
     if not all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
+        print(f"[RAG_TIMING] client_search_init_skip missing_pg_env elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return
     load_started = time.perf_counter()
     CLIENTS, CLIENT_BY_ID, CLIENT_FRAGMENT_INDEX = _initialize_client_search()
     load_seconds = time.perf_counter() - load_started
     CLIENT_SEARCH_INITIALIZED = True
     print(f"[RAG_TIMING] client_catalog_load_seconds={load_seconds:.3f} client_count={len(CLIENTS)}", flush=True)
+    print(f"[RAG_TIMING] client_search_init_exit elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
 
 
 def query_options_from_postgres(kind: str, query: str, client_id: str | None = None) -> list[dict[str, Any]]:
@@ -757,6 +782,7 @@ def query_options_from_postgres(kind: str, query: str, client_id: str | None = N
     kind = str(kind or "client").strip().lower()
     query_text = str(query or "").strip()
     total_started = time.perf_counter()
+    print(f"[RAG_TIMING] query_options_enter kind={kind} query={query_text!r} client_id={str(client_id or '').strip()}", flush=True)
 
     if kind == "pet":
         client_id = str(client_id or "").strip()
@@ -1070,11 +1096,15 @@ def _load_cached_file_catalog(path: Path, force: bool = False) -> RagCatalog:
 
 
 def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> RagCatalog:
+    started = time.perf_counter()
+    print(f"[RAG_TIMING] refresh_catalog_enter data_path={str(data_path or '')!r} force={int(force)}", flush=True)
     explicit_path = data_path
     if explicit_path is None and _is_test_context():
         explicit_path = os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip()
     if explicit_path:
-        return _load_cached_file_catalog(resolve_data_path(explicit_path), force=force)
+        catalog = _load_cached_file_catalog(resolve_data_path(explicit_path), force=force)
+        print(f"[RAG_TIMING] refresh_catalog_exit source=file elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        return catalog
 
     pg_env = _pg_env()
     if pg_env is not None:
@@ -1082,13 +1112,17 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
         now = time.time()
         cached = _CATALOG_CACHE.get(cache_key)
         if not force and cached and (now - cached[1]) < _refresh_interval_seconds():
+            print(f"[RAG_TIMING] refresh_catalog_exit source=postgres_cache elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return cached[2]
         catalog = _load_catalog_from_postgres()
         _CATALOG_CACHE[cache_key] = (0.0, now, catalog)
+        print(f"[RAG_TIMING] refresh_catalog_exit source=postgres elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return catalog
 
     if _is_test_context():
-        return _load_cached_file_catalog(resolve_data_path(data_path), force=force)
+        catalog = _load_cached_file_catalog(resolve_data_path(data_path), force=force)
+        print(f"[RAG_TIMING] refresh_catalog_exit source=test_file elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        return catalog
     raise FileNotFoundError(
         "No live RAG catalog source configured. Set production database "
         "credentials or explicit live data path."
@@ -1097,11 +1131,15 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
 
 def load_catalog(data_path: str | None = None) -> RagCatalog:
     global _CATALOG_MEMORY
+    started = time.perf_counter()
+    print(f"[RAG_TIMING] load_catalog_enter data_path={str(data_path or '')!r}", flush=True)
     if data_path is None and _CATALOG_MEMORY is not None:
         cached_at, catalog = _CATALOG_MEMORY
         if (time.time() - cached_at) < _refresh_interval_seconds():
+            print(f"[RAG_TIMING] load_catalog_exit source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return catalog
     catalog = refresh_catalog(data_path)
     if data_path is None:
         _CATALOG_MEMORY = (time.time(), catalog)
+    print(f"[RAG_TIMING] load_catalog_exit source=refresh elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     return catalog

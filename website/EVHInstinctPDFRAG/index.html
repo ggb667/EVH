@@ -206,6 +206,7 @@ const footerMessages=[
 
 const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[],loadedClientId:""};
+let initialClientSearchStarted=false;
 let sourcePopoverHideTimer=0;
 let backendVersionText="";
 const $=id=>document.getElementById(id);
@@ -454,6 +455,21 @@ async function loadInitialOptions({search,kind,clientId,input,menu,status,onPick
   }finally{
     if(search.controller===controller)search.controller=null;
   }
+}
+
+function kickoffInitialClientSearch(){
+  if(initialClientSearchStarted)return;
+  if(clientSearch.items.length || clientSearch.controller || clientSearch.timer)return;
+  initialClientSearchStarted=true;
+  loadInitialOptions({
+    search:clientSearch,
+    kind:"client",
+    clientId:"",
+    input:$("client-input"),
+    menu:$("client-menu"),
+    status:$("client-status"),
+    onPick:chooseClient
+  });
 }
 
 async function loadPatientOptionsOnce(clientId){
@@ -1232,6 +1248,7 @@ updateQuestionPrompt();
 clearTranscript();
 ensureComposerPlacement();
 refreshBackendVersion();
+kickoffInitialClientSearch();
 </script>
 </body>
 </html>
