@@ -722,6 +722,114 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
 
 
 @pytest.mark.integration
+def test_lambda_selected_context_survives_financials_failure(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: (_ for _ in ()).throw(RuntimeError("financials boom")))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["kwargs"] = kwargs
+        return "All set."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "All set."
+    assert captured["kwargs"]["selected_context"]["client"]["name"] == "Deborah Burchill"
+    assert captured["kwargs"]["selected_context"]["financials"] == {}
+    assert captured["kwargs"]["selected_context"]["reminders"][0]["title"] == "Annual exam"
+
+
+@pytest.mark.integration
+def test_lambda_selected_context_survives_document_load_failure(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: (_ for _ in ()).throw(RuntimeError("documents boom")))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["kwargs"] = kwargs
+        return "All set."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "All set."
+    assert captured["kwargs"]["selected_context"]["client"]["name"] == "Deborah Burchill"
+    assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 12.34
+    assert captured["kwargs"]["selected_context"]["documents"] == []
+
+
+@pytest.mark.integration
+def test_lambda_answer_survives_empty_retrieval(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._execute_planned_retrieval", lambda question, client_id, pet_id: ([], {"total_seconds": 0.0}, {"plan": "stubbed"}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["question"] = question
+        captured["chunks"] = chunks
+        captured["kwargs"] = kwargs
+        return "All set."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "All set."
+    assert captured["question"] == "What is due soon?"
+    assert captured["chunks"] == []
+    assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 12.34
+    assert captured["kwargs"]["selected_context"]["reminders"][0]["title"] == "Annual exam"
+
+
+@pytest.mark.integration
 def test_lambda_answer_includes_conversation_citation_map(monkeypatch):
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
         {"document_id": "doc-b", "document_title": "Current Doc", "source_uri": "https://example.test/doc-b", "page_number": 2, "page_label": "Page 2", "source_page_url": "https://example.test/doc-b#page=2"},

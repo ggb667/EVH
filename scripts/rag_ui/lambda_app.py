@@ -1280,12 +1280,45 @@ def _serve_rag_search(event: dict) -> dict:
 def _build_selected_context_bundle(client_id: str, pet_id: str, *, patient_context: dict[str, str] | None = None) -> dict[str, object]:
     patient_context = patient_context or {}
     client_record, patient_record = _selected_catalog_records(client_id, pet_id)
+    financials: dict[str, object] = {}
+    reminders: list[dict[str, object]] = []
+    patient_documents: list[dict[str, object]] = []
+    try:
+        financials_started = time.perf_counter()
+        financials = _fetch_instinct_financials(client_record)
+        print(
+            "[RAG_TIMING] selected_context_financials_seconds="
+            f"{time.perf_counter() - financials_started:.3f} status=ok has_balance={financials.get('balance') is not None}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[RAG_TIMING] selected_context_financials_error type={type(exc).__name__} message={exc}", flush=True)
+    try:
+        reminders_started = time.perf_counter()
+        reminders = _fetch_instinct_reminders(client_record, patient_record)
+        print(
+            "[RAG_TIMING] selected_context_reminders_seconds="
+            f"{time.perf_counter() - reminders_started:.3f} status=ok count={len(reminders)}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[RAG_TIMING] selected_context_reminders_error type={type(exc).__name__} message={exc}", flush=True)
+    try:
+        documents_started = time.perf_counter()
+        patient_documents = load_patient_documents(client_id, pet_id or None)
+        print(
+            "[RAG_TIMING] selected_context_documents_seconds="
+            f"{time.perf_counter() - documents_started:.3f} status=ok count={len(patient_documents)}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[RAG_TIMING] selected_context_documents_error type={type(exc).__name__} message={exc}", flush=True)
     selected_context = {
         "client": client_record,
         "patient": patient_record,
-        "financials": _fetch_instinct_financials(client_record),
-        "reminders": _fetch_instinct_reminders(client_record, patient_record),
-        "documents": load_patient_documents(client_id, pet_id or None),
+        "financials": financials,
+        "reminders": reminders,
+        "documents": patient_documents,
     }
     return _merge_selected_context(selected_context, patient_context, selected_context.get("documents") or [])
 
