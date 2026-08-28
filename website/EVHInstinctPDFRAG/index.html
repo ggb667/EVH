@@ -98,6 +98,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .refs a{display:block;text-decoration:none;color:var(--blue);padding:9px 10px;border:1px solid #d6dde4;border-radius:8px;background:#fafbfc}
 .refs a:hover{background:#f3f7fb;border-color:#c8d6e2}
 .empty{padding:16px;border:1px dashed #d6dde4;border-radius:12px;color:#6b7580;background:#fbfcfd}
+.page-foot{margin-top:18px;font-size:11px;line-height:1.25;color:#7a8490;text-align:right}
 @media(max-width:760px){
   .selector-grid{grid-template-columns:1fr}
   .header{flex-direction:column}
@@ -151,6 +152,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
     <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
   </section>
+  <div class="page-foot">EVH Patient Record Assistant © 2026 Gregory Garrett Bishop</div>
 </main>
 
 <script>
@@ -536,10 +538,6 @@ function restoreConversationFor(clientId,patientId){
 function renderTranscript(){
   const transcript=$("transcript");
   transcript.replaceChildren();
-  if(!state.turns.length){
-    transcript.innerHTML='<div class="empty">No patient questions yet.</div>';
-    return;
-  }
   for(const turn of state.turns){
     transcript.appendChild(renderTurn(turn));
   }
