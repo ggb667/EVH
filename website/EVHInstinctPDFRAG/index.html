@@ -129,6 +129,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
       </section>
   </div>
 
+  <section id="transcript" class="transcript" aria-live="polite"></section>
+
   <section id="composer" class="card ask-area">
     <div class="question-label-row">
       <label for="question">Question</label>
@@ -140,8 +142,6 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
     <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
   </section>
-
-  <section id="transcript" class="transcript" aria-live="polite"></section>
 </main>
 
 <script>
@@ -165,7 +165,8 @@ const state={
   turns:[],
   loading:false,
   firstAnswerSubmitted:false,
-  patientCacheByClient:new Map()
+  patientCacheByClient:new Map(),
+  conversationByScope:new Map()
 };
 
 const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
@@ -295,8 +296,7 @@ function rankOptionsLocally(items,query){
     }
     return {item,score};
   }).sort((a,b)=>b.score-a.score || String(a.item.label||"").localeCompare(String(b.item.label||"")));
-  const positive=scored.filter(entry=>entry.score>0).map(entry=>entry.item);
-  return positive.length?positive:items.slice();
+  return scored.map(entry=>entry.item);
 }
 
 function shouldRenderSearchResponse(search,input,q,seq){
@@ -481,9 +481,57 @@ function updateAsk(){
   $("ask").disabled=!(state.client&&state.pet&&$("question").value.trim()&&!state.loading);
 }
 
+function conversationScopeKey(clientId,patientId){
+  return `${String(clientId||"")}::${String(patientId||"")}`;
+}
+
+function currentConversationKey(){
+  if(!state.client || !state.pet)return "";
+  return conversationScopeKey(state.client.id,state.pet.id);
+}
+
+function persistCurrentConversation(){
+  const key=currentConversationKey();
+  if(!key)return;
+  state.conversationByScope.set(key,state.turns.map(turn=>({...turn})));
+  while(state.conversationByScope.size>50){
+    const oldestKey=state.conversationByScope.keys().next().value;
+    if(oldestKey===undefined)break;
+    state.conversationByScope.delete(oldestKey);
+  }
+}
+
+function restoreConversationFor(clientId,patientId){
+  const key=conversationScopeKey(clientId,patientId);
+  const turns=state.conversationByScope.get(key);
+  state.turns=Array.isArray(turns)?turns.map(turn=>({...turn})):[];
+  renderTranscript();
+}
+
+function renderTranscript(){
+  const transcript=$("transcript");
+  transcript.replaceChildren();
+  if(!state.turns.length){
+    transcript.innerHTML='<div class="empty">Ask a question to begin a patient-specific conversation.</div>';
+    return;
+  }
+  for(const turn of state.turns){
+    transcript.appendChild(renderTurn(turn));
+  }
+}
+
+function ensureComposerPlacement(){
+  const composer=$("composer");
+  const transcript=$("transcript");
+  if(composer && transcript && composer.previousElementSibling !== transcript){
+    transcript.parentElement.insertBefore(composer, transcript.nextSibling);
+  }
+}
+
 function clearTranscript(){
+  ensureComposerPlacement();
   state.turns=[];
-  $("transcript").innerHTML='<div class="empty">Ask a question to begin a patient-specific conversation.</div>';
+  renderTranscript();
 }
 
 function updateQuestionPrompt(){
@@ -493,6 +541,8 @@ function updateQuestionPrompt(){
 }
 
 function clearPatientSelection(){
+  ensureComposerPlacement();
+  persistCurrentConversation();
   abortSearch(petSearch);
   clearPetMenu();
   state.pet=null;
@@ -505,6 +555,8 @@ function clearPatientSelection(){
 }
 
 function clearClientSelection(){
+  ensureComposerPlacement();
+  persistCurrentConversation();
   abortSearch(clientSearch);
   clearClientMenu();
   state.client=null;
@@ -523,6 +575,8 @@ function clearClientSelection(){
 }
 
 function chooseClient(item){
+  ensureComposerPlacement();
+  persistCurrentConversation();
   abortSearch(clientSearch);
   clearClientMenu();
 
@@ -552,14 +606,15 @@ function chooseClient(item){
 }
 
 function choosePet(item){
+  ensureComposerPlacement();
+  persistCurrentConversation();
   abortSearch(petSearch);
   clearPetMenu();
 
   state.pet=item;
   $("pet-input").value=item.label||"";
   $("pet-status").textContent=[item.species,item.breed].filter(Boolean).join(" · ");
-
-  clearTranscript();
+  restoreConversationFor(state.client.id,item.id);
   updateAsk();
 }
 
@@ -845,7 +900,9 @@ function renderTurn(turn){
 }
 
 function appendTurn(turn){
+  ensureComposerPlacement();
   state.turns.push(turn);
+  persistCurrentConversation();
   const transcript=$("transcript");
   if(transcript.querySelector(".empty"))transcript.replaceChildren();
 
@@ -858,6 +915,12 @@ async function submitQuestion(){
 
   const question=$("question").value.trim();
   if(!(state.client&&state.pet&&question))return;
+  const lastTurn=state.turns[state.turns.length-1];
+  if(lastTurn && String(lastTurn.question||"").trim()===question){
+    $("ask-status").textContent="Duplicate question ignored.";
+    updateAsk();
+    return;
+  }
 
   state.loading=true;
   updateAsk();
@@ -1003,7 +1066,7 @@ $("pet-input").addEventListener("input",event=>{
     return;
   }
   clearPetMenu();
-  renderMenu($("pet-menu"),filterOptionsLocally(cachedItems,q),choosePet,"No matches");
+  renderMenu($("pet-menu"),rankOptionsLocally(cachedItems,q),choosePet);
   $("pet-status").textContent="Filtering…";
 });
 
@@ -1062,6 +1125,7 @@ document.addEventListener("click",event=>{
 
 updateQuestionPrompt();
 clearTranscript();
+ensureComposerPlacement();
 refreshBackendVersion();
 </script>
 </body>

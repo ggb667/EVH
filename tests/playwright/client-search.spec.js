@@ -154,12 +154,33 @@ test('patient list is loaded once per client and reused locally after clear', as
         }
         if (kind === 'pet' && clientId === 'client-1') {
           if (query === '') {
-            return { items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }, { id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' }] };
+            return {
+              items: [
+                { id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' },
+                { id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' },
+                { id: 'pet-4', label: 'Emmett Bleu (#4)', secondary: 'Canine · Mixed', species: 'Canine', breed: 'Mixed' },
+              ],
+            };
           }
           if (query.toLowerCase() === 'las' || query.toLowerCase() === 'lassie') {
             return { items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }] };
           }
-          return { items: [{ id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' }] };
+          if (query.toLowerCase().includes('emm')) {
+            return {
+              items: [
+                { id: 'pet-4', label: 'Emmett Bleu (#4)', secondary: 'Canine · Mixed', species: 'Canine', breed: 'Mixed' },
+                { id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' },
+                { id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' },
+              ],
+            };
+          }
+          return {
+            items: [
+              { id: 'pet-2', label: 'Minnie', secondary: 'Canine · Yorkshire Terrier', species: 'Canine', breed: 'Yorkshire Terrier' },
+              { id: 'pet-4', label: 'Emmett Bleu (#4)', secondary: 'Canine · Mixed', species: 'Canine', breed: 'Mixed' },
+              { id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' },
+            ],
+          };
         }
         return { items: [] };
       };
@@ -207,11 +228,22 @@ test('patient list is loaded once per client and reused locally after clear', as
 
   await pet.fill('La');
   await expect(petMenu).toContainText('Lassie');
-  await expect(petMenu).not.toContainText('Minnie');
+  await expect(petMenu).toContainText('Minnie');
   await expect(requests.filter(r => r.kind === 'pet').length).toBe(1);
   await page.getByText('Lassie').click();
   await expect(pet).toHaveValue('Lassie');
   await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
+
+  await pet.fill('');
+  await expect(petMenu).toContainText('Lassie');
+  await expect(petMenu).toContainText('Minnie');
+  await expect(petMenu).toContainText('Emmett Bleu (#4)');
+
+  await pet.fill('Emm ABC');
+  await expect(petMenu).toContainText('Emmett Bleu (#4)');
+  await expect(petMenu).toContainText('Minnie');
+  await expect(petMenu).toContainText('Lassie');
+  await expect(petMenu.locator('.option').first()).toContainText('Emmett Bleu (#4)');
 
   await client.fill('');
   await expect(client).toHaveValue('');
@@ -285,4 +317,177 @@ test('clearing client disables patient input and resets prompt', async ({ page }
   await expect(client).toHaveValue('');
   await expect(pet).toBeDisabled();
   await expect(pet).toHaveAttribute('placeholder', 'Select a client first');
+});
+
+test('switching patients restores per-patient transcript history', async ({ page }) => {
+  await page.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.endsWith('/api/version')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 'test-sha', lambda_version: '$LATEST' }),
+      });
+      return;
+    }
+    if (url.includes('/api/options')) {
+      const query = new URL(url).searchParams.get('q') || '';
+      const kind = new URL(url).searchParams.get('kind') || '';
+      const clientId = new URL(url).searchParams.get('clientId') || '';
+      const body = kind === 'client'
+        ? { items: [{ id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762', pet_count: 3 }] }
+        : clientId === 'client-1'
+          ? { items: [
+              { id: 'pet-4', label: 'Emmett Bleu (#4)', secondary: 'Canine · Mixed', species: 'Canine', breed: 'Mixed' },
+              { id: 'pet-5', label: 'Charlie Brown', secondary: 'Canine · Beagle', species: 'Canine', breed: 'Beagle' },
+            ] }
+          : { items: [] };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+      return;
+    }
+    if (url.includes('/api/rag/answer')) {
+      const body = JSON.parse(route.request().postData() || '{}');
+      const patient = body.patient_context?.patient_name || '';
+      const answer = patient.includes('Emmett')
+        ? 'Emmett answer one.'
+        : 'Charlie answer one.';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ answer, citations: [], references: [], citation_map: {}, elapsed_seconds: 0 }),
+      });
+      return;
+    }
+    if (url === 'https://example.test/' || url === 'http://example.test/' || url.endsWith('/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: html,
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
+  });
+
+  await page.goto('https://example.test/');
+  const client = page.locator('#client-input');
+  const pet = page.locator('#pet-input');
+  const question = page.locator('#question');
+  const ask = page.locator('#ask');
+  const transcript = page.locator('#transcript');
+
+  await client.fill('Mary');
+  await page.getByText('Mary Theresa Jeffries').click();
+
+  await pet.fill('Emm');
+  await page.getByText('Emmett Bleu (#4)').click();
+  await question.fill('How fat is he?');
+  await ask.click();
+  await expect(transcript).toContainText('Emmett answer one.');
+
+  await pet.fill('Cha');
+  await page.getByText('Charlie Brown').click();
+  await expect(transcript).not.toContainText('Emmett answer one.');
+  await question.fill('How fat is he?');
+  await ask.click();
+  await expect(transcript).toContainText('Charlie answer one.');
+
+  await pet.fill('Emm');
+  await page.getByText('Emmett Bleu (#4)').click();
+  await expect(transcript).toContainText('How fat is he?');
+  await expect(transcript).toContainText('Emmett answer one.');
+  await expect(transcript).not.toContainText('Charlie answer one.');
+});
+
+test('identical sequential questions are ignored and reopening a patient restores the prior thread', async ({ page }) => {
+  const answerRequests = [];
+
+  await page.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.endsWith('/api/version')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 'test-sha', lambda_version: '$LATEST' }),
+      });
+      return;
+    }
+    if (url.includes('/api/options')) {
+      const kind = new URL(url).searchParams.get('kind') || '';
+      const clientId = new URL(url).searchParams.get('clientId') || '';
+      const query = new URL(url).searchParams.get('q') || '';
+      const body = kind === 'client'
+        ? { items: [{ id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762', pet_count: 2 }] }
+        : clientId === 'client-1'
+          ? { items: [
+              { id: 'pet-4', label: 'Emmett Bleu (#4)', secondary: 'Canine · Mixed', species: 'Canine', breed: 'Mixed' },
+              { id: 'pet-5', label: 'Charlie Brown', secondary: 'Canine · Beagle', species: 'Canine', breed: 'Beagle' },
+            ] }
+          : { items: [] };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+      return;
+    }
+    if (url.includes('/api/rag/answer')) {
+      const body = JSON.parse(route.request().postData() || '{}');
+      answerRequests.push(body);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ answer: `Answer ${answerRequests.length}.`, citations: [], references: [], citation_map: {}, elapsed_seconds: 0 }),
+      });
+      return;
+    }
+    if (url === 'https://example.test/' || url === 'http://example.test/' || url.endsWith('/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: html,
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
+  });
+
+  await page.goto('https://example.test/');
+  const client = page.locator('#client-input');
+  const pet = page.locator('#pet-input');
+  const question = page.locator('#question');
+  const ask = page.locator('#ask');
+  const transcript = page.locator('#transcript');
+
+  await client.fill('Mary');
+  await page.getByText('Mary Theresa Jeffries').click();
+
+  await pet.fill('Emm');
+  await page.getByText('Emmett Bleu (#4)').click();
+  await question.fill('How fat is he?');
+  await ask.click();
+  await expect(transcript).toContainText('Answer 1.');
+  await expect.poll(() => answerRequests.length).toBe(1);
+
+  await question.fill('How fat is he?');
+  await ask.click();
+  await expect(transcript).toContainText('Answer 1.');
+  await expect(transcript).not.toContainText('Answer 2.');
+  await expect.poll(() => answerRequests.length).toBe(1);
+
+  await pet.fill('Cha');
+  await page.getByText('Charlie Brown').click();
+  await question.fill('How old is he?');
+  await ask.click();
+  await expect(transcript).toContainText('Answer 2.');
+
+  await pet.fill('Emm');
+  await page.getByText('Emmett Bleu (#4)').click();
+  await expect(transcript).toContainText('How fat is he?');
+  await expect(transcript).toContainText('Answer 1.');
+  await expect(transcript).not.toContainText('Answer 2.');
 });
