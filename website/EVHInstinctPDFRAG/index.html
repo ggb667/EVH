@@ -1000,7 +1000,10 @@ async function submitQuestion(){
     autoResize($("question"));
     state.firstAnswerSubmitted=true;
     updateQuestionPrompt();
-    $("ask-status").textContent=`Completed in ${data.elapsed_seconds??"?"}s`;
+    const elapsedSeconds=Number(data.elapsed_seconds);
+    $("ask-status").textContent=Number.isFinite(elapsedSeconds)
+      ? (elapsedSeconds < 1 ? "Completed in <1s" : `Completed in ${elapsedSeconds.toFixed(elapsedSeconds < 10 ? 1 : 0)}s`)
+      : "Completed";
   }catch(error){
     $("ask-status").textContent=`Unable to answer: ${error.message}`;
   }finally{
