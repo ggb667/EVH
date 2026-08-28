@@ -275,6 +275,8 @@ class ClientOption:
     id: str
     label: str
     secondary: str
+    primary_phone: str
+    email: str
     pet_count: int
     search_text: str
 
@@ -283,6 +285,8 @@ class ClientOption:
             "id": self.id,
             "label": self.label,
             "secondary": self.secondary,
+            "primary_phone": self.primary_phone,
+            "email": self.email,
             "petCount": self.pet_count,
         }
 
@@ -599,7 +603,9 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
             select
               account_id as id,
               coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id) as label,
-              coalesce(nullif(pims_code, ''), account_id) as secondary
+              coalesce(nullif(pims_code, ''), account_id) as secondary,
+              coalesce(nullif(phone_primary, ''), '') as primary_phone,
+              coalesce(nullif(email, ''), '') as email
             from public.instinct_owner_lookup
             order by lower(coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id)), account_id
             """
@@ -615,8 +621,10 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
                 id=str(row[0] or "").strip(),
                 label=str(row[1] or "").strip(),
                 secondary=str(row[2] or "").strip(),
+                primary_phone=str(row[3] or "").strip(),
+                email=str(row[4] or "").strip(),
                 pet_count=0,
-                search_text=_normalize(" ".join([str(row[1] or "").strip(), str(row[2] or "").strip(), str(row[0] or "").strip()])),
+                search_text=_normalize(" ".join([str(row[1] or "").strip(), str(row[2] or "").strip(), str(row[3] or "").strip(), str(row[4] or "").strip(), str(row[0] or "").strip()])),
             )
             for row in rows
             if str(row[0] or "").strip()
@@ -984,7 +992,9 @@ def _load_catalog_from_postgres() -> RagCatalog:
               account_id,
               coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id) as label,
               coalesce(nullif(pims_code, ''), account_id) as secondary,
-              coalesce(owner_name, '') as owner_name
+              coalesce(owner_name, '') as owner_name,
+              coalesce(nullif(phone_primary, ''), '') as phone_primary,
+              coalesce(nullif(email, ''), '') as email
             from public.instinct_owner_lookup
             """
         )
@@ -1009,14 +1019,16 @@ def _load_catalog_from_postgres() -> RagCatalog:
         connection.close()
 
     clients: list[dict[str, Any]] = []
-    for account_id, label, secondary, owner_name in owner_rows:
+    for account_id, label, secondary, owner_name, phone_primary, email in owner_rows:
         client_id = str(account_id or "").strip()
         if not client_id:
             continue
         label = str(label or "").strip() or client_id
         secondary = str(secondary or "").strip()
-        search_text = _normalize(" ".join([label, secondary, owner_name]))
-        clients.append({"id": client_id, "label": label, "secondary": secondary, "search_text": search_text})
+        phone_primary = str(phone_primary or "").strip()
+        email = str(email or "").strip()
+        search_text = _normalize(" ".join([label, secondary, owner_name, phone_primary, email]))
+        clients.append({"id": client_id, "label": label, "secondary": secondary, "primary_phone": phone_primary, "email": email, "search_text": search_text})
 
     patients: list[dict[str, Any]] = []
     for patient_id, account_id, label, species, breed, pims_code, owner_name in patient_rows:

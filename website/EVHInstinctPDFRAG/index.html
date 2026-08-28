@@ -28,7 +28,7 @@ body{margin:0;background:var(--bg);color:var(--text)}
 h1{margin:0;font-size:28px;line-height:1.08}
 .sub{color:var(--muted);margin:0;max-width:900px;line-height:1.45}
 .meta{font-size:12px;line-height:1.35;color:#7a8490;text-align:right}
-.build-line{white-space:nowrap}
+.build-line{white-space:nowrap;font-size:12px;line-height:1.35}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
 .selector-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
 .field{position:relative}
@@ -58,11 +58,18 @@ textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
 .option{padding:9px 11px;cursor:pointer;border-bottom:1px solid #eef1f3}
 .option:last-child{border-bottom:0}
 .option:hover,.option.active{background:#f0f4f7}
-.secondary{font-size:12px;color:#6b7580;margin-top:2px}
-.status{font-size:13px;color:#68737e;margin-top:6px;min-height:18px}
+.secondary{font-size:12px;color:#6b7580;margin-top:2px;line-height:1.35}
+.status{font-size:12px;color:#68737e;margin-top:6px;min-height:18px;line-height:1.35}
 .ask-area{display:grid;gap:10px}
 .composer-box{position:relative}
 .question-label-row{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+#corner-quote{
+  font-size:12px;
+  line-height:1.35;
+  color:#6b7580;
+  text-align:right;
+  min-height:0;
+}
 #composer{margin-top:14px}
 button{padding:10px 16px;border:0;border-radius:8px;background:#263746;color:white;cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
@@ -95,29 +102,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .refs a{display:block;text-decoration:none;color:var(--blue);padding:9px 10px;border:1px solid #d6dde4;border-radius:8px;background:#fafbfc}
 .refs a:hover{background:#f3f7fb;border-color:#c8d6e2}
 .empty{padding:16px;border:1px dashed #d6dde4;border-radius:12px;color:#6b7580;background:#fbfcfd}
-.corner-quote{
-  position:fixed;
-  right:18px;
-  bottom:16px;
-  z-index:50;
-  max-width:min(320px,calc(100vw - 36px));
-  padding:8px 10px;
-  border:1px solid #d6dde4;
-  border-radius:10px;
-  background:rgba(255,255,255,.88);
-  backdrop-filter:blur(6px);
-  box-shadow:0 8px 24px rgba(0,0,0,.08);
-  font-size:12px;
-  line-height:1.35;
-  color:#5f6974;
-  text-align:right;
-  pointer-events:none;
-}
 @media(max-width:760px){
   .selector-grid{grid-template-columns:1fr}
   .header{flex-direction:column}
   .meta{text-align:left}
-  .corner-quote{left:12px;right:12px;text-align:center}
 }
 </style>
 </head>
@@ -164,10 +152,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
       <textarea id="question" placeholder="When was the last dental cleaning?"></textarea>
       <button id="ask" disabled>Ask</button>
     </div>
+    <div id="corner-quote" class="status" aria-hidden="true" style="margin-top:0;padding-top:0"></div>
     <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
   </section>
 </main>
-<div id="corner-quote" class="corner-quote" aria-hidden="true"></div>
 
 <script>
 "use strict";
