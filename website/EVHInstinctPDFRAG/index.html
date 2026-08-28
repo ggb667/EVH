@@ -233,6 +233,39 @@ function renderClientContact(item){
   return fragment;
 }
 
+function speciesEmoji(species){
+  const value=String(species||"").trim().toLowerCase();
+  if(!value)return "";
+  if(value.includes("canine")||value.includes("dog"))return "🐕";
+  if(value.includes("feline")||value.includes("cat"))return "🐈";
+  if(value.includes("rabbit")||value.includes("bunny")||value.includes("hare"))return "🐇";
+  if(value.includes("tortoise")||value.includes("turtle"))return "🐢";
+  if(value.includes("bird")||value.includes("avian"))return "🐦";
+  if(value.includes("reptile")||value.includes("lizard")||value.includes("snake"))return "🦎";
+  if(value.includes("horse")||value.includes("equine"))return "🐴";
+  if(value.includes("ferret"))return "🦦";
+  if(value.includes("guinea pig"))return "🐹";
+  if(value.includes("hamster"))return "🐹";
+  if(value.includes("rodent"))return "🐭";
+  if(value.includes("bovine")||value.includes("cow"))return "🐄";
+  if(value.includes("porcine")||value.includes("pig"))return "🐖";
+  return "";
+}
+
+function patientDisplayText(item){
+  const parts=[];
+  const emoji=speciesEmoji(item?.species);
+  const species=String(item?.species||"").trim();
+  const breed=String(item?.breed||"").trim();
+  const sex=String(item?.sex||"").trim();
+  if(species){
+    parts.push(`${emoji ? `${emoji} ` : ""}${species}`);
+  }
+  if(breed)parts.push(breed);
+  if(sex)parts.push(sex);
+  return parts.filter(Boolean).join(" · ");
+}
+
 function cachedPatientsFor(clientId){
   return state.patientCacheByClient.get(String(clientId||"")) || [];
 }
@@ -657,7 +690,7 @@ function choosePet(item){
 
   state.pet=item;
   $("pet-input").value=item.label||"";
-  $("pet-status").textContent=[item.species,item.breed].filter(Boolean).join(" · ");
+  $("pet-status").textContent=patientDisplayText(item);
   restoreConversationFor(state.client.id,item.id);
   updateAsk();
 }
