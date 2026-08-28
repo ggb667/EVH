@@ -537,7 +537,7 @@ function renderTranscript(){
   const transcript=$("transcript");
   transcript.replaceChildren();
   if(!state.turns.length){
-    transcript.innerHTML='<div class="empty">Ask a question to begin a patient-specific conversation.</div>';
+    transcript.innerHTML='<div class="empty">No patient questions yet.</div>';
     return;
   }
   for(const turn of state.turns){
