@@ -156,7 +156,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     </div>
     <div id="ask-status" class="status ask-status-row" style="margin-top:0;min-height:0">
       <span id="ask-status-text" class="ask-status-text"></span>
-      <span class="ask-status-foot">EVH Patient Record Assistant © 2026 Gregory Garrett Bishop</span>
+      <span id="ask-status-foot" class="ask-status-foot">EVH Patient Record Assistant © 2026 Gregory Garrett Bishop</span>
     </div>
   </section>
 </main>
@@ -183,8 +183,19 @@ const state={
   loading:false,
   firstAnswerSubmitted:false,
   patientCacheByClient:new Map(),
-  conversationByScope:new Map()
+  conversationByScope:new Map(),
+  footerIndex:0
 };
+
+const footerMessages=[
+  "EVH Patient Record Assistant © 2026 Gregory Garrett Bishop",
+  "If you're in a hole the first thing to do is stop digging.",
+  "Plan your work and then work your plan.",
+  "Proper prior planning prevents piss poor performance.",
+  "Treat everyone like you'd like to be treated.",
+  "Kindness is a way of life.",
+  "Fresh places, fresh places!"
+];
 
 const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[],loadedClientId:""};
@@ -554,6 +565,12 @@ function updateAsk(){
 
 function setAskStatus(message){
   $("ask-status-text").textContent=message;
+}
+
+function rotateFooterMessage(){
+  if(!footerMessages.length)return;
+  state.footerIndex=(state.footerIndex+1)%footerMessages.length;
+  $("ask-status-foot").textContent=footerMessages[state.footerIndex];
 }
 
 function conversationScopeKey(clientId,patientId){
@@ -1059,6 +1076,7 @@ async function submitQuestion(){
     setAskStatus(Number.isFinite(elapsedSeconds)
       ? (elapsedSeconds < 1 ? "Completed in <1s" : `Completed in ${elapsedSeconds.toFixed(elapsedSeconds < 10 ? 1 : 0)}s`)
       : "Completed");
+    rotateFooterMessage();
   }catch(error){
     setAskStatus(`Unable to answer: ${error.message}`);
   }finally{
