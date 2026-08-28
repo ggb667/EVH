@@ -237,7 +237,19 @@ function clearPetMenu(){clearMenu($("pet-menu"));}
 
 function renderClientContact(item){
   const fragment=document.createDocumentFragment();
-  const phone=String(item?.primary_phone||item?.phone||item?.phone_no||"").trim();
+  const formatPhone=value=>{
+    const raw=String(value||"").trim();
+    if(!raw)return "";
+    const digits=raw.replace(/\D/g,"");
+    if(digits.length===10){
+      return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+    }
+    if(digits.length===11&&digits.startsWith("1")){
+      return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+    }
+    return raw;
+  };
+  const phone=formatPhone(item?.primary_phone||item?.phone||item?.phone_no||"");
   const email=String(item?.email||item?.email_address||item?.emailAddresses?.[0]||"").trim();
   if(phone){
     fragment.appendChild(document.createTextNode(phone));
@@ -616,6 +628,12 @@ function persistCurrentConversation(){
   }
 }
 
+function hasConversationForSelection(clientId,patientId){
+  const key=conversationScopeKey(clientId,patientId);
+  const turns=state.conversationByScope.get(key);
+  return Array.isArray(turns) && turns.length>0;
+}
+
 function restoreConversationFor(clientId,patientId){
   const key=conversationScopeKey(clientId,patientId);
   const turns=state.conversationByScope.get(key);
@@ -704,7 +722,9 @@ function chooseClient(item){
   $("pet-input").disabled=false;
   $("pet-input").placeholder="Type a patient name";
 
-  clearTranscript();
+  if(!hasConversationForSelection(item.id, state.pet?.id || "")){
+    clearTranscript();
+  }
   updateAsk();
   $("pet-status").textContent="Loading patients…";
   loadPatientOptionsOnce(item.id)
@@ -732,6 +752,9 @@ function choosePet(item){
   $("pet-input").value=item.label||"";
   $("pet-status").textContent=patientDisplayText(item);
   restoreConversationFor(state.client.id,item.id);
+  if(!hasConversationForSelection(state.client.id,item.id)){
+    clearTranscript();
+  }
   updateAsk();
 }
 
@@ -741,6 +764,40 @@ function showCachedPatients(){
   clearPetMenu();
   renderMenu($("pet-menu"),items,choosePet,"No matches");
   $("pet-status").textContent=items.length?`${items.length} matches`:"No matches";
+}
+
+function buildSelectedContext(){
+  const scopeKey=conversationScopeKey(state.client?.id,state.pet?.id);
+  return {
+    scope_key: scopeKey,
+    client: state.client ? {
+      id: state.client.id || "",
+      name: state.client.label || "",
+      primary_phone: state.client.primary_phone || state.client.phone || state.client.phone_no || "",
+      email: state.client.email || state.client.email_address || "",
+      pims_code: state.client.secondary || "",
+    } : null,
+    patient: state.pet ? {
+      id: state.pet.id || "",
+      account_id: state.client?.id || "",
+      name: state.pet.label || "",
+      species: state.pet.species || "",
+      breed: state.pet.breed || "",
+      birthdate: state.pet.birthdate || "",
+      pims_code: state.pet.secondary || "",
+      owner_name: state.client?.label || "",
+    } : null,
+    financials: null,
+    reminders: [],
+    documents: [],
+    conversation: {
+      scope_key: scopeKey,
+      turns: state.turns.map(turn=>({
+        question: turn.question || "",
+        answer: turn.answer || ""
+      }))
+    }
+  };
 }
 
 function citationLink(ref){
@@ -1049,18 +1106,6 @@ async function submitQuestion(){
       pet_id:state.pet.id,
       question
     });
-    const patientContext={
-      client_id:state.client.id,
-      client_label:state.client.label||"",
-      patient_id:state.pet.id,
-      patient_name:state.pet.label||"",
-      species:state.pet.species||"",
-      breed:state.pet.breed||"",
-      birthdate:state.pet.birthdate||"",
-      owner:state.client.label||"",
-      pims_code:state.pet.microchipId||"",
-      microchip_id:state.pet.microchipId||"",
-    };
     const conversation=state.turns.map(turn=>({
       role:"user",
       content:turn.question||"",
@@ -1072,7 +1117,6 @@ async function submitQuestion(){
     const data=await api(`/api/rag/answer?${params.toString()}`,{
       method:"POST",
       body:JSON.stringify({
-        patient_context:patientContext,
         conversation
       })
     });

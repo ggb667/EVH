@@ -129,9 +129,11 @@ def write_sample_sqlite_catalog(path: Path) -> None:
 def reset_catalog_cache():
     rag_catalog._CATALOG_CACHE.clear()
     rag_catalog._CATALOG_MEMORY = None
+    lambda_app._SELECTED_CONTEXT_CACHE.clear()
     yield
     rag_catalog._CATALOG_CACHE.clear()
     rag_catalog._CATALOG_MEMORY = None
+    lambda_app._SELECTED_CONTEXT_CACHE.clear()
 
 
 @pytest.mark.unit
@@ -573,6 +575,150 @@ def test_lambda_serves_rag_answer_with_patient_context_and_history(monkeypatch):
     assert captured["question"] == "What species is Minnie?"
     assert payload["citations"][0]["document_id"] == "doc-1"
     assert payload["references"][0]["document_id"] == "doc-1"
+
+
+@pytest.mark.unit
+def test_answer_messages_include_selected_context_bundle(monkeypatch):
+    captured = {}
+
+    fake_langchain_openai = types.ModuleType("langchain_openai")
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return type("Resp", (), {"content": "All set."})()
+
+    fake_langchain_openai.ChatOpenAI = FakeChatOpenAI
+
+    fake_messages = types.ModuleType("langchain_core.messages")
+    fake_messages.HumanMessage = lambda content: {"role": "user", "content": content}
+    fake_messages.SystemMessage = lambda content: {"role": "system", "content": content}
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_langchain_openai)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_messages)
+    monkeypatch.setattr(lambda_app, "_openai_api_key", lambda: "test-key")
+
+    answer = lambda_app._call_openai_answer(
+        "What is due soon?",
+        [],
+        patient_context={
+            "patient_name": "Minnie",
+            "species": "Canine",
+            "breed": "Yorkshire Terrier",
+            "owner_name": "Deborah Burchill",
+        },
+        selected_context={
+            "client": {"id": "client-1", "name": "Deborah Burchill"},
+            "patient": {"id": "pet-1", "name": "Minnie"},
+            "financials": {"balance": 12.34},
+            "reminders": [{"title": "Annual exam"}],
+            "documents": [{"title": "Visit Summary"}],
+        },
+    )
+
+    assert answer == "All set."
+    user_text = captured["messages"][1]["content"]
+    assert "Selected conversation context:" in user_text
+    assert '"balance": 12.34' in user_text
+    assert '"Annual exam"' in user_text
+    assert '"Visit Summary"' in user_text
+    assert '"Deborah Burchill"' in user_text
+
+
+@pytest.mark.integration
+def test_lambda_serves_rag_answer_with_selected_context_bundle(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["kwargs"] = kwargs
+        return "All set."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "body": json.dumps({
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Minnie"},
+                    "financials": {"balance": 12.34},
+                    "reminders": [{"title": "Annual exam"}],
+                    "documents": [{"title": "Visit Summary"}],
+                }
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "All set."
+    assert captured["kwargs"]["selected_context"]["client"]["name"] == "Deborah Burchill"
+    assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 12.34
+
+
+@pytest.mark.integration
+def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
+        {"document_id": "doc-x", "document_title": "Chart File", "source_page_url": "https://example.test/doc-x#page=1"}
+    ])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["kwargs"] = kwargs
+        return "All set."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "body": json.dumps({
+                "patient_context": {
+                    "patient_name": "Minnie",
+                    "species": "Canine",
+                    "breed": "Yorkshire Terrier",
+                    "owner_name": "Deborah Burchill",
+                },
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Minnie"},
+                    "financials": {"balance": 12.34},
+                    "reminders": [{"title": "Annual exam"}],
+                    "documents": [],
+                },
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "All set."
+    assert captured["kwargs"]["selected_context"]["documents"][0]["document_id"] == "doc-x"
 
 
 @pytest.mark.integration

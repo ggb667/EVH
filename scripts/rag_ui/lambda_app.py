@@ -28,6 +28,7 @@ class _InstinctUrlCacheEntry:
 
 
 _INSTINCT_URL_CACHE: dict[tuple[str, int], _InstinctUrlCacheEntry] = {}
+_SELECTED_CONTEXT_CACHE: dict[str, tuple[float, dict[str, object]]] = {}
 DEFAULT_PRACTICE_STACK_CONTEXT = (
     "The practice stack uses Instinct EMS and Weave. "
     "General questions about those systems are in-scope, and the assistant may answer how-to or where-to-look questions about the technology itself. "
@@ -133,6 +134,189 @@ def _instinct_token() -> str:
     if not token:
         raise RuntimeError(f"Instinct token response missing access token field: {data}")
     return token
+
+
+def _instinct_get_json(path: str, params: dict[str, str] | None = None) -> dict | list | str | None:
+    query = urlencode({key: value for key, value in (params or {}).items() if str(value or "").strip()})
+    url = f"{_instinct_base_url()}{path}"
+    if query:
+        url = f"{url}?{query}"
+    request = urllib_request.Request(
+        url,
+        headers={"Authorization": f"Bearer {_instinct_token()}", "Accept": "application/json"},
+        method="GET",
+    )
+    with urllib_request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _instinct_graphql_json(query: str, variables: dict[str, object] | None = None) -> dict:
+    payload = {
+        "query": query,
+        "variables": variables or {},
+    }
+    request = urllib_request.Request(
+        _instinct_graphql_url(),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {_instinct_token()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=30) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError("Instinct GraphQL response was not a JSON object.")
+    if data.get("errors"):
+        raise RuntimeError(json.dumps(data["errors"], indent=2, sort_keys=True))
+    return data
+
+
+def _normalize_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _selected_catalog_records(client_id: str, pet_id: str) -> tuple[dict[str, object], dict[str, object]]:
+    catalog = load_catalog()
+    client = catalog.clients_by_id.get(str(client_id or "").strip())
+    pet = catalog.pets_by_id.get(str(pet_id or "").strip())
+    client_record = {
+        "id": getattr(client, "id", "") or str(client_id or ""),
+        "name": getattr(client, "label", "") or "",
+        "pims_code": getattr(client, "secondary", "") or "",
+        "phone_primary": getattr(client, "primary_phone", "") or "",
+        "email": getattr(client, "email", "") or "",
+    }
+    patient_record = {
+        "id": getattr(pet, "id", "") or str(pet_id or ""),
+        "account_id": getattr(pet, "client_id", "") or str(client_id or ""),
+        "name": getattr(pet, "label", "") or "",
+        "species": getattr(pet, "species", "") or "",
+        "breed": getattr(pet, "breed", "") or "",
+        "birthdate": getattr(pet, "birthdate", "") or "",
+        "pims_code": getattr(pet, "secondary", "") or "",
+        "owner_name": getattr(client, "label", "") or "",
+    }
+    return client_record, patient_record
+
+
+def _fetch_instinct_financials(client_record: dict[str, object]) -> dict[str, object]:
+    name = _normalize_text(client_record.get("name"))
+    pims_code = _normalize_text(client_record.get("pims_code"))
+    if not name and not pims_code:
+        return {}
+    query = """
+query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: Boolean) {
+  accounts(params: $params) {
+    id
+    pimsCode
+    label
+    isTestAccount
+    numberOfPatients
+    accountAlerts { id }
+    primaryContact {
+      communicationDetails {
+        type
+        label
+        value
+        displayValue
+        isPreferred
+      }
+    }
+    runningLedger(summary: true, overdueInvoicesOnly: $overdueInvoicesOnly) {
+      balance
+      unappliedPaymentAmount
+      invoicesToReview { id balance }
+      agedBalances { current over30 over60 over90 over120 }
+    }
+  }
+}
+""".strip()
+    variables = {
+        "params": {"q": name or pims_code, "includeZeroBalances": False, "perPage": 25},
+        "overdueInvoicesOnly": False,
+    }
+    data = _instinct_graphql_json(query, variables)
+    accounts = (((data.get("data") or {}).get("accounts")) or [])
+    if not isinstance(accounts, list):
+        return {}
+    target_id = _normalize_text(client_record.get("id"))
+    target_pims = _normalize_text(client_record.get("pims_code"))
+    target_name = _normalize_text(client_record.get("name")).lower()
+    selected = None
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        if target_id and _normalize_text(account.get("id")) == target_id:
+            selected = account
+            break
+        if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
+            selected = account
+            break
+        label = _normalize_text(account.get("label")).lower()
+        if target_name and (label == target_name or target_name in label):
+            selected = account
+            break
+    if selected is None and accounts:
+        selected = accounts[0]
+    if not isinstance(selected, dict):
+        return {}
+    running = selected.get("runningLedger") or {}
+    return {
+        "account_id": _normalize_text(selected.get("id")),
+        "pims_code": _normalize_text(selected.get("pimsCode")),
+        "label": _normalize_text(selected.get("label")) or _normalize_text(client_record.get("name")),
+        "number_of_patients": selected.get("numberOfPatients"),
+        "balance": running.get("balance"),
+        "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
+        "aged_balances": running.get("agedBalances") or {},
+        "invoices_to_review": running.get("invoicesToReview") or [],
+    }
+
+
+def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: dict[str, object]) -> list[dict[str, object]]:
+    query = _normalize_text(patient_record.get("name")) or _normalize_text(client_record.get("name")) or _normalize_text(client_record.get("pims_code"))
+    if not query:
+        return []
+    try:
+        data = _instinct_get_json("/v1/reminders", {"limit": "50", "pageDirection": "after"})
+    except Exception:
+        return []
+    rows: list[dict[str, object]] = []
+    if isinstance(data, dict):
+        for key in ("reminders", "data", "items", "results"):
+            value = data.get(key)
+            if isinstance(value, list):
+                rows = [row for row in value if isinstance(row, dict)]
+                break
+    elif isinstance(data, list):
+        rows = [row for row in data if isinstance(row, dict)]
+    if not rows:
+        return []
+    lowered = query.lower()
+    filtered: list[dict[str, object]] = []
+    for row in rows:
+        haystack = " ".join(
+            _normalize_text(row.get(key))
+            for key in ("title", "name", "label", "patientName", "patient_name", "accountName", "account_name", "description")
+        ).lower()
+        if lowered and lowered in haystack:
+            filtered.append(row)
+    if filtered:
+        rows = filtered
+    reminders: list[dict[str, object]] = []
+    for row in rows[:10]:
+        reminders.append(
+            {
+                "id": _normalize_text(row.get("id") or row.get("uuid")),
+                "title": _normalize_text(row.get("title") or row.get("name") or row.get("label")),
+                "type": _normalize_text(row.get("type") or row.get("reminderType") or row.get("category")),
+                "due_date": _normalize_text(row.get("dueAt") or row.get("dueDate") or row.get("due")),
+                "status": _normalize_text(row.get("status") or row.get("state") or row.get("reminderStatus")),
+            }
+        )
+    return reminders
 
 
 def _create_chart_file_url(chart_id: str, inline: bool = True) -> str:
@@ -258,6 +442,84 @@ def _selected_patient_context_from_event(event: dict) -> dict[str, str]:
         if text:
             normalized[key] = text
     return normalized
+
+
+def _selected_context_from_event(event: dict) -> dict[str, object]:
+    body = _event_json_body(event)
+    candidate = {}
+    if isinstance(body, dict):
+        candidate = body.get("selected_context") or {}
+    return candidate if isinstance(candidate, dict) else {}
+
+
+def _merge_selected_context(
+    selected_context: dict[str, object] | None,
+    patient_context: dict[str, str] | None,
+    patient_documents: list[dict[str, object]] | None,
+) -> dict[str, object]:
+    selected_context = selected_context or {}
+    patient_context = patient_context or {}
+    patient_documents = patient_documents or []
+    merged = dict(selected_context)
+    merged_patient = dict(merged.get("patient") or {})
+    for key in ("client_id", "clientId", "patient_id", "patientId", "pet_id", "petId", "patient_name", "name", "species", "breed", "sex", "birthdate", "owner", "owner_name", "pims_code", "microchip_id"):
+        value = patient_context.get(key)
+        if value and not merged_patient.get(key):
+            merged_patient[key] = value
+    merged["patient"] = merged_patient or patient_context
+    merged.setdefault("client", selected_context.get("client") or {})
+    merged.setdefault("financials", selected_context.get("financials") or {})
+    merged.setdefault("reminders", selected_context.get("reminders") or [])
+    merged_documents = list(merged.get("documents") or [])
+    if patient_documents:
+        existing_ids = {str(item.get("document_id") or "").strip() for item in merged_documents if isinstance(item, dict)}
+        for doc in patient_documents:
+            if not isinstance(doc, dict):
+                continue
+            doc_id = str(doc.get("document_id") or "").strip()
+            if doc_id and doc_id in existing_ids:
+                continue
+            merged_documents.append(
+                {
+                    "document_id": doc_id,
+                    "title": str(doc.get("document_title") or doc.get("title") or "Source PDF"),
+                    "type": str(doc.get("type") or doc.get("family") or ""),
+                    "source_page_url": str(doc.get("source_page_url") or ""),
+                }
+            )
+    merged["documents"] = merged_documents
+    return merged
+
+
+def _selected_context_cache_key(client_id: str, pet_id: str) -> str:
+    return f"{str(client_id or '').strip()}::{str(pet_id or '').strip()}"
+
+
+def _prune_selected_context_cache(now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    stale_keys = [key for key, (cached_at, _) in _SELECTED_CONTEXT_CACHE.items() if (now - cached_at) >= 900]
+    for key in stale_keys:
+        _SELECTED_CONTEXT_CACHE.pop(key, None)
+    while len(_SELECTED_CONTEXT_CACHE) > 50:
+        oldest_key = min(_SELECTED_CONTEXT_CACHE.items(), key=lambda item: item[1][0])[0]
+        _SELECTED_CONTEXT_CACHE.pop(oldest_key, None)
+
+
+def _selected_context_cache_get(client_id: str, pet_id: str) -> dict[str, object] | None:
+    key = _selected_context_cache_key(client_id, pet_id)
+    cached = _SELECTED_CONTEXT_CACHE.get(key)
+    if not cached:
+        return None
+    cached_at, payload = cached
+    if (time.time() - cached_at) >= 900:
+        _SELECTED_CONTEXT_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _selected_context_cache_set(client_id: str, pet_id: str, payload: dict[str, object]) -> None:
+    _SELECTED_CONTEXT_CACHE[_selected_context_cache_key(client_id, pet_id)] = (time.time(), payload)
+    _prune_selected_context_cache()
 
 
 def _conversation_turns_from_event(event: dict) -> list[dict[str, str]]:
@@ -658,10 +920,12 @@ def _answer_messages(
     *,
     practice_stack_context: str | None = None,
     patient_context: dict[str, str] | None = None,
+    selected_context: dict[str, object] | None = None,
     conversation_turns: list[dict[str, str]] | None = None,
     conversation_refs: list[dict[str, str]] | None = None,
 ) -> list[dict]:
     patient_context = patient_context or {}
+    selected_context = selected_context or {}
     conversation_turns = conversation_turns or []
     conversation_refs = conversation_refs or []
     structured_patient = {
@@ -677,6 +941,14 @@ def _answer_messages(
         "microchip_id": patient_context.get("microchip_id") or "",
     }
     patient_text = json.dumps(structured_patient, indent=2, sort_keys=True)
+    structured_selected_context = {
+        "client": selected_context.get("client") or {},
+        "patient": selected_context.get("patient") or structured_patient,
+        "financials": selected_context.get("financials") or {},
+        "reminders": selected_context.get("reminders") or [],
+        "documents": selected_context.get("documents") or [],
+    }
+    selected_context_text = json.dumps(structured_selected_context, indent=2, sort_keys=True)
     history_text = json.dumps(conversation_turns, indent=2, sort_keys=True)
     evidence_refs = [
         {
@@ -726,6 +998,7 @@ def _answer_messages(
         "When citing a source, emit machine-readable markers like [CITE document_id=\"61173\" page=\"1\"] and do not invent URLs."
     )
     user_text = (
+        f"Selected conversation context:\n{selected_context_text}\n\n"
         f"Selected patient metadata:\n{patient_text}\n\n"
         f"Prior conversation turns:\n{history_text}\n\n"
         f"Evidence reference map:\n{json.dumps(evidence_refs, indent=2, sort_keys=True)}\n\n"
@@ -744,6 +1017,7 @@ def _call_openai_answer(
     *,
     practice_stack_context: str | None = None,
     patient_context: dict[str, str] | None = None,
+    selected_context: dict[str, object] | None = None,
     conversation_turns: list[dict[str, str]] | None = None,
     conversation_refs: list[dict[str, str]] | None = None,
 ) -> str:
@@ -766,6 +1040,7 @@ def _call_openai_answer(
             context_chunks,
             practice_stack_context=practice_stack_context,
             patient_context=patient_context,
+            selected_context=selected_context,
             conversation_turns=conversation_turns,
             conversation_refs=conversation_refs,
         )
@@ -792,6 +1067,7 @@ def _call_openai_answer(
         context_chunks,
         practice_stack_context=practice_stack_context,
         patient_context=patient_context,
+        selected_context=selected_context,
         conversation_turns=conversation_turns,
         conversation_refs=conversation_refs,
     )
@@ -1001,6 +1277,19 @@ def _serve_rag_search(event: dict) -> dict:
     )
 
 
+def _build_selected_context_bundle(client_id: str, pet_id: str, *, patient_context: dict[str, str] | None = None) -> dict[str, object]:
+    patient_context = patient_context or {}
+    client_record, patient_record = _selected_catalog_records(client_id, pet_id)
+    selected_context = {
+        "client": client_record,
+        "patient": patient_record,
+        "financials": _fetch_instinct_financials(client_record),
+        "reminders": _fetch_instinct_reminders(client_record, patient_record),
+        "documents": load_patient_documents(client_id, pet_id or None),
+    }
+    return _merge_selected_context(selected_context, patient_context, selected_context.get("documents") or [])
+
+
 def _serve_rag_answer(event: dict) -> dict:
     params = _query_params(event)
     client_id = params.get("client_id") or params.get("clientId") or ""
@@ -1016,7 +1305,13 @@ def _serve_rag_answer(event: dict) -> dict:
         patient_context = _selected_patient_context_from_event(event)
         conversation_turns = _conversation_turns_from_event(event)
         conversation_refs = _conversation_citation_refs_from_event(event)
-        patient_documents = load_patient_documents(client_id, pet_id or None)
+        selected_context = _selected_context_from_event(event)
+        cached_selected_context = _selected_context_cache_get(client_id, pet_id)
+        if cached_selected_context is None:
+            cached_selected_context = _build_selected_context_bundle(client_id, pet_id, patient_context=patient_context)
+            _selected_context_cache_set(client_id, pet_id, cached_selected_context)
+        selected_context = _merge_selected_context(cached_selected_context, patient_context, cached_selected_context.get("documents") or [])
+        selected_documents = selected_context.get("documents") or []
         retrieval_started = time.perf_counter()
         context_chunks, retrieval_timing, retrieval_plan = _execute_planned_retrieval(question, client_id, pet_id)
         retrieval_elapsed = time.perf_counter() - retrieval_started
@@ -1026,6 +1321,7 @@ def _serve_rag_answer(event: dict) -> dict:
             question,
             context_chunks,
             patient_context=patient_context,
+            selected_context=selected_context,
             conversation_turns=conversation_turns,
             conversation_refs=conversation_refs,
         )
@@ -1033,14 +1329,14 @@ def _serve_rag_answer(event: dict) -> dict:
         total_elapsed = time.perf_counter() - started
         print(f"[RAG_TIMING] llm_seconds={llm_elapsed:.3f} total_seconds={total_elapsed:.3f}")
         citation_map = _build_document_url_map(
-            list(patient_documents or []) + list(context_chunks or []),
+            list(selected_documents or []) + list(context_chunks or []),
             conversation_refs,
         )
         payload = {
             "answer": answer,
             "context": context_chunks,
-            "patient_documents": patient_documents,
-            "references": _build_reference_map(patient_documents, context_chunks),
+            "patient_documents": selected_documents,
+            "references": _build_reference_map(selected_documents, context_chunks),
             "citations": _extract_citations(context_chunks),
             "citation_map": citation_map,
             "retrieval": {
