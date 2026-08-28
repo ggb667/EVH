@@ -73,6 +73,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 #ask.running{background:#9aa3ad}
 #ask{position:absolute;right:10px;bottom:10px}
 .hint{font-size:12px;color:var(--muted);line-height:1.35}
+.ask-status-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ask-status-text{min-width:0;flex:1 1 auto}
+.ask-status-foot{font-size:11px;line-height:1.25;color:#7a8490;white-space:nowrap;margin-left:auto}
 .transcript{display:grid;gap:14px;margin-top:18px}
 .turn{padding:16px;border-radius:12px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow)}
 .turn-question{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
@@ -100,7 +103,6 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .refs a{display:block;text-decoration:none;color:var(--blue);padding:9px 10px;border:1px solid #d6dde4;border-radius:8px;background:#fafbfc}
 .refs a:hover{background:#f3f7fb;border-color:#c8d6e2}
 .empty{padding:16px;border:1px dashed #d6dde4;border-radius:12px;color:#6b7580;background:#fbfcfd}
-.page-foot{margin-top:18px;font-size:11px;line-height:1.25;color:#7a8490;text-align:right}
 @media(max-width:760px){
   .selector-grid{grid-template-columns:1fr}
   .header{flex-direction:column}
@@ -152,9 +154,11 @@ button:disabled{opacity:.45;cursor:not-allowed}
       <textarea id="question" placeholder="When was the last dental cleaning?"></textarea>
       <button id="ask" disabled>Ask</button>
     </div>
-    <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
+    <div id="ask-status" class="status ask-status-row" style="margin-top:0;min-height:0">
+      <span id="ask-status-text" class="ask-status-text"></span>
+      <span class="ask-status-foot">EVH Patient Record Assistant © 2026 Gregory Garrett Bishop</span>
+    </div>
   </section>
-  <div class="page-foot">EVH Patient Record Assistant © 2026 Gregory Garrett Bishop</div>
 </main>
 
 <script>
@@ -513,6 +517,10 @@ function updateAsk(){
   ask.classList.toggle("ready",Boolean(enabled)&&!state.loading);
   ask.classList.toggle("running",Boolean(state.loading));
   ask.textContent=state.loading ? "Working…" : "Ask";
+}
+
+function setAskStatus(message){
+  $("ask-status-text").textContent=message;
 }
 
 function conversationScopeKey(clientId,patientId){
@@ -953,14 +961,14 @@ async function submitQuestion(){
   if(!(state.client&&state.pet&&question))return;
   const lastTurn=state.turns[state.turns.length-1];
   if(lastTurn && String(lastTurn.question||"").trim()===question){
-    $("ask-status").textContent="Duplicate question ignored.";
+    setAskStatus("Duplicate question ignored.");
     updateAsk();
     return;
   }
 
   state.loading=true;
   updateAsk();
-  $("ask-status").textContent="Searching patient records and answering…";
+  setAskStatus("Searching patient records and answering…");
 
   try{
     const params=new URLSearchParams({
@@ -1015,11 +1023,11 @@ async function submitQuestion(){
     state.firstAnswerSubmitted=true;
     updateQuestionPrompt();
     const elapsedSeconds=Number(data.elapsed_seconds);
-    $("ask-status").textContent=Number.isFinite(elapsedSeconds)
+    setAskStatus(Number.isFinite(elapsedSeconds)
       ? (elapsedSeconds < 1 ? "Completed in <1s" : `Completed in ${elapsedSeconds.toFixed(elapsedSeconds < 10 ? 1 : 0)}s`)
-      : "Completed";
+      : "Completed");
   }catch(error){
-    $("ask-status").textContent=`Unable to answer: ${error.message}`;
+    setAskStatus(`Unable to answer: ${error.message}`);
   }finally{
     state.loading=false;
     updateAsk();
