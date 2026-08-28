@@ -499,7 +499,7 @@ def test_call_openai_answer_includes_patient_metadata_and_history(monkeypatch):
     user_text = captured["messages"][1]["content"]
     assert "selected patient metadata is authoritative context" in system_text.lower()
     assert "instinct ems and weave" in system_text.lower()
-    assert "general questions about those technologies are in-scope" in system_text.lower()
+    assert "general questions about those systems are in-scope" in system_text.lower()
     assert "explicit structured fact" in system_text.lower()
     assert "strong inference" in system_text.lower()
     assert "Do not require exact wording" in system_text
