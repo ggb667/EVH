@@ -95,10 +95,29 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .refs a{display:block;text-decoration:none;color:var(--blue);padding:9px 10px;border:1px solid #d6dde4;border-radius:8px;background:#fafbfc}
 .refs a:hover{background:#f3f7fb;border-color:#c8d6e2}
 .empty{padding:16px;border:1px dashed #d6dde4;border-radius:12px;color:#6b7580;background:#fbfcfd}
+.corner-quote{
+  position:fixed;
+  right:18px;
+  bottom:16px;
+  z-index:50;
+  max-width:min(320px,calc(100vw - 36px));
+  padding:8px 10px;
+  border:1px solid #d6dde4;
+  border-radius:10px;
+  background:rgba(255,255,255,.88);
+  backdrop-filter:blur(6px);
+  box-shadow:0 8px 24px rgba(0,0,0,.08);
+  font-size:12px;
+  line-height:1.35;
+  color:#5f6974;
+  text-align:right;
+  pointer-events:none;
+}
 @media(max-width:760px){
   .selector-grid{grid-template-columns:1fr}
   .header{flex-direction:column}
   .meta{text-align:left}
+  .corner-quote{left:12px;right:12px;text-align:center}
 }
 </style>
 </head>
@@ -148,6 +167,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
   </section>
 </main>
+<div id="corner-quote" class="corner-quote" aria-hidden="true"></div>
 
 <script>
 "use strict";
@@ -178,6 +198,23 @@ const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[],loadedClientId:""};
 let sourcePopoverHideTimer=0;
 let backendVersionText="";
+const cornerQuotes=[
+  "EVH Patient Record Assistant (c) 2026 Gregory Garrett Bishop",
+  "If you're in a hole the first thing to do is stop digging.",
+  "Plan your work and then work your plan.",
+  "Proper prior planning prevents piss poor performance.",
+  "Ya'll gonna learn.",
+  "No man can avoid his fate. That is kismet.",
+  "If clients have been waiting tell them you know and will see them as soon as you can.",
+  "Pay attention. Or pain and tension.",
+  "If its got a mouth it can bite.",
+  "Treat everyone like you'd like to be treated.",
+  "Kindness is a way of life.",
+  "When in trouble, or in doubt, run in circles scream and shout!",
+  "Fresh places, fresh places!",
+  "There will be kittens and puppies."
+];
+let cornerQuoteIndex=0;
 
 const $=id=>document.getElementById(id);
 
@@ -560,6 +597,13 @@ function updateQuestionPrompt(){
   $("question").placeholder=state.firstAnswerSubmitted
     ?"Ask another question…"
     :"When was the last dental cleaning?";
+}
+
+function updateCornerQuote(){
+  const el=$("corner-quote");
+  if(!el)return;
+  el.textContent=cornerQuotes[cornerQuoteIndex%cornerQuotes.length];
+  cornerQuoteIndex=(cornerQuoteIndex+1)%cornerQuotes.length;
 }
 
 function clearPatientSelection(){
@@ -982,6 +1026,7 @@ async function submitQuestion(){
       })
     });
 
+    updateCornerQuote();
     appendTurn({
       when:new Date().toLocaleString([],{
         hour:"numeric",
@@ -1152,6 +1197,7 @@ updateQuestionPrompt();
 clearTranscript();
 ensureComposerPlacement();
 refreshBackendVersion();
+updateCornerQuote();
 </script>
 </body>
 </html>
