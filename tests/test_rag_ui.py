@@ -790,7 +790,7 @@ def test_lambda_selected_context_survives_document_load_failure(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_with_status", lambda allow_stale=True: (fake_catalog, {"source": "memory", "stale": True, "age_seconds": 3600.0}))
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: (_ for _ in ()).throw(RuntimeError("documents boom")))
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
@@ -825,7 +825,7 @@ def test_lambda_answer_survives_empty_retrieval(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_with_status", lambda allow_stale=True: (fake_catalog, {"source": "memory", "stale": True, "age_seconds": 3600.0}))
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
