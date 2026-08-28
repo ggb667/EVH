@@ -66,13 +66,6 @@ textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
 .question-label-row .question-label{flex:0 0 auto}
 .question-label-row .question-helper{flex:1 1 auto;font-size:12px;line-height:1.35;color:var(--muted);text-align:left}
 .question-label-row .hint{flex:0 0 auto;margin-left:auto;text-align:right}
-#corner-quote{
-  font-size:12px;
-  line-height:1.35;
-  color:#6b7580;
-  text-align:right;
-  min-height:0;
-}
 #composer{margin-top:14px}
 button{padding:10px 16px;border:0;border-radius:8px;background:#263746;color:white;cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
@@ -149,14 +142,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <section id="composer" class="card ask-area">
     <div class="question-label-row">
       <label class="question-label" for="question">Question</label>
-      <div class="question-helper">Ask a question to begin a patient-specific conversation.</div>
+      <div id="question-helper" class="question-helper">Ask a question to begin a patient-specific conversation.</div>
       <div class="hint">Enter submits • Ctrl+Enter inserts a newline</div>
     </div>
     <div class="composer-box">
       <textarea id="question" placeholder="When was the last dental cleaning?"></textarea>
       <button id="ask" disabled>Ask</button>
     </div>
-    <div id="corner-quote" class="status" aria-hidden="true" style="margin-top:0;padding-top:0"></div>
     <div id="ask-status" class="status" style="margin-top:0;min-height:0"></div>
   </section>
 </main>
@@ -190,24 +182,6 @@ const clientSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[]};
 const petSearch={timer:0,seq:0,controller:null,lastQuery:"",items:[],loadedClientId:""};
 let sourcePopoverHideTimer=0;
 let backendVersionText="";
-const cornerQuotes=[
-  "EVH Patient Record Assistant (c) 2026 Gregory Garrett Bishop",
-  "If you're in a hole the first thing to do is stop digging.",
-  "Plan your work and then work your plan.",
-  "Proper prior planning prevents piss poor performance.",
-  "Ya'll gonna learn.",
-  "No man can avoid his fate. That is kismet.",
-  "If clients have been waiting tell them you know and will see them as soon as you can.",
-  "Pay attention. Or pain and tension.",
-  "If its got a mouth it can bite.",
-  "Treat everyone like you'd like to be treated.",
-  "Kindness is a way of life.",
-  "When in trouble, or in doubt, run in circles scream and shout!",
-  "Fresh places, fresh places!",
-  "There will be kittens and puppies."
-];
-let cornerQuoteIndex=0;
-
 const $=id=>document.getElementById(id);
 
 function escapeHtml(value){
@@ -589,13 +563,12 @@ function updateQuestionPrompt(){
   $("question").placeholder=state.firstAnswerSubmitted
     ?"Ask another question…"
     :"When was the last dental cleaning?";
-}
-
-function updateCornerQuote(){
-  const el=$("corner-quote");
-  if(!el)return;
-  el.textContent=cornerQuotes[cornerQuoteIndex%cornerQuotes.length];
-  cornerQuoteIndex=(cornerQuoteIndex+1)%cornerQuotes.length;
+  const helper=$("question-helper");
+  if(helper){
+    helper.textContent=state.firstAnswerSubmitted
+      ?"Ask a question to continue this patient-specific conversation."
+      :"Ask a question to begin a patient-specific conversation.";
+  }
 }
 
 function clearPatientSelection(){
@@ -1018,7 +991,6 @@ async function submitQuestion(){
       })
     });
 
-    updateCornerQuote();
     appendTurn({
       when:new Date().toLocaleString([],{
         hour:"numeric",
@@ -1189,7 +1161,6 @@ updateQuestionPrompt();
 clearTranscript();
 ensureComposerPlacement();
 refreshBackendVersion();
-updateCornerQuote();
 </script>
 </body>
 </html>
