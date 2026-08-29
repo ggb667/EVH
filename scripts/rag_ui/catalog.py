@@ -14,6 +14,8 @@ from typing import Any, Iterable
 from urllib.parse import urlencode
 from urllib import request as urllib_request
 
+import boto3
+
 
 def _normalize(value: Any) -> str:
     text = re.sub(r"[^a-z]+", " ", str(value or "").lower())
