@@ -455,6 +455,7 @@ def test_lambda_import_primes_catalog_from_postgres(monkeypatch):
     monkeypatch.setenv("EVH_PGDATABASE", "evhvector")
     monkeypatch.setenv("EVH_PGUSER", "evhadmin")
     monkeypatch.setenv("EVH_PGPASSWORD", "secret")
+    monkeypatch.setenv("AWS_LAMBDA_FUNCTION_NAME", "evh_instinct_rag_search")
     monkeypatch.setenv("RAG_UI_DISABLE_IMPORT_PRELOAD", "")
     monkeypatch.setattr(lambda_app.threading, "Thread", FakeThread)
     monkeypatch.setattr(rag_catalog, "load_catalog_with_status", fake_load_catalog_with_status)
@@ -803,6 +804,135 @@ def test_lambda_serves_rag_answer_with_selected_context_bundle(monkeypatch):
     assert payload["answer"] == "All set."
     assert captured["kwargs"]["selected_context"]["client"]["name"] == "Deborah Burchill"
     assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 12.34
+
+
+@pytest.mark.integration
+def test_lambda_builds_selected_context_for_first_client_pet_answer(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="+1 (352) 267-0916", email="loonlov@aol.com")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Emmett Bleu (#4)", species="Canine", breed="American Pit Bull Terrier Mix", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [{"document_id": "doc-x", "document_title": "Visit Summary"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {
+        "account_id": "client-1",
+        "pims_code": "8762",
+        "label": "Deborah Burchill",
+        "number_of_patients": 1,
+        "balance": 123.45,
+        "unapplied_payment_amount": 0.0,
+        "aged_balances": {"current": 12.0, "over30": 34.0, "over60": 0.0, "over90": 0.0, "over120": 0.0},
+        "invoices_to_review": [{"id": "inv-1", "balance": 12.0}],
+    })
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["question"] = question
+        captured["kwargs"] = kwargs
+        return "All set."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "Do you have billing information for Deborah?"},
+            "body": json.dumps({
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Emmett Bleu (#4)"},
+                }
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "All set."
+    assert captured["question"] == "Do you have billing information for Deborah?"
+    assert captured["kwargs"]["selected_context"]["client"]["name"] == "Deborah Burchill"
+    assert captured["kwargs"]["selected_context"]["patient"]["name"] == "Emmett Bleu (#4)"
+    assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 123.45
+    assert captured["kwargs"]["selected_context"]["documents"][0]["document_id"] == "doc-x"
+    assert captured["kwargs"]["selected_context"]["financials"]["account_id"] == "client-1"
+
+
+@pytest.mark.integration
+def test_answer_messages_for_burchill_balance_question_include_financial_context(monkeypatch):
+    captured = {}
+
+    fake_langchain_openai = types.ModuleType("langchain_openai")
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return type("Resp", (), {"content": "All set."})()
+
+    fake_langchain_openai.ChatOpenAI = FakeChatOpenAI
+
+    fake_messages = types.ModuleType("langchain_core.messages")
+    fake_messages.HumanMessage = lambda content: {"role": "user", "content": content}
+    fake_messages.SystemMessage = lambda content: {"role": "system", "content": content}
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_langchain_openai)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_messages)
+    monkeypatch.setattr(lambda_app, "_openai_api_key", lambda: "test-key")
+
+    answer = lambda_app._call_openai_answer(
+        "Do you have billing information for Deborah? What is her balance?",
+        [],
+        patient_context={
+            "patient_name": "Emmett Bleu (#4)",
+            "species": "Canine",
+            "breed": "American Pit Bull Terrier Mix",
+            "owner_name": "Deborah Burchill",
+        },
+        selected_context={
+            "client": {
+                "id": "client-1",
+                "name": "Deborah Burchill",
+                "primary_phone": "+1 (352) 267-0916",
+                "email": "loonlov@aol.com",
+                "pims_code": "8762",
+            },
+            "patient": {
+                "id": "pet-1",
+                "name": "Emmett Bleu (#4)",
+                "species": "Canine",
+                "breed": "American Pit Bull Terrier Mix",
+                "birthdate": "2020-01-01",
+                "pims_code": "21369",
+                "owner_name": "Deborah Burchill",
+            },
+            "financials": {
+                "account_id": "client-1",
+                "pims_code": "8762",
+                "label": "Deborah Burchill",
+                "number_of_patients": 1,
+                "balance": 123.45,
+                "unapplied_payment_amount": 0.0,
+                "aged_balances": {"current": 12.0, "over30": 34.0, "over60": 0.0, "over90": 0.0, "over120": 0.0},
+                "invoices_to_review": [{"id": "inv-1", "balance": 12.0}],
+            },
+            "reminders": [{"title": "Annual exam"}],
+            "documents": [{"document_id": "doc-x", "title": "Visit Summary"}],
+        },
+    )
+
+    assert answer == "All set."
+    user_text = captured["messages"][1]["content"]
+    assert "Do you have billing information for Deborah? What is her balance?" in user_text
+    assert "Deborah Burchill" in user_text
+    assert "Emmett Bleu (#4)" in user_text
+    assert '"balance": 123.45' in user_text
+    assert '"unapplied_payment_amount": 0.0' in user_text
+    assert '"invoices_to_review"' in user_text
 
 
 @pytest.mark.integration

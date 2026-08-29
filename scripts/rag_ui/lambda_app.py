@@ -40,6 +40,8 @@ DEFAULT_PRACTICE_STACK_CONTEXT = (
 def _prime_catalog_on_import() -> None:
     if os.environ.get("RAG_UI_DISABLE_IMPORT_PRELOAD", "").strip():
         return
+    if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "").strip():
+        return
     if not os.environ.get("EVH_PGHOST", "").strip():
         return
     def _worker() -> None:
