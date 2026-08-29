@@ -8,6 +8,7 @@ OUTPUT_ZIP="${OUTPUT_ZIP:-$ROOT_DIR/evh_site.zip}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 BUCKET_NAME="${STATIC_SITE_BUCKET:-evh-instinct-pdf-rag-shell}"
 TARGET_PAGE="${TARGET_PAGE:-EVHInstinctPDFRAG}"
+EXPECTED_SHORT_HASH="${EXPECTED_SHORT_HASH:-$(git -C "$ROOT_DIR" rev-parse --short HEAD)}"
 
 if [ ! -d "$SITE_DIR" ]; then
   echo "ERROR: site directory not found: $SITE_DIR" >&2
@@ -87,6 +88,10 @@ trap 'rm -f "$VALIDATION_HTML"; rm -rf "$TMP_DIR"' EXIT
 curl -fsS "$URL" -o "$VALIDATION_HTML"
 if ! grep -q 'Build: ' "$VALIDATION_HTML"; then
   echo "ERROR: deployed page did not contain a build stamp" >&2
+  exit 1
+fi
+if ! grep -q "$EXPECTED_SHORT_HASH" "$VALIDATION_HTML"; then
+  echo "ERROR: deployed page build stamp did not match expected commit hash $EXPECTED_SHORT_HASH" >&2
   exit 1
 fi
 
