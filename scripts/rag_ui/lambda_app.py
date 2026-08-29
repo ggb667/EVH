@@ -36,6 +36,20 @@ DEFAULT_PRACTICE_STACK_CONTEXT = (
 )
 
 
+def _prime_catalog_on_import() -> None:
+    if os.environ.get("RAG_UI_DISABLE_IMPORT_PRELOAD", "").strip():
+        return
+    if not os.environ.get("EVH_PGHOST", "").strip():
+        return
+    try:
+        load_catalog_with_status()
+    except Exception as error:
+        print(f"[RAG_TIMING] import_preload_failed error={error}", flush=True)
+
+
+_prime_catalog_on_import()
+
+
 def _app_version() -> str:
     env_version = os.environ.get("RAG_UI_VERSION", "").strip()
     if env_version:

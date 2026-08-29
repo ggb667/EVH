@@ -8,6 +8,7 @@ import time
 import types
 import base64
 import importlib.util
+import importlib
 import subprocess
 from pathlib import Path
 
@@ -427,6 +428,27 @@ def test_lambda_serves_options_from_sqlite_catalog(tmp_path, monkeypatch):
     payload = json.loads(options_response["body"])
     assert payload["kind"] == "client"
     assert [item["label"] for item in payload["items"]] == ["Alpha Client"]
+
+
+@pytest.mark.unit
+def test_lambda_import_primes_catalog_from_postgres(monkeypatch):
+    calls = []
+
+    def fake_load_catalog_with_status(data_path=None, *, allow_stale=False):
+        calls.append({"data_path": data_path, "allow_stale": allow_stale})
+        return object(), {"source": "refresh", "stale": False, "age_seconds": 0.0}
+
+    monkeypatch.setenv("EVH_PGHOST", "example-host")
+    monkeypatch.setenv("EVH_PGPORT", "5432")
+    monkeypatch.setenv("EVH_PGDATABASE", "evhvector")
+    monkeypatch.setenv("EVH_PGUSER", "evhadmin")
+    monkeypatch.setenv("EVH_PGPASSWORD", "secret")
+    monkeypatch.setenv("RAG_UI_DISABLE_IMPORT_PRELOAD", "")
+    monkeypatch.setattr(rag_catalog, "load_catalog_with_status", fake_load_catalog_with_status)
+
+    importlib.reload(lambda_app)
+
+    assert calls == [{"data_path": None, "allow_stale": False}]
 
 
 #
