@@ -1227,10 +1227,6 @@ $("client-input").addEventListener("input",event=>{
     $("client-status").textContent="";
     return;
   }
-  state.client=null;
-  clearPatientSelection();
-  $("pet-input").disabled=true;
-  $("pet-input").placeholder="Select a client first";
   updateAsk();
   if(q.length<SEARCH_MIN){
     abortSearch(clientSearch);
@@ -1276,6 +1272,7 @@ $("pet-input").addEventListener("input",event=>{
   }
 
   const q=event.target.value.trim();
+  persistCurrentConversation();
   state.pet=null;
   $("pet-input").disabled=false;
   $("pet-input").placeholder="Type a patient name";

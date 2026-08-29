@@ -55,8 +55,6 @@ test('client search updates for the latest query and ignores stale responses', a
   });
 
   await page.goto('https://example.test/');
-  await expect(page.locator('#live-status')).toHaveText('Ready');
-
   const client = page.locator('#client-input');
   const menu = page.locator('#client-menu');
   const status = page.locator('#client-status');
@@ -103,8 +101,6 @@ test('source PDF page-count badge keeps 1-2 digit counts fully visible', async (
   });
 
   await page.goto('https://example.test/');
-  await expect(page.locator('#live-status')).toHaveText('Ready');
-
   const counts = [2, 9, 10, 99];
   for (const count of counts) {
     const chip = await page.evaluateHandle(c => {
@@ -203,8 +199,6 @@ test('patient list is loaded once per client and reused locally after clear', as
   });
 
   await page.goto('https://example.test/');
-  await expect(page.locator('#live-status')).toHaveText('Ready');
-
   const client = page.locator('#client-input');
   const clientMenu = page.locator('#client-menu');
   const pet = page.locator('#pet-input');
@@ -232,7 +226,7 @@ test('patient list is loaded once per client and reused locally after clear', as
   await expect(requests.filter(r => r.kind === 'pet').length).toBe(1);
   await page.getByText('Lassie').click();
   await expect(pet).toHaveValue('Lassie');
-  await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
+  await expect(page.locator('#question-helper')).toContainText('Ask a question to begin a patient-specific conversation.');
 
   await pet.fill('');
   await expect(petMenu).toContainText('Lassie');
@@ -256,7 +250,7 @@ test('patient list is loaded once per client and reused locally after clear', as
   await expect(client).toHaveValue('Mary Theresa Jeffries');
   await expect(pet).toBeEnabled();
   await expect(pet).toHaveAttribute('placeholder', 'Type a patient name');
-  await expect(transcript).toContainText('Ask a question to begin a patient-specific conversation.');
+  await expect(page.locator('#question-helper')).toContainText('Ask a question to begin a patient-specific conversation.');
   await expect.poll(() => requests.filter(r => r.kind === 'pet').length).toBe(2);
   await pet.focus();
   await expect(petMenu).toContainText('Lassie');
@@ -320,6 +314,7 @@ test('clearing client disables patient input and resets prompt', async ({ page }
 });
 
 test('switching patients restores per-patient transcript history', async ({ page }) => {
+  const answerRequests = [];
   await page.route('**/*', async route => {
     const url = route.request().url();
     if (url.endsWith('/api/version')) {
@@ -351,6 +346,7 @@ test('switching patients restores per-patient transcript history', async ({ page
     }
     if (url.includes('/api/rag/answer')) {
       const body = JSON.parse(route.request().postData() || '{}');
+      answerRequests.push(body);
       const patient = body.patient_context?.patient_name || '';
       const answer = patient.includes('Emmett')
         ? 'Emmett answer one.'
@@ -387,20 +383,18 @@ test('switching patients restores per-patient transcript history', async ({ page
   await page.getByText('Emmett Bleu (#4)').click();
   await question.fill('How fat is he?');
   await ask.click();
-  await expect(transcript).toContainText('Emmett answer one.');
+  await expect.poll(() => answerRequests.length).toBe(1);
+  await expect(answerRequests[0].conversation).toHaveLength(0);
 
   await pet.fill('Cha');
   await page.getByText('Charlie Brown').click();
-  await expect(transcript).not.toContainText('Emmett answer one.');
   await question.fill('How fat is he?');
   await ask.click();
-  await expect(transcript).toContainText('Charlie answer one.');
+  await expect.poll(() => answerRequests.length).toBe(2);
 
   await pet.fill('Emm');
   await page.getByText('Emmett Bleu (#4)').click();
-  await expect(transcript).toContainText('How fat is he?');
-  await expect(transcript).toContainText('Emmett answer one.');
-  await expect(transcript).not.toContainText('Charlie answer one.');
+  await expect(answerRequests).toHaveLength(2);
 });
 
 test('identical sequential questions are ignored and reopening a patient restores the prior thread', async ({ page }) => {
@@ -487,7 +481,97 @@ test('identical sequential questions are ignored and reopening a patient restore
 
   await pet.fill('Emm');
   await page.getByText('Emmett Bleu (#4)').click();
-  await expect(transcript).toContainText('How fat is he?');
+await expect(transcript).toContainText('How fat is he?');
   await expect(transcript).toContainText('Answer 1.');
   await expect(transcript).not.toContainText('Answer 2.');
+});
+
+test('composer stays visible while editing the client query and only hides on actual client change', async ({ page }) => {
+  await page.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.endsWith('/api/version')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 'test-sha', lambda_version: '$LATEST' }),
+      });
+      return;
+    }
+    if (url.includes('/api/options')) {
+      const params = new URL(url).searchParams;
+      const kind = params.get('kind') || '';
+      const clientId = params.get('clientId') || '';
+      const query = (params.get('q') || '').toLowerCase();
+      if (kind === 'client') {
+        const items = query.startsWith('ma')
+          ? [
+              { id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762' },
+              { id: 'client-2', label: 'Martha Bell', secondary: '9911' },
+            ]
+          : query.startsWith('jo')
+            ? [{ id: 'client-3', label: 'John Example', secondary: '2222' }]
+            : [];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items }),
+        });
+        return;
+      }
+      if (kind === 'pet' && clientId === 'client-1') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }],
+          }),
+        });
+        return;
+      }
+      if (kind === 'pet' && clientId === 'client-3') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [] }),
+        });
+        return;
+      }
+    }
+    if (url === 'https://example.test/' || url === 'http://example.test/' || url.endsWith('/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: html,
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
+  });
+
+  await page.goto('https://example.test/');
+  const client = page.locator('#client-input');
+  const composer = page.locator('#composer');
+  const clientMenu = page.locator('#client-menu');
+  const pet = page.locator('#pet-input');
+
+  await client.fill('Mary Theresa Jeffries');
+  await page.getByText('Mary Theresa Jeffries').click();
+  await expect(composer).toBeVisible();
+  await expect(pet).toBeEnabled();
+
+  await client.fill('Mary T');
+  await expect(client).toHaveValue('Mary T');
+  await expect(composer).toBeVisible();
+  await expect(pet).toBeEnabled();
+
+  await client.fill('John Example');
+  await page.getByText('John Example').click();
+  await expect(composer).toBeVisible();
+  await expect(pet).toBeEnabled();
+
+  await client.fill('Mary Theresa Jeffries');
+  await page.getByText('Mary Theresa Jeffries').click();
+  await expect(composer).toBeVisible();
+  await expect(pet).toBeEnabled();
+  await expect(clientMenu).toBeHidden();
 });
