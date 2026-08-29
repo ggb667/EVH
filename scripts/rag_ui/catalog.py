@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import time
+import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
@@ -1083,6 +1084,9 @@ def _load_catalog_from_postgres() -> RagCatalog:
 
 _CATALOG_CACHE: dict[str, tuple[float, float, RagCatalog]] = {}
 _CATALOG_MEMORY: tuple[float, RagCatalog] | None = None
+_CATALOG_REFRESH_LOCK = threading.Lock()
+_CATALOG_REFRESH_RUNNING = False
+_CATALOG_REFRESH_STARTED_AT = 0.0
 
 
 def load_catalog_cached() -> RagCatalog | None:
@@ -1250,6 +1254,62 @@ def _load_cached_file_catalog(path: Path, force: bool = False) -> RagCatalog:
     return catalog
 
 
+def _refresh_postgres_catalog_from_instinct() -> None:
+    started = time.perf_counter()
+    print("[RAG_TIMING] Starting - Updating Clients from Instinct...", flush=True)
+    secret = _instinct_secret_json()
+    client_id = str(secret.get("client_id") or secret.get("clientId") or secret.get("username") or "").strip()
+    client_secret = str(secret.get("client_secret") or secret.get("clientSecret") or secret.get("password") or "").strip()
+    if not client_id or not client_secret:
+        raise RuntimeError("Instinct secret is missing client credentials")
+    from scripts.instinct_identity_sync import InstinctApiSyncClient, refresh_identity_tables, _connect
+
+    client = InstinctApiSyncClient(_instinct_base_url(), client_id, client_secret)
+    conn = _connect()
+    try:
+        refresh_identity_tables(client, conn)
+        print(
+            "[RAG_TIMING] Starting - Instinct clients loaded, updating Postgres... "
+            f"elapsed_seconds={time.perf_counter() - started:.3f}",
+            flush=True,
+        )
+    finally:
+        conn.close()
+
+
+def _catalog_refresh_due() -> bool:
+    if _CATALOG_MEMORY is None:
+        return True
+    cached_at, _ = _CATALOG_MEMORY
+    return (time.time() - cached_at) >= _refresh_interval_seconds()
+
+
+def _maybe_start_catalog_refresh() -> None:
+    global _CATALOG_REFRESH_RUNNING, _CATALOG_REFRESH_STARTED_AT, _CATALOG_MEMORY
+    if _is_test_context():
+        return
+    if not _pg_env() or not (os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip() or os.environ.get("TOKEN", "").strip()):
+        return
+    if not _catalog_refresh_due():
+        return
+    with _CATALOG_REFRESH_LOCK:
+        if _CATALOG_REFRESH_RUNNING:
+            return
+        _CATALOG_REFRESH_RUNNING = True
+        _CATALOG_REFRESH_STARTED_AT = time.time()
+
+    def _worker() -> None:
+        global _CATALOG_REFRESH_RUNNING, _CATALOG_MEMORY
+        try:
+            _refresh_postgres_catalog_from_instinct()
+            _CATALOG_MEMORY = None
+        finally:
+            with _CATALOG_REFRESH_LOCK:
+                _CATALOG_REFRESH_RUNNING = False
+
+    threading.Thread(target=_worker, name="rag-ui-catalog-refresh", daemon=True).start()
+
+
 def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> RagCatalog:
     started = time.perf_counter()
     print(f"[RAG_TIMING] refresh_catalog_enter data_path={str(data_path or '')!r} force={int(force)}", flush=True)
@@ -1261,17 +1321,18 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
         print(f"[RAG_TIMING] refresh_catalog_exit source=file elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return catalog
 
-    instinct_enabled = os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip() or os.environ.get("TOKEN", "").strip()
-    if instinct_enabled:
-        cache_key = "instinct://live_lookup"
+    pg_env = _pg_env()
+    if pg_env is not None:
+        cache_key = "postgres://instinct_lookup"
         now = time.time()
         cached = _CATALOG_CACHE.get(cache_key)
         if not force and cached and (now - cached[1]) < _refresh_interval_seconds():
-            print(f"[RAG_TIMING] refresh_catalog_exit source=instinct_cache elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+            print(f"[RAG_TIMING] refresh_catalog_exit source=postgres_cache elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return cached[2]
-        catalog = _load_catalog_from_instinct()
+        print("[RAG_TIMING] Starting - Clients from Postgres...", flush=True)
+        catalog = _load_catalog_from_postgres()
         _CATALOG_CACHE[cache_key] = (0.0, now, catalog)
-        print(f"[RAG_TIMING] refresh_catalog_exit source=instinct elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        print(f"[RAG_TIMING] refresh_catalog_exit source=postgres elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return catalog
 
     if _is_test_context():
@@ -1297,11 +1358,13 @@ def load_catalog_with_status(data_path: str | None = None, *, allow_stale: bool 
         if age < _refresh_interval_seconds():
             print(f"[RAG_TIMING] load_catalog_exit source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return catalog, {"source": "memory", "stale": False, "age_seconds": round(age, 3)}
+    if data_path is None:
+        _maybe_start_catalog_refresh()
     catalog = refresh_catalog(data_path)
     if data_path is None:
         _CATALOG_MEMORY = (time.time(), catalog)
     print(f"[RAG_TIMING] load_catalog_exit source=refresh elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
-    return catalog, {"source": "refresh", "stale": False, "age_seconds": 0.0}
+    return catalog, {"source": "refresh", "stale": False, "age_seconds": 0.0, "refresh_running": _CATALOG_REFRESH_RUNNING}
 
 
 def load_catalog(data_path: str | None = None) -> RagCatalog:
