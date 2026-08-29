@@ -216,6 +216,34 @@ def test_load_catalog_refreshes_after_fifteen_minutes(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_load_catalog_with_status_allows_stale_memory(tmp_path, monkeypatch):
+    sample = tmp_path / "sample.json"
+    write_sample_catalog(sample)
+    monkeypatch.setenv("RAG_UI_DATA_PATH", str(sample))
+
+    timeline = [1000.0]
+    monkeypatch.setattr(rag_catalog.time, "time", lambda: timeline[0])
+
+    catalog1, status1 = rag_catalog.load_catalog_with_status()
+    assert status1["source"] == "refresh"
+    assert status1["stale"] is False
+
+    refreshed = {
+        "accounts": [
+            {"id": "client-3", "pimsCode": "CCC003", "pimsId": None, "deletedAt": None, "primaryContact": {"nameFirst": "Gamma", "nameMiddle": None, "nameLast": "Caretaker"}},
+        ],
+        "patients": [],
+    }
+    sample.write_text(json.dumps(refreshed), encoding="utf-8")
+
+    timeline[0] += 3600.0
+    catalog2, status2 = rag_catalog.load_catalog_with_status(allow_stale=True)
+    assert status2["source"] == "memory"
+    assert status2["stale"] is True
+    assert [item["label"] for item in catalog2.search_clients("")] == ["Alpha Client", "Beta Buyer"]
+
+
+@pytest.mark.unit
 def test_search_pet_chunks_by_embedding_uses_pgvector_sql(monkeypatch):
     executed = {}
 
@@ -634,7 +662,7 @@ def test_lambda_serves_rag_answer_with_selected_context_bundle(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
@@ -677,7 +705,7 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
         {"document_id": "doc-x", "document_title": "Chart File", "source_page_url": "https://example.test/doc-x#page=1"}
     ])
@@ -727,7 +755,7 @@ def test_lambda_selected_context_survives_financials_failure(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: (_ for _ in ()).throw(RuntimeError("financials boom")))
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
@@ -762,7 +790,7 @@ def test_lambda_selected_context_survives_document_load_failure(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: (_ for _ in ()).throw(RuntimeError("documents boom")))
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
@@ -797,7 +825,7 @@ def test_lambda_answer_survives_empty_retrieval(monkeypatch):
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
-    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_financials", lambda client_record: {"balance": 12.34})
     monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
