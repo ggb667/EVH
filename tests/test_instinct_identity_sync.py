@@ -160,7 +160,7 @@ def test_patient_payload_preserves_merge_and_deleted():
     assert payload["deleted_at"].isoformat().startswith("2026-08-25T13:00:00")
 
 
-def test_refresh_identity_tables_builds_and_swaps_atomically(monkeypatch):
+def test_refresh_identity_tables_upserts_into_cache_tables(monkeypatch):
     conn = DummyConn()
     client = FakeClient(
         accounts=[
@@ -173,12 +173,12 @@ def test_refresh_identity_tables_builds_and_swaps_atomically(monkeypatch):
     result = sync.refresh_identity_tables(client, conn)
     assert result["accounts"]["count"] == 1
     assert result["patients"]["count"] == 1
-    assert conn.commit_count >= 2
+    assert conn.commit_count >= 1
     sql = [stmt for stmt, _ in conn.cursor_obj.sql]
-    assert any("CREATE TABLE public.instinct_owner_lookup_refresh" in stmt for stmt in sql)
-    assert any("TRUNCATE public.instinct_owner_lookup, public.instinct_patient_lookup" in stmt for stmt in sql)
-    assert any("INSERT INTO public.instinct_owner_lookup_refresh" in stmt for stmt in sql)
-    assert any("INSERT INTO public.instinct_patient_lookup_refresh" in stmt for stmt in sql)
+    assert any("public.instinct_owner_lookup_cache (" in stmt for stmt in sql)
+    assert any("ON CONFLICT (account_id) DO UPDATE SET" in stmt for stmt in sql)
+    assert any("public.instinct_patient_lookup_cache (" in stmt for stmt in sql)
+    assert any("ON CONFLICT (patient_id) DO UPDATE SET" in stmt for stmt in sql)
 
 
 def test_refresh_failure_leaves_previous_live_dataset_intact(monkeypatch):
@@ -187,8 +187,8 @@ def test_refresh_failure_leaves_previous_live_dataset_intact(monkeypatch):
         accounts=[{"id": "acct-1", "updatedAt": "2026-08-25T12:34:56Z", "primaryContact": {"nameFirst": "Alpha", "nameLast": "One"}}],
         patients=[{"id": 11, "accountId": "acct-1", "name": "Milo", "updatedAt": "2026-08-25T12:34:56Z"}],
     )
-    monkeypatch.setattr(sync, "_replace_live_tables", lambda conn: (_ for _ in ()).throw(RuntimeError("swap failed")))
+    monkeypatch.setattr(sync, "_upsert_identity_tables", lambda conn, accounts, patients: (_ for _ in ()).throw(RuntimeError("upsert failed")))
     with pytest.raises(RuntimeError):
         sync.refresh_identity_tables(client, conn)
     sql = [stmt for stmt, _ in conn.cursor_obj.sql]
-    assert not any("TRUNCATE public.instinct_owner_lookup, public.instinct_patient_lookup" in stmt for stmt in sql)
+    assert not any("TRUNCATE public.instinct_owner_lookup_cache, public.instinct_patient_lookup_cache" in stmt for stmt in sql)

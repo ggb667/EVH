@@ -14,8 +14,8 @@ except Exception:  # pragma: no cover - optional in unit tests
     psycopg = None  # type: ignore[assignment]
 
 
-OWNER_TABLE = "public.instinct_owner_lookup"
-PATIENT_TABLE = "public.instinct_patient_lookup"
+OWNER_TABLE = "public.instinct_owner_lookup_cache"
+PATIENT_TABLE = "public.instinct_patient_lookup_cache"
 
 
 def _now() -> datetime:
@@ -200,16 +200,16 @@ def _ensure_identity_schema(conn) -> None:
             """
             DO $$
             BEGIN
-                IF to_regclass('public.instinct_owner_lookup_norm') IS NOT NULL
-                   AND to_regclass('public.instinct_owner_lookup') IS NULL THEN
-                    ALTER TABLE public.instinct_owner_lookup_norm RENAME TO instinct_owner_lookup;
+                IF to_regclass('public.instinct_owner_lookup_cache_norm') IS NOT NULL
+                   AND to_regclass('public.instinct_owner_lookup_cache') IS NULL THEN
+                    ALTER TABLE public.instinct_owner_lookup_cache_norm RENAME TO instinct_owner_lookup_cache;
                 END IF;
             END$$
             """
         )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS public.instinct_owner_lookup (
+            CREATE TABLE IF NOT EXISTS public.instinct_owner_lookup_cache (
                 account_id text PRIMARY KEY,
                 pims_code text,
                 owner_name text NOT NULL,
@@ -230,7 +230,7 @@ def _ensure_identity_schema(conn) -> None:
         )
         cur.execute(
             """
-            ALTER TABLE public.instinct_owner_lookup
+            ALTER TABLE public.instinct_owner_lookup_cache
                 ADD COLUMN IF NOT EXISTS owner_name_lower text,
                 ADD COLUMN IF NOT EXISTS owner_name_last_first text,
                 ADD COLUMN IF NOT EXISTS phone_digits text,
@@ -241,7 +241,7 @@ def _ensure_identity_schema(conn) -> None:
         )
         cur.execute(
             """
-            ALTER TABLE public.instinct_patient_lookup
+            ALTER TABLE public.instinct_patient_lookup_cache
                 ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
                 ADD COLUMN IF NOT EXISTS merged_into_patient_id bigint,
                 ADD COLUMN IF NOT EXISTS synced_at timestamptz NOT NULL DEFAULT now()
@@ -249,7 +249,7 @@ def _ensure_identity_schema(conn) -> None:
         )
         cur.execute(
             """
-            ALTER TABLE public.instinct_patient_lookup
+            ALTER TABLE public.instinct_patient_lookup_cache
                 ADD COLUMN IF NOT EXISTS patient_pims_code text,
                 ADD COLUMN IF NOT EXISTS birthdate date,
                 ADD COLUMN IF NOT EXISTS species text,
@@ -268,10 +268,10 @@ def _ensure_identity_schema(conn) -> None:
             DO $$
             BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_owner_lookup_pkey'
+                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_owner_lookup_cache_pkey'
                 ) THEN
-                    ALTER TABLE public.instinct_owner_lookup
-                        ADD CONSTRAINT instinct_owner_lookup_pkey PRIMARY KEY (account_id);
+                    ALTER TABLE public.instinct_owner_lookup_cache
+                        ADD CONSTRAINT instinct_owner_lookup_cache_pkey PRIMARY KEY (account_id);
                 END IF;
             END$$
             """
@@ -281,36 +281,36 @@ def _ensure_identity_schema(conn) -> None:
             DO $$
             BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_patient_lookup_pkey'
+                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_patient_lookup_cache_pkey'
                 ) THEN
-                    ALTER TABLE public.instinct_patient_lookup
-                        ADD CONSTRAINT instinct_patient_lookup_pkey PRIMARY KEY (patient_id);
+                    ALTER TABLE public.instinct_patient_lookup_cache
+                        ADD CONSTRAINT instinct_patient_lookup_cache_pkey PRIMARY KEY (patient_id);
                 END IF;
             END$$
             """
         )
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS instinct_owner_lookup_owner_name_lower_idx
-                ON public.instinct_owner_lookup (lower(owner_name))
+            CREATE INDEX IF NOT EXISTS instinct_owner_lookup_cache_owner_name_lower_idx
+                ON public.instinct_owner_lookup_cache (lower(owner_name))
             """
         )
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS instinct_owner_lookup_owner_name_last_first_idx
-                ON public.instinct_owner_lookup (owner_name_last_first)
+            CREATE INDEX IF NOT EXISTS instinct_owner_lookup_cache_owner_name_last_first_idx
+                ON public.instinct_owner_lookup_cache (owner_name_last_first)
             """
         )
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS instinct_owner_lookup_phone_digits_idx
-                ON public.instinct_owner_lookup (phone_digits)
+            CREATE INDEX IF NOT EXISTS instinct_owner_lookup_cache_phone_digits_idx
+                ON public.instinct_owner_lookup_cache (phone_digits)
             """
         )
         cur.execute(
             """
-            CREATE INDEX IF NOT EXISTS instinct_patient_lookup_account_patient_lower_idx
-                ON public.instinct_patient_lookup (account_id, lower(patient_name))
+            CREATE INDEX IF NOT EXISTS instinct_patient_lookup_cache_account_patient_lower_idx
+                ON public.instinct_patient_lookup_cache (account_id, lower(patient_name))
             """
         )
     conn.commit()
@@ -371,61 +371,64 @@ def _patient_payload(patient: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_refresh_tables(conn):
-    with conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS public.instinct_owner_lookup_refresh")
-        cur.execute("DROP TABLE IF EXISTS public.instinct_patient_lookup_refresh")
-        cur.execute("CREATE TABLE public.instinct_owner_lookup_refresh (LIKE public.instinct_owner_lookup INCLUDING ALL)")
-        cur.execute("CREATE TABLE public.instinct_patient_lookup_refresh (LIKE public.instinct_patient_lookup INCLUDING ALL)")
-    conn.commit()
-
-
-def _replace_live_tables(conn) -> None:
-    with conn.cursor() as cur:
-        cur.execute("TRUNCATE public.instinct_owner_lookup, public.instinct_patient_lookup")
-        cur.execute(
-            """
-            INSERT INTO public.instinct_owner_lookup
-            SELECT * FROM public.instinct_owner_lookup_refresh
-            """
-        )
-        cur.execute(
-            """
-            INSERT INTO public.instinct_patient_lookup
-            SELECT * FROM public.instinct_patient_lookup_refresh
-            """
-        )
-        cur.execute("DROP TABLE public.instinct_owner_lookup_refresh")
-        cur.execute("DROP TABLE public.instinct_patient_lookup_refresh")
-    conn.commit()
-
-
-def _load_refresh_tables(conn, accounts: list[dict[str, Any]], patients: list[dict[str, Any]]) -> None:
-    _build_refresh_tables(conn)
+def _upsert_identity_tables(conn, accounts: list[dict[str, Any]], patients: list[dict[str, Any]]) -> None:
     owner_rows = [_account_payload(item) for item in accounts]
     patient_rows = [_patient_payload(item) for item in patients]
     with conn.cursor() as cur:
         cur.executemany(
             """
-            INSERT INTO public.instinct_owner_lookup_refresh (
+            INSERT INTO public.instinct_owner_lookup_cache (
                 account_id, pims_code, owner_name, phone_primary, phone_all, email, address, city_state_zip,
                 owner_name_lower, owner_name_last_first, phone_digits, updated_at, deleted_at, merged_into_account_id, synced_at
             ) VALUES (
                 %(account_id)s, %(pims_code)s, %(owner_name)s, %(phone_primary)s, %(phone_all)s, %(email)s, %(address)s, %(city_state_zip)s,
                 %(owner_name_lower)s, %(owner_name_last_first)s, %(phone_digits)s, %(updated_at)s, %(deleted_at)s, %(merged_into_account_id)s, %(synced_at)s
             )
+            ON CONFLICT (account_id) DO UPDATE SET
+                pims_code = EXCLUDED.pims_code,
+                owner_name = EXCLUDED.owner_name,
+                phone_primary = EXCLUDED.phone_primary,
+                phone_all = EXCLUDED.phone_all,
+                email = EXCLUDED.email,
+                address = EXCLUDED.address,
+                city_state_zip = EXCLUDED.city_state_zip,
+                owner_name_lower = EXCLUDED.owner_name_lower,
+                owner_name_last_first = EXCLUDED.owner_name_last_first,
+                phone_digits = EXCLUDED.phone_digits,
+                updated_at = EXCLUDED.updated_at,
+                deleted_at = EXCLUDED.deleted_at,
+                merged_into_account_id = EXCLUDED.merged_into_account_id,
+                synced_at = EXCLUDED.synced_at
             """,
             owner_rows,
         )
         cur.executemany(
             """
-            INSERT INTO public.instinct_patient_lookup_refresh (
+            INSERT INTO public.instinct_patient_lookup_cache (
                 patient_id, account_id, patient_name, patient_pims_code, birthdate, species, breed, color, sex,
                 weight, owner_name, phone_primary, address, city_state_zip, updated_at, deleted_at, merged_into_patient_id, synced_at
             ) VALUES (
                 %(patient_id)s, %(account_id)s, %(patient_name)s, %(patient_pims_code)s, %(birthdate)s, %(species)s, %(breed)s, %(color)s, %(sex)s,
                 %(weight)s, %(owner_name)s, %(phone_primary)s, %(address)s, %(city_state_zip)s, %(updated_at)s, %(deleted_at)s, %(merged_into_patient_id)s, %(synced_at)s
             )
+            ON CONFLICT (patient_id) DO UPDATE SET
+                account_id = EXCLUDED.account_id,
+                patient_name = EXCLUDED.patient_name,
+                patient_pims_code = EXCLUDED.patient_pims_code,
+                birthdate = EXCLUDED.birthdate,
+                species = EXCLUDED.species,
+                breed = EXCLUDED.breed,
+                color = EXCLUDED.color,
+                sex = EXCLUDED.sex,
+                weight = EXCLUDED.weight,
+                owner_name = EXCLUDED.owner_name,
+                phone_primary = EXCLUDED.phone_primary,
+                address = EXCLUDED.address,
+                city_state_zip = EXCLUDED.city_state_zip,
+                updated_at = EXCLUDED.updated_at,
+                deleted_at = EXCLUDED.deleted_at,
+                merged_into_patient_id = EXCLUDED.merged_into_patient_id,
+                synced_at = EXCLUDED.synced_at
             """,
             patient_rows,
         )
@@ -435,8 +438,7 @@ def _load_refresh_tables(conn, accounts: list[dict[str, Any]], patients: list[di
 def refresh_identity_tables(client: InstinctApiSyncClient, conn) -> dict[str, Any]:
     accounts, accounts_seconds = client.iter_accounts()
     patients, patients_seconds = client.iter_patients()
-    _load_refresh_tables(conn, accounts, patients)
-    _replace_live_tables(conn)
+    _upsert_identity_tables(conn, accounts, patients)
     return {
         "accounts": {"count": len(accounts), "seconds": round(accounts_seconds, 3)},
         "patients": {"count": len(patients), "seconds": round(patients_seconds, 3)},

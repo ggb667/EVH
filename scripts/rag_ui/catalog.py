@@ -614,7 +614,7 @@ def _postgres_client_options() -> tuple[ClientOption, ...]:
               coalesce(nullif(pims_code, ''), account_id) as secondary,
               coalesce(nullif(phone_primary, ''), '') as primary_phone,
               coalesce(nullif(email, ''), '') as email
-            from public.instinct_owner_lookup
+            from public.instinct_owner_lookup_cache
             order by lower(coalesce(nullif(owner_name, ''), nullif(pims_code, ''), account_id)), account_id
             """
         )
@@ -686,7 +686,7 @@ def _postgres_pet_options(client_id: str) -> tuple[PetOption, ...]:
               coalesce(nullif(species, ''), '') as species,
               coalesce(nullif(breed, ''), '') as breed,
               coalesce(owner_name, '') as owner_name
-            from public.instinct_patient_lookup
+            from public.instinct_patient_lookup_cache
             where account_id = %s
             order by lower(coalesce(nullif(patient_name, ''), nullif(patient_pims_code, ''), patient_id::text)), patient_id
             """,
@@ -1028,7 +1028,7 @@ def _load_catalog_from_postgres() -> RagCatalog:
               coalesce(owner_name, '') as owner_name,
               coalesce(nullif(phone_primary, ''), '') as phone_primary,
               coalesce(nullif(email, ''), '') as email
-            from public.instinct_owner_lookup
+            from public.instinct_owner_lookup_cache
             """
         )
         owner_rows = cursor.fetchall()
@@ -1042,7 +1042,7 @@ def _load_catalog_from_postgres() -> RagCatalog:
               coalesce(nullif(breed, ''), '') as breed,
               coalesce(nullif(patient_pims_code, ''), patient_id::text) as pims_code,
               coalesce(owner_name, '') as owner_name
-            from public.instinct_patient_lookup
+            from public.instinct_patient_lookup_cache
             where account_id is not null and account_id <> ''
             """
         )
