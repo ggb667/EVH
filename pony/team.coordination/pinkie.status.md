@@ -11,3 +11,4 @@ BLOCKERS: waiting on Weave support case 901174 for application credentials or ex
 NEXT_STEP: once Weave access arrives, export the existing Weave contact list, reconcile it against the persisted Instinct export, and decide what is safe to import
 QUESTIONS_FOR_TWI: none
 DECISION_NEEDED: none
+SHUTDOWN_NOTE: local dirty tracked files remain in pony/README.md and pony/pony.system.config.yaml and must be preserved
