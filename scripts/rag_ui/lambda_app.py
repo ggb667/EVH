@@ -7,6 +7,7 @@ import subprocess
 import time
 import traceback
 import re
+import threading
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from pathlib import Path
@@ -41,10 +42,13 @@ def _prime_catalog_on_import() -> None:
         return
     if not os.environ.get("EVH_PGHOST", "").strip():
         return
-    try:
-        load_catalog_with_status()
-    except Exception as error:
-        print(f"[RAG_TIMING] import_preload_failed error={error}", flush=True)
+    def _worker() -> None:
+        try:
+            load_catalog_with_status()
+        except Exception as error:
+            print(f"[RAG_TIMING] import_preload_failed error={error}", flush=True)
+
+    threading.Thread(target=_worker, name="rag-ui-import-preload", daemon=True).start()
 
 
 _prime_catalog_on_import()
