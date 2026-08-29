@@ -968,12 +968,8 @@ def test_index_uses_request_driven_search_lifecycle():
 
 @pytest.mark.integration
 def test_live_client_filter_candidate_retention():
-    if not _has_postgres_driver():
-        pytest.skip("Postgres driver unavailable in local test environment")
-    required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
-    missing = [name for name in required if not os.environ.get(name, "").strip()]
-    if missing:
-        raise AssertionError(f"live DB creds are required for this integration test: {', '.join(missing)}")
+    if not (os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip() or os.environ.get("TOKEN", "").strip()):
+        pytest.skip("Live Instinct credentials unavailable in local test environment")
 
     catalog = load_catalog()
     all_labels = [item["label"] for item in catalog.search_clients("")]
@@ -1009,12 +1005,8 @@ def test_live_client_filter_candidate_retention():
 
 @pytest.mark.integration
 def test_live_client_filter_ranking_contract():
-    if not _has_postgres_driver():
-        pytest.skip("Postgres driver unavailable in local test environment")
-    required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
-    missing = [name for name in required if not os.environ.get(name, "").strip()]
-    if missing:
-        raise AssertionError(f"live DB creds are required for this integration test: {', '.join(missing)}")
+    if not (os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip() or os.environ.get("TOKEN", "").strip()):
+        pytest.skip("Live Instinct credentials unavailable in local test environment")
 
     catalog = load_catalog()
 
@@ -1033,12 +1025,8 @@ def test_live_client_filter_ranking_contract():
 
 @pytest.mark.integration
 def test_live_client_filter_performance_budget():
-    if not _has_postgres_driver():
-        pytest.skip("Postgres driver unavailable in local test environment")
-    required = ["EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD"]
-    missing = [name for name in required if not os.environ.get(name, "").strip()]
-    if missing:
-        raise AssertionError(f"live DB creds are required for this integration test: {', '.join(missing)}")
+    if not (os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip() or os.environ.get("TOKEN", "").strip()):
+        pytest.skip("Live Instinct credentials unavailable in local test environment")
 
     catalog = load_catalog()
     queries = ["D", "De", "Deb", "Debo", "Debor", "Debora", "Deborah", "Deborah ", "Deborah B", "Deborah Bu", "Deborah Bur", "Burchell"]
