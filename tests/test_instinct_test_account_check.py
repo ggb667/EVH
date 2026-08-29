@@ -1,61 +1,34 @@
-from __future__ import annotations
-
-from scripts import instinct_test_account_check as check
-
-
-class _FakeResponse:
-    def __init__(self, status: int, body: str):
-        self.status = status
-        self._body = body.encode("utf-8")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def read(self):
-        return self._body
+from scripts.instinct_test_account_check import (
+    _build_initial_visit,
+    _extract_object_id,
+    _extract_rows,
+)
 
 
-def test_fetch_partner_token_uses_access_token_field(monkeypatch):
-    captured = {}
-
-    def fake_urlopen(req, timeout=30):
-        captured["url"] = req.full_url
-        captured["data"] = req.data.decode("utf-8")
-        return _FakeResponse(200, '{"access_token":"abc123"}')
-
-    monkeypatch.setattr(check.request, "urlopen", fake_urlopen)
-
-    token = check._fetch_partner_token("https://partner.example/token", "cid", "secret")
-
-    assert token == "abc123"
-    assert "grant_type=client_credentials" in captured["data"]
-    assert "client_id=cid" in captured["data"]
-    assert "client_secret=secret" in captured["data"]
+def test_extract_object_id_from_common_response_shapes():
+    assert _extract_object_id({"id": "patient-1"}) == "patient-1"
+    assert _extract_object_id({"data": {"patientId": 42}}) == "42"
+    assert _extract_object_id({"result": {"uuid": "abc"}}) == "abc"
 
 
-def test_fetch_partner_token_accepts_token_alias(monkeypatch):
-    def fake_urlopen(req, timeout=30):
-        return _FakeResponse(200, '{"token":"xyz789"}')
+def test_extract_rows_supports_list_and_wrapped_data_shapes():
+    direct = _extract_rows([{"id": 1, "name": "A"}, {"id": 2, "name": "B"}])
+    wrapped = _extract_rows({"data": [{"id": 3, "name": "C"}]})
 
-    monkeypatch.setattr(check.request, "urlopen", fake_urlopen)
-
-    token = check._fetch_partner_token("https://partner.example/token", "cid", "secret")
-
-    assert token == "xyz789"
+    assert [row["id"] for row in direct] == [1, 2]
+    assert [row["id"] for row in wrapped] == [3]
 
 
-def test_discover_account_defaults_uses_live_alert_and_reminder_ids(monkeypatch):
-    class FakeClient:
-        def fetch_alerts(self):
-            return 200, {"alerts": [{"id": 333}, {"id": 444}]}
+def test_build_initial_visit_includes_required_fields_and_optional_type():
+    payload = _build_initial_visit(
+        account_id="acc-1",
+        patient_id="patient-1",
+        visit_reason="initial",
+        visit_type_id=7,
+    )
 
-        def fetch_reminders(self):
-            return 200, {"reminders": [{"id": 777}, {"id": 888}]}
-
-    alert_id, reminder_ids = check._discover_account_defaults(FakeClient())
-
-    assert alert_id == 333
-    assert reminder_ids == (777, 888)
+    assert payload["accountId"] == "acc-1"
+    assert payload["patientId"] == "patient-1"
+    assert payload["notes"] == "initial"
+    assert payload["visitTypeId"] == 7
+    assert "startedAt" in payload

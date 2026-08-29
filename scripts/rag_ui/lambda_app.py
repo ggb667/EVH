@@ -7,6 +7,7 @@ import subprocess
 import time
 import traceback
 import re
+import threading
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from pathlib import Path
@@ -14,7 +15,7 @@ from urllib import request as urllib_request
 
 import boto3
 
-from scripts.rag_ui.catalog import load_catalog, load_catalog_with_status, load_patient_documents, query_options_from_postgres, search_pet_chunks_by_embedding
+from scripts.rag_ui.catalog import load_catalog, load_catalog_cached, load_catalog_with_status, load_patient_documents, query_options_from_postgres, search_pet_chunks_by_embedding
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PDF_ICONS_PATH = STATIC_DIR / "PDFIcons.png"
@@ -34,6 +35,25 @@ DEFAULT_PRACTICE_STACK_CONTEXT = (
     "General questions about those systems are in-scope, and the assistant may answer how-to or where-to-look questions about the technology itself. "
     "Do not use that general guidance to override patient-specific truth."
 )
+
+
+def _prime_catalog_on_import() -> None:
+    if os.environ.get("RAG_UI_DISABLE_IMPORT_PRELOAD", "").strip():
+        return
+    if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "").strip():
+        return
+    if not os.environ.get("EVH_PGHOST", "").strip():
+        return
+    def _worker() -> None:
+        try:
+            load_catalog_with_status()
+        except Exception as error:
+            print(f"[RAG_TIMING] import_preload_failed error={error}", flush=True)
+
+    threading.Thread(target=_worker, name="rag-ui-import-preload", daemon=True).start()
+
+
+_prime_catalog_on_import()
 
 
 def _app_version() -> str:
@@ -1276,10 +1296,45 @@ def _serve_rag_search(event: dict) -> dict:
     )
 
 
-def _build_selected_context_bundle(client_id: str, pet_id: str, *, patient_context: dict[str, str] | None = None) -> dict[str, object]:
+def _build_selected_context_bundle(
+    client_id: str,
+    pet_id: str,
+    *,
+    patient_context: dict[str, str] | None = None,
+    selected_context_hint: dict[str, object] | None = None,
+) -> dict[str, object]:
     patient_context = patient_context or {}
-    catalog, catalog_status = load_catalog_with_status(allow_stale=True)
-    client_record, patient_record = _selected_catalog_records(catalog, client_id, pet_id)
+    selected_context_hint = selected_context_hint or {}
+    catalog = load_catalog_cached()
+    catalog_status = {"source": "memory", "stale": catalog is None, "age_seconds": None}
+    if catalog is None:
+        hint_client = selected_context_hint.get("client") if isinstance(selected_context_hint.get("client"), dict) else {}
+        hint_patient = selected_context_hint.get("patient") if isinstance(selected_context_hint.get("patient"), dict) else {}
+        client_record = {
+            "id": str(client_id or ""),
+            "name": str(
+                (hint_client or {}).get("name")
+                or patient_context.get("owner_name")
+                or patient_context.get("client_name")
+                or patient_context.get("client_label")
+                or "",
+            ),
+            "pims_code": str(patient_context.get("pims_code") or ""),
+            "phone_primary": "",
+            "email": "",
+        }
+        patient_record = {
+            "id": str(pet_id or ""),
+            "account_id": str(client_id or ""),
+            "name": str((hint_patient or {}).get("name") or patient_context.get("patient_name") or patient_context.get("name") or ""),
+            "species": str((hint_patient or {}).get("species") or patient_context.get("species") or ""),
+            "breed": str((hint_patient or {}).get("breed") or patient_context.get("breed") or ""),
+            "birthdate": str((hint_patient or {}).get("birthdate") or patient_context.get("birthdate") or ""),
+            "pims_code": str((hint_patient or {}).get("pims_code") or patient_context.get("microchip_id") or ""),
+            "owner_name": str((hint_client or {}).get("name") or patient_context.get("owner_name") or patient_context.get("owner") or patient_context.get("client_name") or ""),
+        }
+    else:
+        client_record, patient_record = _selected_catalog_records(catalog, client_id, pet_id)
     financials: dict[str, object] = {}
     reminders: list[dict[str, object]] = []
     patient_documents: list[dict[str, object]] = []
@@ -1342,7 +1397,12 @@ def _serve_rag_answer(event: dict) -> dict:
         conversation_refs = _conversation_citation_refs_from_event(event)
         cached_selected_context = _selected_context_cache_get(client_id, pet_id)
         if cached_selected_context is None:
-            cached_selected_context = _build_selected_context_bundle(client_id, pet_id, patient_context=patient_context)
+            cached_selected_context = _build_selected_context_bundle(
+                client_id,
+                pet_id,
+                patient_context=patient_context,
+                selected_context_hint=_selected_context_from_event(event),
+            )
             _selected_context_cache_set(client_id, pet_id, cached_selected_context)
         selected_context = _merge_selected_context(cached_selected_context, patient_context, cached_selected_context.get("documents") or [])
         catalog_status = cached_selected_context.get("catalog_status") or {}

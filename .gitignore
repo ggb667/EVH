@@ -215,3 +215,8 @@ pony/team.coordination/*.review-needed
 
 # Project-local pony runtime
 /pony/
+
+# Local Codex and EVH static deploy scratch artifacts
+/.codex
+/.codex/
+/evh_site.zip

@@ -1,5 +1,15 @@
 # EVH
 
+## Local test run
+
+Create the repo-local virtualenv, install `pytest`, and run the test suite:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest -q
+```
+
 ## Instinct API base
 
 The official Instinct Partner API reference lists the fetch-account endpoint as:
@@ -17,6 +27,12 @@ Primary Partner API base:
 Token endpoint used by the local scripts:
 
 - `POST https://partner.instinctvet.com/v1/auth/token`
+
+Local credential note:
+
+- `../creds.txt` in the dev root contains an Instinct access block labeled for the partner API.
+- The token endpoint is documented as `client_credentials`, but the values currently stored there did not exchange successfully with the live partner endpoint when tested from this workspace.
+- If you use that file again, expect to verify the exact auth shape with the current Instinct tenant before assuming the saved values are usable.
 
 ## Environment and setup
 
@@ -97,6 +113,79 @@ However, for the tested patient/account context above, the Partner API returned 
 
 That means the reminders visible in the Instinct UI are not yet reproducible from the current Partner API call pattern alone. Treat that as an unresolved API/product behavior question, not as a parsing bug in the EVH scripts.
 
+## Instinct token auth
+
+The smoke-test helper supports three auth modes:
+
+- Bearer token via `--api-key`
+- Basic auth via `--username` and `--password`
+- OAuth client credentials via `--client-id` and `--client-secret`
+
+If you already have a Bearer token, pass it directly:
+
+```bash
+.venv/bin/python scripts/instinct_test_account_check.py \
+  --base-url "https://api.instinctvet.com" \
+  --api-key "$INSTINCT_TOKEN" \
+  --discover-only
+```
+
+If you only have a client ID and client secret, the script can fetch the token for you from:
+
+- `POST https://partner.instinctvet.com/v1/auth/token`
+
+The partner flow that worked live in this repo was client credentials against the
+partner token endpoint, then Bearer auth on the API requests.
+
+Use:
+
+```bash
+.venv/bin/python scripts/instinct_test_account_check.py \
+  --base-url "https://api.instinctvet.com" \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET" \
+  --discover-only
+```
+
+If you need to fetch the token yourself first, this request matches the script behavior:
+
+```bash
+curl -X POST "https://partner.instinctvet.com/v1/auth/token" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "client_id=$INSTINCT_CLIENT_ID" \
+  --data-urlencode "client_secret=$INSTINCT_CLIENT_SECRET"
+```
+
+Then use the returned `access_token` as:
+
+```bash
+export INSTINCT_TOKEN="<access_token>"
+```
+
+## Instinct reminders workflow
+
+For the live reminders workflow we verified:
+
+1. Fetch a Bearer token from `POST https://partner.instinctvet.com/v1/auth/token`.
+2. Walk reminders with `GET /v1/reminders`.
+3. Use the returned `metadata.after` cursor with
+   `GET /v1/reminders?limit=100&pageCursor=<after>&pageDirection=after`.
+4. Find a patient by `GET /v1/patients?pimsCode=<patient-code>` or by walking
+   the patient list and matching `name`.
+5. Count that patient’s reminders by filtering the reminder list on `patientId`.
+
+Current reminder-write status:
+
+- patient PATCH was not the correct write path for creating visible reminder rows
+- `GET /v1/reminders` is still the read/count source of truth
+- the tenant exposes patient-linked reminder rows, but the exact create/update route still needs one more lookup
+
+The full worked example is documented in:
+
+- `docs/instinct-reminders-handoff.md`
+
 ## Instinct import helpers
 
 - `scripts/instinct_import_payload_builder.py`: builds patient payloads with
@@ -105,13 +194,19 @@ That means the reminders visible in the Instinct UI are not yet reproducible fro
   test account connectivity, alert/reminder lookups, and optional patient create
   (supports explicit `--patient-name` and `--patient-pms-id`, with either
   Bearer API key auth, username/password Basic auth, or OAuth
-  `client_id`/`client_secret` token fetch; discovers account alert/reminder IDs
-  on the fly for the import payload).
+  `client_id`/`client_secret` token fetch). Also supports `--discover-only`
+  (ID lookup) and optional initial visit create after patient creation.
+- `scripts/instinct_sync_runner.py`: dry-run sync runner for Instinct account and appointment feeds with persisted watermarks and structured export output.
+- `docs/instinct-appointments-contract-notes.md`: captured appointment and appointment-type endpoint surface from the Instinct docs.
 - `docs/instinct-import.md`: integration notes, endpoint checklist, and test-account commands.
+- `docs/instinct-weight-alert-etl.md`: workbook structure, Instinct API findings, doc gaps, and the current weight + alert ETL rules.
+- Includes a troubleshooting section for applying patches cleanly in zsh/WSL (`git apply --check` + heredoc pattern).
 - `scripts/instinct_active_patients_audit.py`: preflight checker for `Active Patients.csv` to verify unique patient identifiers and required mapping fields before bulk import.
 - `scripts/evh_reminder_importer.py`: reminder spreadsheet parser plus live patient/reminder audit mode for validating owner/contact/reminder state before import execution.
-- `scripts/contacts/weave_contact_sync.py`: periodic Instinct-account exporter that emits incremental Weave bulk-import CSV batches, skips unchanged accounts by stable payload hash, and persists local watermark/export state.
+- `scripts/instinct_pdf_chunker.py`: manifest-driven PDF chunker for patient documents with a LangChain-compatible `Document` shape.
+- `scripts/instinct_alert_weight_etl.py`: ETL for importing patient weights and only the cleanly mappable Instinct alert IDs, with JSONL/CSV summary logs.
 - `tests/test_instinct_import_payload_builder.py`: unit tests for payload merge/dedupe behavior.
+- `tests/test_instinct_pdf_chunker.py`: unit tests for manifest parsing and text splitting.
 
 ## Invocation examples
 
@@ -170,18 +265,6 @@ Audit live patients plus reminder counts exposed by the Partner API:
   --export-json patients.json
 ```
 
-Export incremental Weave contact-import CSV files from Instinct accounts:
-
-```bash
-.venv/bin/python -m scripts.contacts.weave_contact_sync \
-  --base-url "https://partner.instinctvet.com" \
-  --token "$INSTINCT_TOKEN" \
-  --clinic-id "evh-main" \
-  --state-file /tmp/evh-weave-contact-sync-state.json \
-  --export-dir /tmp/evh-weave-contact-csv \
-  --chunk-size 10000
-```
-
 Note: `scripts/evh_reminder_importer.py` currently supports:
 
 - spreadsheet parsing and source-to-Instinct mapping
@@ -189,3 +272,26 @@ Note: `scripts/evh_reminder_importer.py` currently supports:
 - patient lookup by account/client and patient identity
 
 It does not yet implement the final reminder submission path end-to-end.
+
+## Instinct sync runner
+
+Use the sync runner to normalize Instinct account and appointment feeds, persist simple watermarks, and emit structured export records for downstream Weave mirroring:
+
+```bash
+.venv/bin/python scripts/instinct_sync_runner.py \
+  --base-url "https://partner.instinctvet.com" \
+  --token "$INSTINCT_TOKEN" \
+  --accounts \
+  --appointments \
+  --updated-since "2026-04-20T00:00:00Z" \
+  --state-file /tmp/evh-instinct-sync-state.json \
+  --export-json /tmp/evh-instinct-sync-export.json \
+  --fetch-types
+```
+
+Output includes:
+
+- normalized account and appointment payloads
+- `idempotency_key` for each exported record
+- `conflict_status` for downstream review logic
+- persisted feed watermarks when `--state-file` is provided

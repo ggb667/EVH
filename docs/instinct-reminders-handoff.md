@@ -1,77 +1,118 @@
-# Instinct Reminders Handoff
+# Instinct reminders handoff
 
-This is the final handoff note for the Instinct reminder import work.
+This note is the shortest path from auth to patient reminder count.
+It captures the live flow we verified against the partner API.
 
-## What We Proved
+## 1. Make a Bearer token
 
-- The partner auth token flow works with the documented client-credentials request.
-- `GET /v1/reminders` must be paged with `metadata.after` and `pageDirection=after`.
-- The reminder smoke-test helper now extracts live `reminderLabelId` values from the paged response.
-- `GET /v1/appointments` and `GET /v1/appointment-types` both return `200` with the same partner token.
+Use the partner token endpoint with client credentials:
 
-## Final Export
+```bash
+curl -sS https://partner.instinctvet.com/v1/auth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'client_id=$INSTINCT_CLIENT_ID' \
+  --data-urlencode 'client_secret=$INSTINCT_CLIENT_SECRET'
+```
 
-Handoff CSV:
+Grab the returned `access_token` and send it as:
 
-- `scripts/instinct_reminder_handoff.csv`
+```bash
+export INSTINCT_TOKEN="<access_token>"
+```
 
-Current export size:
+## 2. Walk the reminders collection
 
-- `6,746` reminder rows
-- `3,543` reminder groups
+First page:
 
-Resolution summary:
+```bash
+curl -sS "https://partner.instinctvet.com/v1/reminders" \
+  -H "Authorization: Bearer $INSTINCT_TOKEN"
+```
 
-- `3,530` groups resolved by live Instinct lookup
-- `13` groups unresolved in the final live pass
+The response includes:
 
-## Match Rule
+- `data`: reminder rows
+- `metadata.after`: cursor for the next page
+- `metadata.totalCount`: total reminders in the collection
 
-The correct live match key is the patient PMS / PIMS code when present.
+Page forward:
 
-Example:
+```bash
+curl -sS "https://partner.instinctvet.com/v1/reminders?limit=100&pageCursor=<after>&pageDirection=after" \
+  -H "Authorization: Bearer $INSTINCT_TOKEN"
+```
 
-- `Jack Abner`
-- patient PMS ID `23809`
-- owner `Kindra Abner`
-- owner phone `(352) 636-2110`
+Important live behavior:
 
-That live record resolves in Instinct, so the matching logic should prefer the live patient PMS ID over stale cached account slices.
+- `pageDirection=after` is required for paging.
+- `pageCursor` must be present and non-empty when paging.
+- `limit` works up to `100`.
 
-## Final Exceptions
+## 3. Find a patient
 
-These are the unresolved groups from the final export that should be called out in the email to Nick:
+The fastest lookup we verified is by patient code:
 
-1. `Harmon, Nancy` / `Pebbles` / `(407) 948 - 1583`
-   - `Lyme Vaccine Annual` -> `Borrelia burgdorferi (Lyme) Vaccine` (`reminderLabelId` `41`)
-   - `Bordetella Oral Vaccine` -> `Bordetella Oral Parainfluenza Vaccine` (`reminderLabelId` `40`)
-   - `DA2PP + Leptospirosis 4 Annual` -> `DA2P + Leptospirosis 4` (`reminderLabelId` `69`)
-   - reason: `ambiguous_patient_in_account`
-2. `Jimenez, Providencia` / `Ms. Shadow` / `(407) 879 - 2313`
-   - `Fvrcpc Annual` -> `FVRCP Vaccine` (`reminderLabelId` `48`)
-   - `Feline Rabies 1 yr/Purevax` -> `Rabies Vaccine (Feline)` (`reminderLabelId` `52`)
-   - reason: `ambiguous_patient_in_account`
-3. `Hospital, Eustis Veterina` / `Kitten 5 - 30 - 25` / `(352) 357 - 6688`
-   - `Antech CBC, CHEM25, T4, freeT4` -> `Comprehensive Bloodwork` (`reminderLabelId` `6`)
-   - `Inject - Solensia` -> `Solensia Injection` (`reminderLabelId` `55`)
-   - `Revolution Plus Cat 2.8 - 5.5#` -> `Flea / Tick / Heartworm Prevention` (`reminderLabelId` `14`)
-   - `In House Imagyst Fecal/Oocysts` -> `Fecal Analysis` (`reminderLabelId` `11`)
-   - `Feline Rabies 1 yr/Purevax` -> `Rabies Vaccine (Feline)` (`reminderLabelId` `52`)
-   - `Rabies Canine 1 yr` -> `Rabies Vaccine (Canine)` (`reminderLabelId` `51`)
-   - `General Senior Profile (IRL 78` -> `Senior Blood Work` (`reminderLabelId` `28`)
-   - `Annual Wellness Exam` -> `Annual Exam` (`reminderLabelId` `3`)
-   - `Credelio for Cats 2.0 - 4.0# C` -> `Flea / Tick Prevention` (`reminderLabelId` `13`)
-   - reason: `no_patient`
-4. `Sanders, Karen` / `G - Man` / `(713) 385 - 2388`
-   - `Feline Leukemia Annual` -> `Feline Leukemia (FeLV) Vaccine` (`reminderLabelId` `47`)
-   - `Fvrcpc Annual` -> `FVRCP Vaccine` (`reminderLabelId` `48`)
-   - reason: `no_patient`
-5. `Sanders - Foster Pets, Ka` / blank patient name / `(352) 343 - 2468`
-   - `Antech Fecal & Giardia ELISA` -> `Fecal Analysis` (`reminderLabelId` `11`)
-   - reason: `no_patient`
+```bash
+curl -sS "https://partner.instinctvet.com/v1/patients?pimsCode=<patient-code>" \
+  -H "Authorization: Bearer $INSTINCT_TOKEN"
+```
 
-## Note
+If you only have a name, you can walk the patient list and match `name` in the
+returned `data` rows.
 
-The CSV has now been backfilled with `instinct_label_id` values from the live reminder-label table, so we did not need to rerun the 22-hour export to fill that column.
+Useful patient fields from the live response:
 
-The live lookup fix is still the authoritative path; if you regenerate later, keep the patient PMS ID-first resolution rule, the live paging fix, and the `reminderLabelId` capture intact.
+- `id`
+- `name`
+- `pimsCode`
+- `accountId`
+
+## 4. Count reminders for a patient
+
+Once you know the patient `id`, walk all reminder pages and count rows where
+`patientId` matches that patient:
+
+```bash
+curl -sS "https://partner.instinctvet.com/v1/reminders" \
+  -H "Authorization: Bearer $INSTINCT_TOKEN"
+```
+
+Then page through using `metadata.after` until it is null.
+
+For each page:
+
+- inspect `data`
+- count rows where `patientId == <patient-id>`
+- add the matches to your running total
+
+The live run we verified returned:
+
+- `669` total reminders in the collection
+- `3` reminders for patient `Ember Hetherman` / `pimsCode 27117`
+
+What we tried and ruled out:
+
+- Patching the patient record was not the correct way to create visible reminder rows.
+- The live tenant did not expose a `patients/{id}/reminders` subresource in the probes we ran.
+- We do not yet have the final create/update route for patient reminder rows.
+
+## 5. Repo helpers
+
+The local smoke-test helper now supports the same flow:
+
+```bash
+.venv/bin/python scripts/instinct_test_account_check.py \
+  --base-url "https://partner.instinctvet.com" \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET" \
+  --discover-only
+```
+
+It uses:
+
+- `GET /v1/accounts`
+- `GET /v1/alerts`
+- `GET /v1/reminders`
+
+and prints the discovered rows from each list.

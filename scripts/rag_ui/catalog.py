@@ -6,11 +6,16 @@ import os
 import re
 import sqlite3
 import time
+import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlencode
+from urllib import request as urllib_request
+
+import boto3
 
 
 def _normalize(value: Any) -> str:
@@ -1079,6 +1084,160 @@ def _load_catalog_from_postgres() -> RagCatalog:
 
 _CATALOG_CACHE: dict[str, tuple[float, float, RagCatalog]] = {}
 _CATALOG_MEMORY: tuple[float, RagCatalog] | None = None
+_CATALOG_REFRESH_LOCK = threading.Lock()
+_CATALOG_REFRESH_RUNNING = False
+_CATALOG_REFRESH_STARTED_AT = 0.0
+
+
+def load_catalog_cached() -> RagCatalog | None:
+    if _CATALOG_MEMORY is None:
+        return None
+    cached_at, catalog = _CATALOG_MEMORY
+    if (time.time() - cached_at) >= _refresh_interval_seconds():
+        return None
+    return catalog
+
+
+def _instinct_base_url() -> str:
+    return os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip().rstrip("/")
+
+
+def _instinct_secret_json() -> dict[str, Any]:
+    secret_arn = os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip()
+    if not secret_arn:
+        raise FileNotFoundError("INSTINCT_CLIENT_SECRET_ARN is required for live Instinct catalog refreshes")
+    client = boto3.client("secretsmanager")
+    response = client.get_secret_value(SecretId=secret_arn)
+    secret = str(response.get("SecretString") or "").strip()
+    if not secret:
+        raise RuntimeError("Instinct secret was empty")
+    data = json.loads(secret)
+    if not isinstance(data, dict):
+        raise RuntimeError("Instinct secret JSON must be an object")
+    return data
+
+
+def _instinct_token() -> str:
+    token = os.environ.get("TOKEN", "").strip()
+    if token:
+        return token
+    secret = _instinct_secret_json()
+    client_id = str(secret.get("client_id") or secret.get("clientId") or secret.get("username") or "").strip()
+    client_secret = str(secret.get("client_secret") or secret.get("clientSecret") or secret.get("password") or "").strip()
+    if not client_id or not client_secret:
+        raise RuntimeError("Instinct secret is missing client credentials")
+    token_url = f"{_instinct_base_url()}/v1/auth/token"
+    payload = urlencode({
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }).encode("utf-8")
+    request = urllib_request.Request(token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+    with urllib_request.urlopen(request, timeout=30) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    token = str(data.get("access_token") or data.get("token") or "").strip()
+    if not token:
+        raise RuntimeError("Instinct token response was missing an access token")
+    return token
+
+
+def _instinct_get_json(path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+    query = urlencode({key: value for key, value in (params or {}).items() if str(value or "").strip()})
+    url = f"{_instinct_base_url()}{path}"
+    if query:
+        url = f"{url}?{query}"
+    request = urllib_request.Request(
+        url,
+        headers={"Authorization": f"Bearer {_instinct_token()}", "Accept": "application/json"},
+        method="GET",
+    )
+    with urllib_request.urlopen(request, timeout=30) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Unexpected Instinct response for {path!r}")
+    return data
+
+
+def _instinct_collection(payload: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _load_catalog_from_instinct() -> RagCatalog:
+    accounts: list[dict[str, Any]] = []
+    patients: list[dict[str, Any]] = []
+
+    account_payload = _instinct_get_json("/v1/accounts", {"limit": "100"})
+    for account in _instinct_collection(account_payload, ("accounts", "data", "items", "results")):
+        account_id = str(account.get("id") or "").strip()
+        if not account_id:
+            continue
+        primary = account.get("primaryContact") or {}
+        if not isinstance(primary, dict):
+            primary = {}
+        display = " ".join(
+            part for part in (
+                str(primary.get("nameFirst") or "").strip(),
+                str(primary.get("nameMiddle") or "").strip(),
+                str(primary.get("nameLast") or "").strip(),
+            )
+            if part
+        ).strip()
+        label = display or str(account.get("label") or account.get("pimsCode") or account_id).strip()
+        communication = primary.get("communicationDetails") or []
+        if not isinstance(communication, list):
+            communication = []
+        phone_primary = ""
+        for item in communication:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("value") or item.get("number") or "").strip()
+            kind = str(item.get("type") or item.get("kind") or "").lower()
+            if value and ("phone" in kind or "mobile" in kind or kind == ""):
+                phone_primary = value
+                break
+        email = ""
+        for item in communication:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("value") or "").strip()
+            kind = str(item.get("type") or item.get("kind") or "").lower()
+            if value and ("email" in kind or kind == "email"):
+                email = value
+                break
+        secondary = str(account.get("pimsCode") or account.get("pimsId") or account_id).strip()
+        search_text = _normalize(" ".join([label, secondary, display, phone_primary, email, account_id]))
+        accounts.append({"id": account_id, "label": label, "secondary": secondary, "primary_phone": phone_primary, "email": email, "search_text": search_text})
+
+    patient_after: str | None = None
+    while True:
+        params = {"limit": "100"}
+        if patient_after:
+            params["pageCursor"] = patient_after
+            params["pageDirection"] = "after"
+        patient_payload = _instinct_get_json("/v1/patients", params)
+        for patient in _instinct_collection(patient_payload, ("patients", "data", "items", "results")):
+            pet_id = str(patient.get("id") or "").strip()
+            client_id = str(patient.get("accountId") or patient.get("account_id") or "").strip()
+            if not pet_id or not client_id:
+                continue
+            name = str(patient.get("name") or patient.get("label") or patient.get("pimsCode") or pet_id).strip()
+            species = str((patient.get("species") or {}).get("label") if isinstance(patient.get("species"), dict) else patient.get("species") or "").strip()
+            breed = str((patient.get("breed") or {}).get("label") if isinstance(patient.get("breed"), dict) else patient.get("breed") or "").strip()
+            birthdate = str(patient.get("birthdate") or "").strip()
+            alerts = patient.get("alerts") or []
+            secondary = _pet_secondary({"species": {"label": species} if species else {}, "breed": {"label": breed} if breed else {}, "pimsCode": str(patient.get("pimsCode") or "")})
+            search_text = _normalize(" ".join([name, secondary, client_id, str(patient.get("pimsCode") or ""), pet_id]))
+            patients.append({"id": pet_id, "label": name, "secondary": secondary, "client_id": client_id, "species": species, "breed": breed, "birthdate": birthdate, "alert_count": len(alerts) if isinstance(alerts, list) else 0, "microchip_id": str(patient.get("microchipId") or "").strip(), "search_text": search_text})
+        metadata = patient_payload.get("metadata") if isinstance(patient_payload, dict) else None
+        patient_after = str(metadata.get("after") or "").strip() if isinstance(metadata, dict) else ""
+        if not patient_after:
+            break
+
+    return _build_catalog(accounts, patients)
 
 
 def _load_cached_file_catalog(path: Path, force: bool = False) -> RagCatalog:
@@ -1093,6 +1252,62 @@ def _load_cached_file_catalog(path: Path, force: bool = False) -> RagCatalog:
     catalog = load_catalog_from_file(key)
     _CATALOG_CACHE[key] = (mtime, now, catalog)
     return catalog
+
+
+def _refresh_postgres_catalog_from_instinct() -> None:
+    started = time.perf_counter()
+    print("[RAG_TIMING] Starting - Updating Clients from Instinct...", flush=True)
+    secret = _instinct_secret_json()
+    client_id = str(secret.get("client_id") or secret.get("clientId") or secret.get("username") or "").strip()
+    client_secret = str(secret.get("client_secret") or secret.get("clientSecret") or secret.get("password") or "").strip()
+    if not client_id or not client_secret:
+        raise RuntimeError("Instinct secret is missing client credentials")
+    from scripts.instinct_identity_sync import InstinctApiSyncClient, refresh_identity_tables, _connect
+
+    client = InstinctApiSyncClient(_instinct_base_url(), client_id, client_secret)
+    conn = _connect()
+    try:
+        refresh_identity_tables(client, conn)
+        print(
+            "[RAG_TIMING] Starting - Instinct clients loaded, updating Postgres... "
+            f"elapsed_seconds={time.perf_counter() - started:.3f}",
+            flush=True,
+        )
+    finally:
+        conn.close()
+
+
+def _catalog_refresh_due() -> bool:
+    if _CATALOG_MEMORY is None:
+        return True
+    cached_at, _ = _CATALOG_MEMORY
+    return (time.time() - cached_at) >= _refresh_interval_seconds()
+
+
+def _maybe_start_catalog_refresh() -> None:
+    global _CATALOG_REFRESH_RUNNING, _CATALOG_REFRESH_STARTED_AT, _CATALOG_MEMORY
+    if _is_test_context():
+        return
+    if not _pg_env() or not (os.environ.get("INSTINCT_CLIENT_SECRET_ARN", "").strip() or os.environ.get("TOKEN", "").strip()):
+        return
+    if not _catalog_refresh_due():
+        return
+    with _CATALOG_REFRESH_LOCK:
+        if _CATALOG_REFRESH_RUNNING:
+            return
+        _CATALOG_REFRESH_RUNNING = True
+        _CATALOG_REFRESH_STARTED_AT = time.time()
+
+    def _worker() -> None:
+        global _CATALOG_REFRESH_RUNNING, _CATALOG_MEMORY
+        try:
+            _refresh_postgres_catalog_from_instinct()
+            _CATALOG_MEMORY = None
+        finally:
+            with _CATALOG_REFRESH_LOCK:
+                _CATALOG_REFRESH_RUNNING = False
+
+    threading.Thread(target=_worker, name="rag-ui-catalog-refresh", daemon=True).start()
 
 
 def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> RagCatalog:
@@ -1114,6 +1329,7 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
         if not force and cached and (now - cached[1]) < _refresh_interval_seconds():
             print(f"[RAG_TIMING] refresh_catalog_exit source=postgres_cache elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return cached[2]
+        print("[RAG_TIMING] Starting - Clients from Postgres...", flush=True)
         catalog = _load_catalog_from_postgres()
         _CATALOG_CACHE[cache_key] = (0.0, now, catalog)
         print(f"[RAG_TIMING] refresh_catalog_exit source=postgres elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
@@ -1142,11 +1358,13 @@ def load_catalog_with_status(data_path: str | None = None, *, allow_stale: bool 
         if age < _refresh_interval_seconds():
             print(f"[RAG_TIMING] load_catalog_exit source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return catalog, {"source": "memory", "stale": False, "age_seconds": round(age, 3)}
+    if data_path is None:
+        _maybe_start_catalog_refresh()
     catalog = refresh_catalog(data_path)
     if data_path is None:
         _CATALOG_MEMORY = (time.time(), catalog)
     print(f"[RAG_TIMING] load_catalog_exit source=refresh elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
-    return catalog, {"source": "refresh", "stale": False, "age_seconds": 0.0}
+    return catalog, {"source": "refresh", "stale": False, "age_seconds": 0.0, "refresh_running": _CATALOG_REFRESH_RUNNING}
 
 
 def load_catalog(data_path: str | None = None) -> RagCatalog:

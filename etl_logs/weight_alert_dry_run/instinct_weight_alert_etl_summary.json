@@ -1,0 +1,8 @@
+{
+  "total_logged_rows": 1575,
+  "status_counts": {
+    "planned": 1575
+  },
+  "jsonl_path": "etl_logs/weight_alert_dry_run/instinct_weight_alert_etl.jsonl",
+  "csv_path": "etl_logs/weight_alert_dry_run/instinct_weight_alert_etl.csv"
+}

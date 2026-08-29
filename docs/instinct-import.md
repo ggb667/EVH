@@ -29,6 +29,25 @@ This prints a sample payload containing:
 
 ## Test-account smoke test
 
+If you still need to look up IDs, run discovery first:
+
+```bash
+python scripts/instinct_test_account_check.py \
+  --base-url "https://partner.instinctvet.com" \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET" \
+  --discover-only
+```
+
+This lists discovered account/alert/reminder IDs so you can pick the right values.
+
+Reminder workflow status from the live tenant:
+
+- `GET /v1/reminders` is the authoritative read path for patient-linked reminder rows.
+- We verified that Ember Hetherman’s reminders are counted from that feed by `patientId`.
+- We also verified that patching the patient record was not the right way to create visible reminder rows.
+- The exact reminder create/update route still needs one more lookup before we can do live writes safely.
+
 Use the smoke-test script to validate account access and IDs before creating any patient:
 
 ```bash
@@ -54,6 +73,27 @@ python scripts/instinct_test_account_check.py \
   --create-patient
 ```
 
+If the patient has never had a visit and you need one created as part of setup, add:
+
+```bash
+python scripts/instinct_test_account_check.py \
+  --base-url "https://partner.instinctvet.com" \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET" \
+  --account-id "<test-account-uuid>" \
+  --default-alert-id 101 \
+  --default-reminder-ids 201,202 \
+  --patient-name "bob TEST" \
+  --patient-pms-id "FE261" \
+  --create-patient \
+  --create-initial-visit
+```
+
+Notes:
+
+- Default visit endpoint path is `/v1/visits`; override with `--visit-path` if your tenant uses a different route.
+- Include `--visit-type-id <ID>` when your API requires a visit type.
+
 For the owner/account context you provided:
 
 - Owner display: `INSTINCT TEST / Greg Test`
@@ -76,40 +116,42 @@ The script:
 3. Builds and prints the exact patient payload from `PatientPayloadBuilder`.
 4. Optionally calls `POST /v1/patients` when `--create-patient` is provided.
 
-If Instinct wants a handoff file instead of a live import, use:
+If you need the shortest path from auth to reminder counting, see:
 
-- [scripts/instinct_reminder_handoff.csv](/home/ggb66/dev/EVH/scripts/instinct_reminder_handoff.csv)
+- `docs/instinct-reminders-handoff.md`
 
-That CSV contains one row per importable reminder with:
+## Weight + alert ETL
 
-- Avimark client ID in `avimark_client`
-- patient identity
-- source reminder label
-- mapped Instinct reminder label
-- due date
-- Instinct lookup fields when they could be resolved automatically:
-  - `instinct_patient_id`
-  - `instinct_account_id`
-  - `resolution_status`
-  - `match_method`
-  - `match_confidence`
+For the current import pass, the live ETL only brings over:
 
-Lookup order:
+- patient `weight`
+- cleanly mapped Instinct `alertIds`
 
-1. Avimark client code, when it can be matched to an Instinct account.
-2. Owner name plus owner phone, as an account fallback.
-3. Patient name inside the matched account.
+It does **not** yet write reminders, vaccine history, or free-form notes.
 
-Phone number is used only to resolve the owner account, not as a patient-level match key.
+Use:
 
-Current export size:
+```bash
+.venv/bin/python scripts/instinct_alert_weight_etl.py \
+  --xlsx /home/ggb66/dev/EVH/Active_Clients_Alerts.xlsx \
+  --output-dir etl_logs/weight_alert_dry_run
+```
 
-- `6,745` reminder rows
-- `6,746` CSV lines including the header
+Or live apply:
 
-Official reference source:
+```bash
+.venv/bin/python scripts/instinct_alert_weight_etl.py \
+  --xlsx /home/ggb66/dev/EVH/Active_Clients_Alerts.xlsx \
+  --output-dir etl_logs/weight_alert_apply \
+  --apply \
+  --base-url https://partner.instinctvet.com \
+  --client-id "$INSTINCT_CLIENT_ID" \
+  --client-secret "$INSTINCT_CLIENT_SECRET"
+```
 
-- `docs/instinct-partner-fetch-account.md`
+Detailed findings, doc gaps, mapping rules, and ETL behavior are documented in:
+
+- `docs/instinct-weight-alert-etl.md`
 
 ## Active Patients CSV preflight (run only after test-account success)
 
@@ -134,3 +176,61 @@ Reminder import audit:
 - If the reminder payload does not identify the owning patient, the script emits `null` for `reminder_count` instead of a misleading `0`.
 
 If IDs are duplicated or missing, add a stable external patient ID column before bulk import.
+
+## Appointment contract notes
+
+The appointment endpoint surface has been captured in:
+
+- `docs/instinct-appointments-contract-notes.md`
+
+That note records the six endpoints you asked about and the one writable field the docs explicitly expose for `PATCH /v1/appointments/{appointment_id}`:
+
+- `isConfirmed`
+
+## Instinct sync runner
+
+For a broader Instinct feed dry-run that includes account and appointment normalization, use:
+
+```bash
+python scripts/instinct_sync_runner.py \
+  --base-url "https://partner.instinctvet.com" \
+  --token "$INSTINCT_TOKEN" \
+  --accounts \
+  --appointments \
+  --updated-since "2026-04-20T00:00:00Z" \
+  --state-file /tmp/evh-instinct-sync-state.json \
+  --export-json /tmp/evh-instinct-sync-export.json \
+  --fetch-types
+```
+
+This runner:
+
+- resumes from a JSON watermark file when provided
+- emits structured export records with idempotency keys
+- marks canceled appointments for review so downstream mirroring can choose the right action
+
+## Applying a patch cleanly on zsh / WSL
+
+If you ever get this error while applying a patch:
+
+`error: patch fragment without header at line ...`
+
+it usually means extra text was mixed into the patch body (for example, prompt/output lines) or the patch started after the `diff --git ...` header.
+
+Use this pattern so Git reads only the raw patch text:
+
+```bash
+cat > evh_changes.patch <<'PATCH'
+diff --git a/README.md b/README.md
+...patch lines...
+PATCH
+
+git apply --check evh_changes.patch
+git apply evh_changes.patch
+```
+
+Notes:
+
+- Keep `PATCH` alone on its own line (no spaces before/after).
+- Start at the first `diff --git` line.
+- Run `git apply --check` first to validate before applying.

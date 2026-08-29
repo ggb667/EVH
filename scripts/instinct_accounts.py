@@ -289,6 +289,9 @@ class InstinctAccountPatientAdapter:
             if not after:
                 break
 
+    def iter_patients_for_account_id(self, account_id: str):
+        yield from self.iter_patients_for_account(account_id)
+
     def _find_accounts_by_client_code(self, client_code: str) -> list[dict[str, Any]]:
         matches: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -326,27 +329,46 @@ class InstinctAccountPatientAdapter:
 
         return phone_matches or narrowed
 
+    def _account_matches_source_patient(self, account: dict[str, Any], source_patient: Any) -> bool:
+        normalized_name = normalize_lookup_text(source_patient.client_name)
+        account_name = normalize_lookup_text(account_display_name(account))
+        if normalized_name and account_name and normalized_name == account_name:
+            source_phone = normalize_phone_no(source_patient.phone_no)
+            account_phone = normalize_phone_no(
+                extract_phone_no((account.get("primaryContact") or {}).get("communicationDetails") or [])
+            )
+            if source_phone and account_phone:
+                return source_phone == account_phone
+            return True
+        return False
+
+    def _find_account_for_source_patient(self, source_patient: Any) -> Optional[dict[str, Any]]:
+        matches = self._find_accounts_by_client_code(normalize_text(source_patient.client))
+        if matches:
+            return matches[0]
+
+        source_name = normalize_text(source_patient.client_name)
+        if not source_name:
+            return None
+
+        candidate_accounts = list(self.iter_accounts({"limit": 100, "name": source_name}))
+        if not candidate_accounts:
+            return None
+
+        for account in candidate_accounts:
+            if self._account_matches_source_patient(account, source_patient):
+                return account
+
+        return candidate_accounts[0]
+
     def find_patient(self, source_patient: Any) -> dict[str, Any]:
-        accounts: list[dict[str, Any]] = []
-
-        if getattr(source_patient, "client", None):
-            accounts = self._find_accounts_by_client_code(source_patient.client)
-
-        if not accounts and getattr(source_patient, "client_name", None):
-            accounts = self._find_accounts_by_owner(source_patient.client_name, source_patient.phone_no)
-
-        if not accounts:
+        account = self._find_account_for_source_patient(source_patient)
+        if not account:
             raise RuntimeError(
                 f"Could not find Instinct account for client={source_patient.client!r} owner={source_patient.client_name!r}"
             )
 
-        if len(accounts) > 1:
-            account_ids = [account.get("id") for account in accounts]
-            raise RuntimeError(
-                f"Account lookup was ambiguous for client={source_patient.client!r} owner={source_patient.client_name!r}: {account_ids}"
-            )
-
-        account_id = accounts[0].get("id")
+        account_id = account.get("id")
         if not account_id:
             raise RuntimeError(f"Matched account is missing id for client={source_patient.client!r}")
 

@@ -95,4 +95,3 @@ Source docs reviewed:
 - Instinct exposes a clean appointment lifecycle surface for list, fetch, confirm, and cancel.
 - The update contract explicitly shows `isConfirmed` as the writable field in the docs.
 - The docs do not include JSON examples in the rendered pages I checked, so request and response field-level mapping still needs a live API response or OpenAPI source if we want an exact schema.
-- I probed `OPTIONS /v1/appointments` and `OPTIONS /v1/appointment-types` with the live partner token, but both returned `401 Unauthorized`; that does not prove a create route is absent, only that this token could not inspect supported methods.
