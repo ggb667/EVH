@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.gmail.daily_email_summary import render_markdown
 
 
-def test_render_markdown_uses_universal_mailto_links():
+def test_render_markdown_uses_gmail_thread_links():
     result = {
         "summary": "",
         "counts": {
@@ -41,6 +41,5 @@ def test_render_markdown_uses_universal_mailto_links():
 
     rendered = render_markdown(result, "newer_than:1d", 1)
 
-    assert "mail.google.com" not in rendered
-    assert "mailto:sender%40example.com?subject=Please%20call%20me" in rendered
-    assert "mailto:sender%40example.com?subject=Re%3A%20Please%20call%20me" in rendered
+    assert "https://mail.google.com/mail/u/0/#all/msg-1" in rendered
+    assert "https://mail.google.com/mail/u/0/#all/reply-1" in rendered

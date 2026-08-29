@@ -525,11 +525,8 @@ def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
             if email:
                 head += f" ({email})"
             if subject and message_id:
-                mailto_url = f"mailto:{quote(email)}?subject={quote(subject)}" if email else ""
-                if mailto_url:
-                    head += f" — [{subject}]({mailto_url})"
-                else:
-                    head += f" — {subject}"
+                gmail_url = f"https://mail.google.com/mail/u/0/#all/{message_id}"
+                head += f" — [{subject}]({gmail_url})"
             elif subject:
                 head += f" — {subject}"
             lines.append(head)
@@ -539,12 +536,8 @@ def render_markdown(result: dict[str, Any], query: str, count: int) -> str:
             if isinstance(reply, dict) and reply.get("message_id"):
                 reply_id = str(reply["message_id"])
                 reply_summary = _one_line(str(reply.get("summary", "")))
-                if email:
-                    reply_subject = quote(f"Re: {subject}" if subject else "Re:")
-                    reply_url = f"mailto:{quote(email)}?subject={reply_subject}"
-                    lines.append(f"    Reply: [View reply]({reply_url}) — {reply_summary}")
-                else:
-                    lines.append(f"    Reply: {reply_summary}")
+                reply_url = f"https://mail.google.com/mail/u/0/#all/{reply_id}"
+                lines.append(f"    Reply: [View reply]({reply_url}) — {reply_summary}")
 
     def render_group(unread: bool, prefix: str = "") -> None:
         for key in CATEGORY_KEYS:
