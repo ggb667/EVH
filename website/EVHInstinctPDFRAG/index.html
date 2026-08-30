@@ -49,6 +49,8 @@ body > *{
 h1{margin:0;font-size:28px;line-height:1.08}
 .sub{color:var(--muted);margin:0;max-width:900px;line-height:1.45}
 .meta{font-size:12px;line-height:1.35;color:#7a8490;text-align:right}
+.selection-meta{display:flex;flex-direction:column;gap:2px;align-items:flex-end}
+.selection-meta .item{white-space:nowrap}
 .build-line{white-space:nowrap;font-size:11px;line-height:1.25;margin-left:auto;text-align:right}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
 .selector-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
@@ -151,8 +153,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
         <div class="build-line">Build: __EVH_BUILD_STAMP__</div>
       </div>
       <p class="sub">Select a client and patient, then ask questions in a quiet transcript — meaning the conversation stays in one place and just grows downward instead of reshuffling the page. Each answer keeps its own citations.</p>
-    </div>
-    <div class="meta">
+  </div>
+  <div class="meta">
+      <div id="selection-meta" class="selection-meta" aria-live="polite"></div>
     </div>
   </div>
 
@@ -218,6 +221,24 @@ const state={
   conversationByScope:new Map(),
   footerIndex:0
 };
+
+function updateSelectionMeta(){
+  const meta=$("selection-meta");
+  if(!meta)return;
+  meta.replaceChildren();
+  if(state.client){
+    const clientLine=document.createElement("div");
+    clientLine.className="item";
+    clientLine.textContent=`Client ID: ${state.client.id || "—"}`;
+    meta.appendChild(clientLine);
+  }
+  if(state.pet){
+    const patientLine=document.createElement("div");
+    patientLine.className="item";
+    patientLine.textContent=`Patient ID: ${state.pet.id || "—"}`;
+    meta.appendChild(patientLine);
+  }
+}
 
 const footerMessages=[
   "EVH Patient Record Assistant © 2026 Gregory Garrett Bishop",
@@ -736,6 +757,7 @@ function clearPatientSelection(){
   $("pet-input").disabled=!state.client;
   $("pet-input").placeholder=state.client?"Type a patient name":"Select a client first";
   $("composer").style.display=state.client ? "" : "none";
+  updateSelectionMeta();
   updateAsk();
 }
 
@@ -755,6 +777,7 @@ function clearClientSelection(){
   $("pet-input").disabled=true;
   $("pet-input").placeholder="Select a client first";
   $("composer").style.display="none";
+  updateSelectionMeta();
   clearTranscript();
   updateAsk();
 }
@@ -801,6 +824,7 @@ function choosePet(item){
   state.pet=item;
   $("pet-input").value=item.label||"";
   $("pet-status").textContent=patientDisplayText(item);
+  updateSelectionMeta();
   restoreConversationFor(state.client.id,item.id);
   if(!hasConversationForSelection(state.client.id,item.id)){
     clearTranscript();

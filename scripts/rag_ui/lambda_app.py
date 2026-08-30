@@ -223,7 +223,8 @@ def _selected_catalog_records(catalog, client_id: str, pet_id: str) -> tuple[dic
 def _fetch_instinct_financials(client_record: dict[str, object]) -> dict[str, object]:
     name = _normalize_text(client_record.get("name"))
     pims_code = _normalize_text(client_record.get("pims_code"))
-    if not name and not pims_code:
+    client_id = _normalize_text(client_record.get("id"))
+    if not name and not pims_code and not client_id:
         return {}
     query = """
 query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: Boolean) {
@@ -253,13 +254,26 @@ query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: B
 }
 """.strip()
     variables = {
-        "params": {"q": name or pims_code, "includeZeroBalances": False, "perPage": 25},
+        "params": {"q": name or pims_code or client_id, "includeZeroBalances": False, "perPage": 25},
         "overdueInvoicesOnly": False,
     }
+    def _account_financials(account: dict[str, object]) -> dict[str, object]:
+        running = account.get("runningLedger") or {}
+        return {
+            "account_id": _normalize_text(account.get("id")),
+            "pims_code": _normalize_text(account.get("pimsCode")),
+            "label": _normalize_text(account.get("label")) or _normalize_text(client_record.get("name")),
+            "number_of_patients": account.get("numberOfPatients"),
+            "balance": running.get("balance"),
+            "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
+            "aged_balances": running.get("agedBalances") or {},
+            "invoices_to_review": running.get("invoicesToReview") or [],
+        }
+
     data = _instinct_graphql_json(query, variables)
     accounts = (((data.get("data") or {}).get("accounts")) or [])
     if not isinstance(accounts, list):
-        return {}
+        accounts = []
     target_id = _normalize_text(client_record.get("id"))
     target_pims = _normalize_text(client_record.get("pims_code"))
     target_name = _normalize_text(client_record.get("name")).lower()
@@ -281,16 +295,97 @@ query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: B
         selected = accounts[0]
     if not isinstance(selected, dict):
         return {}
-    running = selected.get("runningLedger") or {}
+    financials = _account_financials(selected)
+    if financials.get("balance") is not None:
+        return financials
+
+    account_id = financials.get("account_id")
+    if not account_id:
+        return financials
+    exact_query = """
+query getAccountLedger($id: ID!) {
+  account(id: $id) {
+    id
+    pimsCode
+    label
+    numberOfPatients
+    runningLedger(summary: true, overdueInvoicesOnly: false) {
+      balance
+      unappliedPaymentAmount
+      invoicesToReview { id balance }
+      agedBalances { current over30 over60 over90 over120 }
+    }
+  }
+}
+""".strip()
+    exact_data = _instinct_graphql_json(exact_query, {"id": account_id})
+    exact_account = ((exact_data.get("data") or {}).get("account"))
+    if isinstance(exact_account, dict):
+        exact_financials = _account_financials(exact_account)
+        if exact_financials.get("balance") is not None:
+            return exact_financials
+    return financials
+
+
+def _instinct_financial_document(client_record: dict[str, object], financials: dict[str, object]) -> dict[str, object]:
+    account_id = _normalize_text(financials.get("account_id") or client_record.get("id"))
+    title = "Instinct Current Account Summary and Financials"
+    source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{account_id}" if account_id else ""
+    lines = [
+        f"Client: {_normalize_text(client_record.get('name'))}",
+        f"Client ID: {account_id}",
+        f"PIMS Code: {_normalize_text(financials.get('pims_code') or client_record.get('pims_code'))}",
+        f"Account Label: {_normalize_text(financials.get('label') or client_record.get('name'))}",
+        f"Balance: {_normalize_text(financials.get('balance'))}",
+        f"Unapplied Payment Amount: {_normalize_text(financials.get('unapplied_payment_amount'))}",
+        f"Aged Balances: {json.dumps(financials.get('aged_balances') or {}, sort_keys=True)}",
+        f"Invoices To Review: {json.dumps(financials.get('invoices_to_review') or [], sort_keys=True)}",
+    ]
     return {
-        "account_id": _normalize_text(selected.get("id")),
-        "pims_code": _normalize_text(selected.get("pimsCode")),
-        "label": _normalize_text(selected.get("label")) or _normalize_text(client_record.get("name")),
-        "number_of_patients": selected.get("numberOfPatients"),
-        "balance": running.get("balance"),
-        "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
-        "aged_balances": running.get("agedBalances") or {},
-        "invoices_to_review": running.get("invoicesToReview") or [],
+        "document_id": f"instinct-account-{account_id}" if account_id else "instinct-account",
+        "document_title": title,
+        "page_label": "Live Account Summary",
+        "page_number": 1,
+        "source_uri": source_uri,
+        "source_page_url": source_uri,
+        "snippet": "\n".join(lines),
+        "confidence": 1.0,
+        "source_type": "instinct",
+    }
+
+
+def _instinct_patient_document(
+    client_record: dict[str, object],
+    patient_record: dict[str, object],
+    financials: dict[str, object] | None = None,
+) -> dict[str, object]:
+    patient_id = _normalize_text(patient_record.get("id"))
+    client_id = _normalize_text(client_record.get("id"))
+    title = "Instinct Current Patient Information"
+    source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
+    lines = [
+        f"Patient: {_normalize_text(patient_record.get('name'))}",
+        f"Patient ID: {patient_id}",
+        f"Client: {_normalize_text(client_record.get('name'))}",
+        f"Client ID: {client_id}",
+        f"Species: {_normalize_text(patient_record.get('species'))}",
+        f"Breed: {_normalize_text(patient_record.get('breed'))}",
+        f"Birthdate: {_normalize_text(patient_record.get('birthdate'))}",
+        f"Owner Name: {_normalize_text(patient_record.get('owner_name') or client_record.get('name'))}",
+        f"PIMS Code: {_normalize_text(patient_record.get('pims_code'))}",
+    ]
+    if financials and _normalize_text(financials.get("balance")):
+        lines.append(f"Linked Account Balance: {_normalize_text(financials.get('balance'))}")
+    return {
+        "document_id": f"instinct-patient-{patient_id}" if patient_id else "instinct-patient",
+        "document_title": title,
+        "page_label": "Live Patient Information",
+        "page_number": 1,
+        "source_uri": source_uri,
+        "source_page_url": source_uri,
+        "snippet": "\n".join(lines),
+        "confidence": 1.0,
+        "source_type": "instinct",
     }
 
 
@@ -998,6 +1093,9 @@ def _answer_messages(
         f"{practice_stack_context}\n"
         "Patient facts like species, breed, sex, birthdate, owner, and microchip stay authoritative only from the selected patient record and retrieved chart evidence.\n"
         "Selected patient metadata is authoritative context and may be used even when no retrieved document says the same thing verbatim.\n"
+        "Selected financial context from Instinct is authoritative live billing truth whenever it is present.\n"
+        "If selected_context.financials contains a balance, account totals, or aged balances, prefer that over any PDF or retrieved-document evidence.\n"
+        "Never replace or hedge away live Instinct billing data with older PDF snippets when selected_context.financials is populated.\n"
         "Conversation history and its cited evidence are part of the same patient conversation, not independent prompts.\n"
         "Distinguish these evidence levels explicitly when relevant:\n"
         "- explicit structured fact\n"
@@ -1346,6 +1444,14 @@ def _build_selected_context_bundle(
             f"{time.perf_counter() - financials_started:.3f} status=ok has_balance={financials.get('balance') is not None}",
             flush=True,
         )
+        print(
+            "[RAG_TIMING] selected_context_financials_payload "
+            f"keys={sorted(list(financials.keys()))} "
+            f"account_id={financials.get('account_id')} "
+            f"balance={financials.get('balance')} "
+            f"aged_current={(financials.get('aged_balances') or {}).get('current')}",
+            flush=True,
+        )
     except Exception as exc:
         print(f"[RAG_TIMING] selected_context_financials_error type={type(exc).__name__} message={exc}", flush=True)
     try:
@@ -1373,7 +1479,11 @@ def _build_selected_context_bundle(
         "patient": patient_record,
         "financials": financials,
         "reminders": reminders,
-        "documents": patient_documents,
+        "documents": [
+            _instinct_financial_document(client_record, financials),
+            _instinct_patient_document(client_record, patient_record, financials),
+            *patient_documents,
+        ],
     }
     merged = _merge_selected_context(selected_context, patient_context, selected_context.get("documents") or [])
     merged["catalog_status"] = catalog_status
@@ -1407,6 +1517,14 @@ def _serve_rag_answer(event: dict) -> dict:
         selected_context = _merge_selected_context(cached_selected_context, patient_context, cached_selected_context.get("documents") or [])
         catalog_status = cached_selected_context.get("catalog_status") or {}
         selected_documents = selected_context.get("documents") or []
+        print(
+            "[RAG_TIMING] answer_selected_context "
+            f"client_id={selected_context.get('client', {}).get('id')} "
+            f"patient_id={selected_context.get('patient', {}).get('id')} "
+            f"financial_keys={sorted(list((selected_context.get('financials') or {}).keys()))} "
+            f"financial_balance={(selected_context.get('financials') or {}).get('balance')}",
+            flush=True,
+        )
         retrieval_started = time.perf_counter()
         context_chunks, retrieval_timing, retrieval_plan = _execute_planned_retrieval(question, client_id, pet_id)
         retrieval_elapsed = time.perf_counter() - retrieval_started
