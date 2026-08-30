@@ -691,6 +691,7 @@ function restoreConversationFor(clientId,patientId){
 
 function renderTranscript(){
   const transcript=$("transcript");
+  if(!transcript)return;
   transcript.replaceChildren();
   for(const turn of state.turns){
     transcript.appendChild(renderTurn(turn));
@@ -700,6 +701,7 @@ function renderTranscript(){
 function ensureComposerPlacement(){
   const composer=$("composer");
   const transcript=$("transcript");
+  if(!composer || !transcript || !composer.parentElement || !transcript.parentElement)return;
   if(composer && transcript && composer.previousElementSibling !== transcript){
     transcript.parentElement.insertBefore(composer, transcript.nextSibling);
   }
@@ -1126,6 +1128,7 @@ function appendTurn(turn){
   state.turns.push(turn);
   persistCurrentConversation();
   const transcript=$("transcript");
+  if(!transcript)return;
   if(transcript.querySelector(".empty"))transcript.replaceChildren();
 
   transcript.appendChild(renderTurn(turn));
