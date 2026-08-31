@@ -829,6 +829,26 @@ def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict
     by_id = {str(doc.get("document_id") or ""): doc for doc in documents}
     seen: set[tuple[str, int]] = set()
     references: list[dict] = []
+    for doc in documents:
+        document_id = str(doc.get("document_id") or "").strip()
+        if not document_id:
+            continue
+        try:
+            page_number = int(doc.get("page_number") or doc.get("pageNumber") or doc.get("page") or 1)
+        except (TypeError, ValueError):
+            page_number = 1
+        key = (document_id, page_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        references.append(
+            {
+                "document_id": document_id,
+                "page_number": page_number,
+                "document_title": doc.get("document_title") or doc.get("documentTitle") or doc.get("page_label") or "Source PDF",
+                "source_uri": doc.get("source_uri") or doc.get("source_page_url") or "",
+            }
+        )
     for hit in chunks:
         document_id = str(hit.get("document_id") or "").strip()
         page_number = int(hit.get("page_number") or 0)
