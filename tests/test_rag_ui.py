@@ -310,9 +310,9 @@ def test_fetch_instinct_financials_tries_exact_uuid_before_search(monkeypatch):
 def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
     captured = {}
 
-    def fake_get_json(path, params=None):
-        captured["path"] = path
-        captured["params"] = params or {}
+    def fake_graphql(query, variables=None):
+        captured["query"] = query
+        captured["variables"] = variables or {}
         return {
             "data": {
                 "listPatientReminders": {
@@ -342,15 +342,15 @@ def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
             }
         }
 
-    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_get_json", fake_get_json)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
 
     reminders = lambda_app._fetch_instinct_reminders(
         {"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "Deborah Burchill", "pims_code": "8762"},
         {"id": "11525", "name": "Emmett Bleu (#4) Burchill"},
     )
 
-    assert captured["path"] == "/v1/reminders"
-    assert captured["params"] == {"limit": "100", "pageDirection": "after"}
+    assert "getPatientRemindersQuery" in captured["query"]
+    assert captured["variables"] == {"params": {"filters": {}, "patientId": "11525"}}
     assert [rem["title"] for rem in reminders] == ["Heartworm Prevention", "Flea / Tick / Heartworm Prevention", "Librela Injection"]
 
 

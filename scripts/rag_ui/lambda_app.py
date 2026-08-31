@@ -421,13 +421,49 @@ def _instinct_patient_document(
 
 
 def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: dict[str, object]) -> list[dict[str, object]]:
-    query = _normalize_text(patient_record.get("name")) or _normalize_text(client_record.get("name")) or _normalize_text(client_record.get("pims_code"))
     patient_id = _normalize_text(patient_record.get("id"))
-    client_id = _normalize_text(client_record.get("id"))
-    if not query:
+    if not patient_id:
         return []
     try:
-        data = _instinct_get_json("/v1/reminders", {"limit": "100", "pageDirection": "after"})
+        data = _instinct_graphql_json(
+            """
+query getPatientRemindersQuery($params: ListPatientReminderParams!) {
+  listPatientReminders(params: $params) {
+    product {
+      lastAdministeredOn
+      deactivationNotes
+      id
+      isActive
+      location { id label }
+      notes
+      reminderLabel { id label }
+      remindOn
+      treatment {
+        id
+        treatmentNotes { id treatmentNote }
+        orderRevision { provider { id } }
+      }
+    }
+    vaccine {
+      lastAdministeredOn
+      deactivationNotes
+      id
+      isActive
+      location { id label }
+      notes
+      reminderLabel { id label }
+      remindOn
+      treatment {
+        id
+        treatmentNotes { id treatmentNote }
+        orderRevision { provider { id } }
+      }
+    }
+  }
+}
+""".strip(),
+            {"params": {"filters": {}, "patientId": patient_id}},
+        )
     except Exception:
         return []
     rows: list[dict[str, object]] = []
@@ -438,63 +474,25 @@ def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: 
                 value = grouped.get(key)
                 if isinstance(value, list):
                     rows.extend([row for row in value if isinstance(row, dict)])
-        for key in ("reminders", "data", "items", "results"):
-            value = data.get(key)
-            if isinstance(value, list):
-                rows.extend([row for row in value if isinstance(row, dict)])
-                break
-    elif isinstance(data, list):
-        rows = [row for row in data if isinstance(row, dict)]
     if not rows:
         return []
-    lowered = query.lower()
-    filtered: list[dict[str, object]] = []
-    for row in rows:
-        haystack = " ".join(
-            _normalize_text(row.get(key))
-            for key in (
-                "title",
-                "name",
-                "label",
-                "patientName",
-                "patient_name",
-                "accountName",
-                "account_name",
-                "description",
-                "patientId",
-                "patient_id",
-                "accountId",
-                "account_id",
-                "clientId",
-                "client_id",
-            )
-        ).lower()
-        if patient_id and patient_id in haystack:
-            filtered.append(row)
-            continue
-        if client_id and client_id in haystack:
-            filtered.append(row)
-            continue
-        if lowered and lowered in haystack:
-            filtered.append(row)
-    if filtered:
-        rows = filtered
     reminders: list[dict[str, object]] = []
-    for row in rows[:10]:
+    for row in rows:
         reminders.append(
             {
                 "id": _normalize_text(row.get("id") or row.get("uuid")),
-                "title": _normalize_text(row.get("title") or row.get("name") or row.get("label")),
+                "title": _normalize_text(
+                    row.get("title")
+                    or row.get("name")
+                    or row.get("label")
+                    or ((row.get("reminderLabel") or {}) if isinstance(row.get("reminderLabel"), dict) else {}).get("label")
+                ),
                 "type": _normalize_text(row.get("type") or row.get("reminderType") or row.get("category")),
                 "due_date": _normalize_text(row.get("dueAt") or row.get("dueDate") or row.get("due")),
                 "status": _normalize_text(row.get("status") or row.get("state") or row.get("reminderStatus")),
             }
         )
-        if not reminders[-1]["title"]:
-            reminder_label = row.get("reminderLabel") or {}
-            if isinstance(reminder_label, dict):
-                reminders[-1]["title"] = _normalize_text(reminder_label.get("label"))
-    return reminders
+    return reminders[:20]
 
 
 def _create_chart_file_url(chart_id: str, inline: bool = True) -> str:
