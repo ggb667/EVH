@@ -226,7 +226,39 @@ def _fetch_instinct_financials(client_record: dict[str, object]) -> dict[str, ob
     client_id = _normalize_text(client_record.get("id"))
     if not name and not pims_code and not client_id:
         return {}
-    query = """
+    def _account_financials(account: dict[str, object]) -> dict[str, object]:
+        running = account.get("runningLedger") or {}
+        return {
+            "account_id": _normalize_text(account.get("id")),
+            "pims_code": _normalize_text(account.get("pimsCode")),
+            "label": _normalize_text(account.get("label")) or _normalize_text(client_record.get("name")),
+            "number_of_patients": account.get("numberOfPatients"),
+            "balance": running.get("balance"),
+            "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
+            "aged_balances": running.get("agedBalances") or {},
+            "invoices_to_review": running.get("invoicesToReview") or [],
+        }
+
+    target_id = _normalize_text(client_record.get("id"))
+    target_pims = _normalize_text(client_record.get("pims_code"))
+    target_name = _normalize_text(client_record.get("name")).lower()
+    exact_query = """
+query getAccountLedger($id: ID!) {
+  account(id: $id) {
+    id
+    pimsCode
+    label
+    numberOfPatients
+    runningLedger(summary: true, overdueInvoicesOnly: false) {
+      balance
+      unappliedPaymentAmount
+      invoicesToReview { id balance }
+      agedBalances { current over30 over60 over90 over120 }
+    }
+    }
+}
+""".strip()
+    search_query = """
 query searchAccountsIndexFinancials($params: SearchAccountIndexParams, $overdueInvoicesOnly: Boolean) {
   searchAccountsIndex(params: $params) {
     entries {
@@ -258,78 +290,64 @@ query searchAccountsIndexFinancials($params: SearchAccountIndexParams, $overdueI
   }
 }
 """.strip()
-    variables = {
-        "params": {"q": name or pims_code or client_id, "perPage": 50},
-        "overdueInvoicesOnly": False,
-    }
-    def _account_financials(account: dict[str, object]) -> dict[str, object]:
-        running = account.get("runningLedger") or {}
-        return {
-            "account_id": _normalize_text(account.get("id")),
-            "pims_code": _normalize_text(account.get("pimsCode")),
-            "label": _normalize_text(account.get("label")) or _normalize_text(client_record.get("name")),
-            "number_of_patients": account.get("numberOfPatients"),
-            "balance": running.get("balance"),
-            "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
-            "aged_balances": running.get("agedBalances") or {},
-            "invoices_to_review": running.get("invoicesToReview") or [],
-        }
 
-    data = _instinct_graphql_json(query, variables)
-    accounts = ((((data.get("data") or {}).get("searchAccountsIndex")) or {}).get("entries")) or []
-    if not isinstance(accounts, list):
-        accounts = []
-    target_id = _normalize_text(client_record.get("id"))
-    target_pims = _normalize_text(client_record.get("pims_code"))
-    target_name = _normalize_text(client_record.get("name")).lower()
-    selected = None
-    for account in accounts:
-        if not isinstance(account, dict):
-            continue
-        if target_id and _normalize_text(account.get("id")) == target_id:
-            selected = account
-            break
-        if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
-            selected = account
-            break
-        label = _normalize_text(account.get("label")).lower()
-        if target_name and (label == target_name or target_name in label):
-            selected = account
-            break
-    if selected is None and accounts:
-        selected = accounts[0]
-    if not isinstance(selected, dict):
-        return {}
-    financials = _account_financials(selected)
-    if financials.get("balance") is not None:
-        return financials
+    def _try_exact_account_lookup(account_id: str) -> dict[str, object] | None:
+        if not account_id:
+            return None
+        exact_data = _instinct_graphql_json(exact_query, {"id": account_id})
+        exact_account = ((exact_data.get("data") or {}).get("account"))
+        if isinstance(exact_account, dict):
+            exact_financials = _account_financials(exact_account)
+            if exact_financials.get("balance") is not None:
+                return exact_financials
+        return None
 
-    account_id = financials.get("account_id")
-    if not account_id:
-        return financials
-    exact_query = """
-query getAccountLedger($id: ID!) {
-  account(id: $id) {
-    id
-    pimsCode
-    label
-    numberOfPatients
-    runningLedger(summary: true, overdueInvoicesOnly: false) {
-      balance
-      unappliedPaymentAmount
-      invoicesToReview { id balance }
-      agedBalances { current over30 over60 over90 over120 }
-    }
-  }
-}
-""".strip()
-    exact_data = _instinct_graphql_json(exact_query, {"id": account_id})
-    exact_account = ((exact_data.get("data") or {}).get("account"))
-    if isinstance(exact_account, dict):
-        exact_financials = _account_financials(exact_account)
-        if exact_financials.get("balance") is not None:
-            return exact_financials
-    return financials
+    def _try_search_lookup(query_value: str) -> dict[str, object] | None:
+        if not query_value:
+            return None
+        data = _instinct_graphql_json(
+            search_query,
+            {"params": {"q": query_value, "perPage": 50}, "overdueInvoicesOnly": False},
+        )
+        accounts = ((((data.get("data") or {}).get("searchAccountsIndex")) or {}).get("entries")) or []
+        if not isinstance(accounts, list):
+            return None
+        selected = None
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            if target_id and _normalize_text(account.get("id")) == target_id:
+                selected = account
+                break
+            if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
+                selected = account
+                break
+            label = _normalize_text(account.get("label")).lower()
+            if target_name and (label == target_name or target_name in label):
+                selected = account
+                break
+        if selected is None and accounts:
+            selected = accounts[0]
+        if not isinstance(selected, dict):
+            return None
+        financials = _account_financials(selected)
+        if financials.get("balance") is not None:
+            return financials
+        if financials.get("account_id"):
+            return _try_exact_account_lookup(str(financials["account_id"]))
+        return None
+
+    for exact_candidate in (target_id, target_pims):
+        found = _try_exact_account_lookup(exact_candidate)
+        if found is not None:
+            return found
+
+    for search_candidate in (target_id, target_pims, target_name):
+        found = _try_search_lookup(search_candidate)
+        if found is not None:
+            return found
+
+    return {}
 
 
 def _instinct_financial_document(client_record: dict[str, object], financials: dict[str, object]) -> dict[str, object]:

@@ -226,6 +226,18 @@ def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch)
 
     def fake_graphql(query, variables=None):
         calls.append((query, variables or {}))
+        if "getAccountLedger" in query:
+            return {
+                "data": {
+                    "account": {
+                        "id": "client-1",
+                        "pimsCode": "8762",
+                        "label": "Deborah Burchill",
+                        "numberOfPatients": 9,
+                        "runningLedger": {"balance": 207.24, "agedBalances": {"current": 207.24, "over30": 0.0, "over60": 0.0, "over90": 0.0, "over120": 0.0}},
+                    }
+                }
+            }
         if "searchAccountsIndexFinancials" in query:
             return {
                 "data": {
@@ -245,7 +257,7 @@ def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch)
                     }
                 }
             }
-        raise AssertionError("unexpected fallback ledger query")
+        raise AssertionError("unexpected graphql query")
 
     monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
 
@@ -256,7 +268,42 @@ def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch)
     assert financials["balance"] == 207.24
     assert financials["aged_balances"]["current"] == 207.24
     assert len(calls) == 1
-    assert "searchAccountsIndexFinancials" in calls[0][0]
+    assert "getAccountLedger" in calls[0][0]
+
+
+@pytest.mark.unit
+def test_fetch_instinct_financials_tries_exact_uuid_before_search(monkeypatch):
+    calls = []
+
+    def fake_graphql(query, variables=None):
+        calls.append((query, variables or {}))
+        if "getAccountLedger" in query:
+            return {
+                "data": {
+                    "account": {
+                        "id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c",
+                        "pimsCode": "8762",
+                        "label": "Deborah Burchill",
+                        "numberOfPatients": 9,
+                        "runningLedger": {
+                            "balance": 207.24,
+                            "unappliedPaymentAmount": None,
+                            "invoicesToReview": [],
+                            "agedBalances": {"current": 207.24, "over30": 0.0, "over60": 0.0, "over90": 0.0, "over120": 0.0},
+                        },
+                    }
+                }
+            }
+        raise AssertionError("unexpected search query; exact UUID lookup should win first")
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
+
+    financials = lambda_app._fetch_instinct_financials({"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "", "pims_code": ""})
+
+    assert financials["account_id"] == "17579316-5a67-41e4-90ef-0ae73f4b9c9c"
+    assert financials["balance"] == 207.24
+    assert len(calls) == 1
+    assert "getAccountLedger" in calls[0][0]
 
 
 #
