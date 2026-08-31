@@ -227,34 +227,39 @@ def _fetch_instinct_financials(client_record: dict[str, object]) -> dict[str, ob
     if not name and not pims_code and not client_id:
         return {}
     query = """
-query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: Boolean) {
-  accounts(params: $params) {
-    id
-    pimsCode
-    label
-    isTestAccount
-    numberOfPatients
-    accountAlerts { id }
-    primaryContact {
-      communicationDetails {
-        type
-        label
-        value
-        displayValue
-        isPreferred
+query searchAccountsIndexFinancials($params: SearchAccountIndexParams, $overdueInvoicesOnly: Boolean) {
+  searchAccountsIndex(params: $params) {
+    entries {
+      id
+      pimsCode
+      label
+      isTestAccount
+      numberOfPatients
+      accountAlerts { id label }
+      primaryContact {
+        id
+        nameFirst
+        nameLast
+        communicationDetails {
+          id
+          type
+          value
+          label
+          displayValue
+          isPreferred
+        }
+      }
+      runningLedger(overdueInvoicesOnly: $overdueInvoicesOnly) {
+        balance
+        agedBalances { current over30 over60 over90 over120 }
       }
     }
-    runningLedger(summary: true, overdueInvoicesOnly: $overdueInvoicesOnly) {
-      balance
-      unappliedPaymentAmount
-      invoicesToReview { id balance }
-      agedBalances { current over30 over60 over90 over120 }
-    }
+    found
   }
 }
 """.strip()
     variables = {
-        "params": {"q": name or pims_code or client_id, "includeZeroBalances": False, "perPage": 25},
+        "params": {"q": name or pims_code or client_id, "perPage": 50},
         "overdueInvoicesOnly": False,
     }
     def _account_financials(account: dict[str, object]) -> dict[str, object]:
@@ -271,7 +276,7 @@ query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: B
         }
 
     data = _instinct_graphql_json(query, variables)
-    accounts = (((data.get("data") or {}).get("accounts")) or [])
+    accounts = ((((data.get("data") or {}).get("searchAccountsIndex")) or {}).get("entries")) or []
     if not isinstance(accounts, list):
         accounts = []
     target_id = _normalize_text(client_record.get("id"))

@@ -220,6 +220,45 @@ def test_catalog_search_filters_after_three_chars(tmp_path, monkeypatch):
     assert [item["label"] for item in catalog.search_pets("client-1", "mil")] == ["Milo"]
 
 
+@pytest.mark.unit
+def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch):
+    calls = []
+
+    def fake_graphql(query, variables=None):
+        calls.append((query, variables or {}))
+        if "searchAccountsIndexFinancials" in query:
+            return {
+                "data": {
+                    "searchAccountsIndex": {
+                        "entries": [
+                            {
+                                "id": "client-1",
+                                "pimsCode": "8762",
+                                "label": None,
+                                "isTestAccount": False,
+                                "numberOfPatients": 9,
+                                "accountAlerts": [],
+                                "primaryContact": {"id": "contact-1", "nameFirst": "Deborah", "nameLast": "Burchill", "communicationDetails": []},
+                                "runningLedger": {"balance": 207.24, "agedBalances": {"current": 207.24, "over30": 0.0, "over60": 0.0, "over90": 0.0, "over120": 0.0}},
+                            }
+                        ]
+                    }
+                }
+            }
+        raise AssertionError("unexpected fallback ledger query")
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
+
+    financials = lambda_app._fetch_instinct_financials({"id": "client-1", "name": "Deborah Burchill", "pims_code": "8762"})
+
+    assert financials["account_id"] == "client-1"
+    assert financials["pims_code"] == "8762"
+    assert financials["balance"] == 207.24
+    assert financials["aged_balances"]["current"] == 207.24
+    assert len(calls) == 1
+    assert "searchAccountsIndexFinancials" in calls[0][0]
+
+
 #
 # Outer-shell tests: catalog loading and UI/API smoke.
 #
@@ -1166,7 +1205,6 @@ def test_index_uses_request_driven_search_lifecycle():
     assert 'clearClientMenu()' in html
 
 
-@pytest.mark.integration
 @pytest.fixture(scope="module")
 def live_instinct_catalog():
     _ensure_instinct_credentials_from_secrets_manager()
