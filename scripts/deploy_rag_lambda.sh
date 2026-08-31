@@ -73,6 +73,7 @@ for arc, src in [
     ("scripts/rag_ui/catalog.py", package_root / "scripts/rag_ui/catalog.py"),
     ("scripts/rag_ui/__init__.py", package_root / "scripts/rag_ui/__init__.py"),
     ("scripts/rag_ui/README.md", package_root / "scripts/rag_ui/README.md"),
+    ("website/EVHInstinctPDFRAG/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
     ("scripts/rag_ui/static/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
 ]:
     dest = staging / arc

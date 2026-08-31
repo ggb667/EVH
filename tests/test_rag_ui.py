@@ -947,6 +947,7 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
         pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
     )
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setenv("TOKEN", "test-token")
     monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [
         {"document_id": "doc-x", "document_title": "Chart File", "source_page_url": "https://example.test/doc-x#page=1"}
     ])
@@ -986,7 +987,9 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
     payload = json.loads(response["body"])
     assert response["statusCode"] == 200
     assert payload["answer"] == "All set."
-    assert captured["kwargs"]["selected_context"]["documents"][0]["document_id"] == "doc-x"
+    docs = captured["kwargs"]["selected_context"]["documents"]
+    assert docs[0]["document_id"] == "instinct-account-client-1"
+    assert any(doc["document_id"] == "doc-x" for doc in docs)
 
 
 @pytest.mark.integration
