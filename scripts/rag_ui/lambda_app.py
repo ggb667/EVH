@@ -381,11 +381,19 @@ def _instinct_patient_document(
     client_record: dict[str, object],
     patient_record: dict[str, object],
     financials: dict[str, object] | None = None,
+    *,
+    visit_id: str | None = None,
 ) -> dict[str, object]:
     patient_id = _normalize_text(patient_record.get("id"))
     client_id = _normalize_text(client_record.get("id"))
     title = "Instinct Current Patient Information"
-    source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
+    visit_id = _normalize_text(visit_id)
+    if patient_id and visit_id:
+        source_uri = f"https://app.instinctvet.cloud/#/patient/{patient_id}/charts?visitId={visit_id}"
+    elif patient_id:
+        source_uri = f"https://app.instinctvet.cloud/#/patient/{patient_id}"
+    else:
+        source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
     lines = [
         f"Patient: {_normalize_text(patient_record.get('name'))}",
         f"Patient ID: {patient_id}",
@@ -414,18 +422,26 @@ def _instinct_patient_document(
 
 def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: dict[str, object]) -> list[dict[str, object]]:
     query = _normalize_text(patient_record.get("name")) or _normalize_text(client_record.get("name")) or _normalize_text(client_record.get("pims_code"))
+    patient_id = _normalize_text(patient_record.get("id"))
+    client_id = _normalize_text(client_record.get("id"))
     if not query:
         return []
     try:
-        data = _instinct_get_json("/v1/reminders", {"limit": "50", "pageDirection": "after"})
+        data = _instinct_get_json("/v1/reminders", {"limit": "100", "pageDirection": "after"})
     except Exception:
         return []
     rows: list[dict[str, object]] = []
     if isinstance(data, dict):
+        grouped = (data.get("data") or {}).get("listPatientReminders")
+        if isinstance(grouped, dict):
+            for key in ("product", "vaccine"):
+                value = grouped.get(key)
+                if isinstance(value, list):
+                    rows.extend([row for row in value if isinstance(row, dict)])
         for key in ("reminders", "data", "items", "results"):
             value = data.get(key)
             if isinstance(value, list):
-                rows = [row for row in value if isinstance(row, dict)]
+                rows.extend([row for row in value if isinstance(row, dict)])
                 break
     elif isinstance(data, list):
         rows = [row for row in data if isinstance(row, dict)]
@@ -436,8 +452,29 @@ def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: 
     for row in rows:
         haystack = " ".join(
             _normalize_text(row.get(key))
-            for key in ("title", "name", "label", "patientName", "patient_name", "accountName", "account_name", "description")
+            for key in (
+                "title",
+                "name",
+                "label",
+                "patientName",
+                "patient_name",
+                "accountName",
+                "account_name",
+                "description",
+                "patientId",
+                "patient_id",
+                "accountId",
+                "account_id",
+                "clientId",
+                "client_id",
+            )
         ).lower()
+        if patient_id and patient_id in haystack:
+            filtered.append(row)
+            continue
+        if client_id and client_id in haystack:
+            filtered.append(row)
+            continue
         if lowered and lowered in haystack:
             filtered.append(row)
     if filtered:
@@ -453,6 +490,10 @@ def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: 
                 "status": _normalize_text(row.get("status") or row.get("state") or row.get("reminderStatus")),
             }
         )
+        if not reminders[-1]["title"]:
+            reminder_label = row.get("reminderLabel") or {}
+            if isinstance(reminder_label, dict):
+                reminders[-1]["title"] = _normalize_text(reminder_label.get("label"))
     return reminders
 
 
@@ -566,6 +607,8 @@ def _selected_patient_context_from_event(event: dict) -> dict[str, str]:
         ("owner_name", "owner_name"),
         ("pims_code", "pims_code"),
         ("microchip_id", "microchip_id"),
+        ("visit_id", "visit_id"),
+        ("visitId", "visitId"),
     ):
         if not merged.get(key):
             value = params.get(fallback_key) or params.get(fallback_key.lower()) or ""
@@ -1426,6 +1469,7 @@ def _build_selected_context_bundle(
 ) -> dict[str, object]:
     patient_context = patient_context or {}
     selected_context_hint = selected_context_hint or {}
+    visit_id = str(patient_context.get("visit_id") or patient_context.get("visitId") or "").strip()
     catalog = load_catalog_cached()
     catalog_status = {"source": "memory", "stale": catalog is None, "age_seconds": None}
     if catalog is None:
@@ -1502,9 +1546,10 @@ def _build_selected_context_bundle(
         "patient": patient_record,
         "financials": financials,
         "reminders": reminders,
+        "financial_source_uri": _instinct_financial_document(client_record, financials).get("source_uri", ""),
         "documents": [
             _instinct_financial_document(client_record, financials),
-            _instinct_patient_document(client_record, patient_record, financials),
+            _instinct_patient_document(client_record, patient_record, financials, visit_id=visit_id or None),
             *patient_documents,
         ],
     }

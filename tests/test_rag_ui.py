@@ -306,6 +306,91 @@ def test_fetch_instinct_financials_tries_exact_uuid_before_search(monkeypatch):
     assert "getAccountLedger" in calls[0][0]
 
 
+@pytest.mark.unit
+def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
+    captured = {}
+
+    def fake_get_json(path, params=None):
+        captured["path"] = path
+        captured["params"] = params or {}
+        return {
+            "data": {
+                "listPatientReminders": {
+                    "product": [
+                        {
+                            "id": "p-1",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Heartworm Prevention"},
+                        },
+                        {
+                            "id": "p-2",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Flea / Tick / Heartworm Prevention"},
+                        },
+                    ],
+                    "vaccine": [
+                        {
+                            "id": "v-1",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Librela Injection"},
+                        }
+                    ],
+                }
+            }
+        }
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_get_json", fake_get_json)
+
+    reminders = lambda_app._fetch_instinct_reminders(
+        {"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "Deborah Burchill", "pims_code": "8762"},
+        {"id": "11525", "name": "Emmett Bleu (#4) Burchill"},
+    )
+
+    assert captured["path"] == "/v1/reminders"
+    assert captured["params"] == {"limit": "100", "pageDirection": "after"}
+    assert [rem["title"] for rem in reminders] == ["Heartworm Prevention", "Flea / Tick / Heartworm Prevention", "Librela Injection"]
+
+
+@pytest.mark.unit
+def test_build_selected_context_bundle_includes_patient_and_financial_links(monkeypatch):
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: None)
+    monkeypatch.setattr(
+        "scripts.rag_ui.lambda_app._fetch_instinct_financials",
+        lambda client_record: {
+            "account_id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c",
+            "pims_code": "8762",
+            "label": "Deborah Burchill",
+            "balance": 207.24,
+            "aged_balances": {"current": 207.24},
+            "invoices_to_review": [],
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.rag_ui.lambda_app._fetch_instinct_reminders",
+        lambda client_record, patient_record: [{"title": "Heartworm Prevention"}],
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+
+    bundle = lambda_app._build_selected_context_bundle(
+        "17579316-5a67-41e4-90ef-0ae73f4b9c9c",
+        "11525",
+        patient_context={
+            "owner_name": "Deborah Burchill",
+            "patient_name": "Emmett Bleu (#4) Burchill",
+            "visit_id": "29219",
+        },
+    )
+
+    docs = bundle["documents"]
+    assert any(doc["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/17579316-5a67-41e4-90ef-0ae73f4b9c9c" for doc in docs)
+    assert any(doc["source_uri"] == "https://app.instinctvet.cloud/#/patient/11525/charts?visitId=29219" for doc in docs)
+    assert bundle["financial_source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/17579316-5a67-41e4-90ef-0ae73f4b9c9c"
+    assert bundle["reminders"][0]["title"] == "Heartworm Prevention"
+
+
 #
 # Outer-shell tests: catalog loading and UI/API smoke.
 #
