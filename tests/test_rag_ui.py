@@ -77,31 +77,38 @@ def _ensure_instinct_credentials_from_secrets_manager() -> None:
     os.environ["INSTINCT_CLIENT_SECRET_ARN"] = secret_arn
     os.environ["INSTINCT_CLIENT_ID"] = client_id
     os.environ["INSTINCT_CLIENT_SECRET"] = client_secret
+    from urllib import parse, request as urllib_request
 
-    token_response = subprocess.run(
-        [
-            "curl",
-            "-sS",
-            "-X",
-            "POST",
-            "-G",
-            "--data-urlencode",
-            "grant_type=client_credentials",
-            "--data-urlencode",
-            f"client_id={client_id}",
-            "--data-urlencode",
-            f"client_secret={client_secret}",
-            "https://partner.instinctvet.com/v1/auth/token",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    payload = json.loads(token_response.stdout)
-    token = str(payload.get("access_token") or payload.get("token") or payload.get("jwt") or "").strip()
-    if not token:
-        raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials")
-    os.environ["TOKEN"] = token
+    base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").rstrip("/")
+    last_error = None
+    for attempt in range(1, 5):
+        try:
+            payload = parse.urlencode(
+                {
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                }
+            ).encode("utf-8")
+            req = urllib_request.Request(
+                f"{base_url}/v1/auth/token",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with urllib_request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            token = str(data.get("access_token") or data.get("token") or data.get("jwt") or "").strip()
+            if not token:
+                raise RuntimeError("token response missing access token")
+            os.environ["TOKEN"] = token
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt == 4:
+                raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials") from exc
+            time.sleep(2 * attempt)
+    raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials") from last_error
 
 
 def write_sample_catalog(path: Path) -> None:
