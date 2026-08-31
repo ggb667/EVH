@@ -513,18 +513,19 @@ class InstinctApiAdapter:
     """
 
     def __init__(self, base_url: str, username: str, password: str) -> None:
+        from scripts.http_session import get_session
+
         self.base_url = base_url
         self.username = username
         self.password = password
         self.token: Optional[str] = None
         self._reminder_counts_by_patient: Optional[dict[int, int]] = None
         self._has_patient_scoped_reminders = False
+        self._session = get_session()
 
     def authenticate(self) -> str:
-        import requests
-
         url = f"{self.base_url}/v1/auth/token"
-        resp = requests.post(
+        resp = self._session.post(
             url,
             json={
                 "grant_type": "client_credentials",
@@ -540,9 +541,7 @@ class InstinctApiAdapter:
         return self.token
 
     def _get(self, path: str, params=None):
-        import requests
-
-        resp = requests.get(
+        resp = self._session.get(
             f"{self.base_url}{path}",
             headers={"Authorization": f"Bearer {self.token}"},
             params=params or {},

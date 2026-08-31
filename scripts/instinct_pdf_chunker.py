@@ -16,7 +16,10 @@ production RAG workflows rather than benchmark-only placeholder math.
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv
+import shlex
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -46,6 +49,10 @@ try:
     from pypdf import PdfReader
 except ImportError as exc:  # pragma: no cover - environment-specific dependency
     raise RuntimeError("pypdf is required to extract PDF text.") from exc
+try:
+    import pymupdf
+except ImportError:  # pragma: no cover - optional dependency
+    pymupdf = None
 
 try:
     from pypdf.errors import PdfReadError
@@ -55,6 +62,7 @@ except Exception:  # pragma: no cover - pypdf version-specific import surface
 
 DEFAULT_TABLE_NAME = "pms_page_chunk"
 DEFAULT_SOURCE_DOCUMENT_TABLE_NAME = "rag_source_document"
+DEFAULT_OCR_PAGE_TABLE_NAME = "rag_pdf_ocr_page"
 DEFAULT_DEFERRED_OCR_TABLE_NAME = "rag_deferred_ocr_document"
 DEFAULT_INGEST_STATE_TABLE_NAME = "rag_ingestion_run"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -75,6 +83,36 @@ DOC_FAMILIES = (
     "other",
 )
 DEFAULT_TEXT_CACHE_DIR = Path(os.environ.get("EVH_INSTINCT_TEXT_CACHE_DIR", "/tmp/evh_instinct_text_cache"))
+EXTRACTOR_USAGE_COUNTS: dict[str, int] = {"pdftotext": 0, "pypdf": 0, "pymupdf": 0, "pdftoppm": 0, "pdftocairo": 0, "gs": 0, "tesseract": 0}
+SQL_VERBOSE_LOGGING = os.environ.get("EVH_VERBOSE_SQL", "").strip().lower() in {"1", "true", "yes", "on"}
+
+_POSTGRES_CONNECTIONS: dict[str, psycopg.Connection] = {}
+
+
+def _get_postgres_connection(database_url: str) -> psycopg.Connection:
+    conn = _POSTGRES_CONNECTIONS.get(database_url)
+    if conn is not None and not conn.closed:
+        return conn
+    conn = psycopg.connect(database_url)
+    _POSTGRES_CONNECTIONS[database_url] = conn
+    return conn
+
+
+def _discard_postgres_connection(database_url: str, conn: psycopg.Connection) -> None:
+    if _POSTGRES_CONNECTIONS.get(database_url) is conn:
+        _POSTGRES_CONNECTIONS.pop(database_url, None)
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _close_postgres_connections() -> None:
+    for database_url, conn in list(_POSTGRES_CONNECTIONS.items()):
+        _discard_postgres_connection(database_url, conn)
+
+
+atexit.register(_close_postgres_connections)
 
 
 class NoTextLayerError(RuntimeError):
@@ -88,7 +126,7 @@ class NoTextLayerError(RuntimeError):
 
 
 class DeferredOCRDocument(RuntimeError):
-    """Raised when a no-text-layer PDF should be deferred for later OCR."""
+    """Raised when a PDF still needs OCR before it can be processed further."""
 
     def __init__(self, *, page_count: int, reason: str, metadata: dict[str, Any] | None = None) -> None:
         self.page_count = page_count
@@ -118,6 +156,7 @@ def _looks_like_non_pdf_or_corrupt_pdf(exc: Exception) -> bool:
 class PatientPdfSource:
     patient_id: str
     patient_name: str
+    pdf_id: str | None = None
     pdf_path: Path | None = None
     pdf_url: str | None = None
 
@@ -228,9 +267,9 @@ def load_patient_manifest(path: Path) -> list[PatientPdfSource]:
 
 def read_pdf_bytes(source: PatientPdfSource) -> bytes:
     if source.pdf_url:
-        import requests
+        from scripts.http_session import get_session
 
-        response = requests.get(source.pdf_url, timeout=60)
+        response = get_session().get(source.pdf_url, timeout=120)
         response.raise_for_status()
         return response.content
     if source.pdf_path is None:
@@ -264,7 +303,7 @@ def _cache_key_for_source(source: PatientPdfSource, payload: bytes | None = None
     return hasher.hexdigest()
 
 
-def _load_cached_text_pages(cache_dir: Path, cache_key: str) -> tuple[list[str], int] | None:
+def _load_cached_text_pages(cache_dir: Path, cache_key: str) -> tuple[list[str], int, str] | None:
     cache_file = cache_dir / f"{cache_key}.json"
     if not cache_file.exists():
         return None
@@ -272,8 +311,9 @@ def _load_cached_text_pages(cache_dir: Path, cache_key: str) -> tuple[list[str],
         payload = json.loads(cache_file.read_text(encoding="utf-8"))
         pages = payload.get("pages")
         page_count = int(payload.get("page_count") or 0)
+        parser = str(payload.get("parser") or "unknown")
         if isinstance(pages, list):
-            return [str(page) for page in pages], page_count or len(pages)
+            return [str(page) for page in pages], page_count or len(pages), parser
     except Exception:
         return None
     return None
@@ -293,6 +333,111 @@ def _store_cached_text_pages(cache_dir: Path, cache_key: str, pages: list[str], 
         ),
         encoding="utf-8",
     )
+
+
+def _record_extractor_usage(parser: str) -> None:
+    EXTRACTOR_USAGE_COUNTS[parser] = EXTRACTOR_USAGE_COUNTS.get(parser, 0) + 1
+
+
+def set_sql_verbose_logging(enabled: bool) -> None:
+    global SQL_VERBOSE_LOGGING
+    SQL_VERBOSE_LOGGING = bool(enabled)
+
+
+def _emit_extractor_usage_summary() -> None:
+    nonzero = {name: count for name, count in EXTRACTOR_USAGE_COUNTS.items() if count > 0}
+    if not nonzero:
+        return
+    print(
+        "wins: "
+        + ", ".join(
+            f"{name}={count}"
+            for name, count in nonzero.items()
+        ),
+        flush=True,
+    )
+
+
+def _better_extraction(current: tuple[list[str], str, float], candidate: tuple[list[str], str, float]) -> tuple[list[str], str, float]:
+    current_pages, current_name, current_seconds = current
+    candidate_pages, candidate_name, candidate_seconds = candidate
+    current_chars = sum(len(page) for page in current_pages)
+    candidate_chars = sum(len(page) for page in candidate_pages)
+    if candidate_chars > current_chars:
+        return candidate
+    if candidate_chars == current_chars and candidate_seconds < current_seconds:
+        return candidate
+    return current
+
+
+def _extract_with_pymupdf(pdf_path: Path) -> tuple[list[str], int]:
+    if pymupdf is None:
+        raise RuntimeError("PyMuPDF is not installed")
+    doc = pymupdf.open(str(pdf_path))
+    pages = [(page.get_text() or "").strip() for page in doc]
+    if pages and not any(page.strip() for page in pages):
+        raise NoTextLayerError(0)
+    return pages, 0
+
+
+def _looks_like_pdf(pdf_bytes: bytes) -> bool:
+    return pdf_bytes.startswith(b"%PDF")
+
+
+def _looks_like_ole_doc(pdf_bytes: bytes) -> bool:
+    return pdf_bytes.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+
+
+def _run_child_process(kind: str, pdf_input: str, *, timeout_s: int) -> dict[str, Any]:
+    ctx = get_context("fork")
+    queue = ctx.Queue()
+
+    def _child() -> None:
+        try:
+            if kind == "extract":
+                pages, page_count = _extract_pdf_text_pages_impl(pdf_input)
+                queue.put(("ok", {"pages": pages, "page_count": page_count}))
+                return
+            if kind == "ocr":
+                pages, page_count = _ocr_pdf_text_pages_impl(pdf_input)
+                queue.put(("ok", {"pages": pages, "page_count": page_count}))
+                return
+            raise RuntimeError(f"unknown child kind: {kind}")
+        except NoTextLayerError as exc:
+            queue.put(("no_text", {"page_count": exc.page_count}))
+        except Exception as exc:  # pragma: no cover - child process
+            queue.put(("err", {"error_type": type(exc).__name__, "error": str(exc)}))
+
+    proc = ctx.Process(target=_child, daemon=True)
+    proc.start()
+    proc.join(timeout_s)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(5)
+        raise TimeoutError(f"{kind} child process timed out after {timeout_s} seconds")
+    if not queue.empty():
+        status, data = queue.get_nowait()
+        if status == "ok":
+            return data
+        if status == "no_text":
+            raise NoTextLayerError(int(data.get("page_count") or 0))
+        raise RuntimeError(f"{data.get('error_type', 'RuntimeError')}: {data.get('error', 'child process failed')}")
+    if proc.exitcode is not None and proc.exitcode < 0:
+        raise RuntimeError(f"{kind} child terminated by signal {-proc.exitcode}")
+    raise RuntimeError(f"{kind} child produced no result")
+
+
+def _child_status_line(stage: str, *, fallback_used: bool | None = None, child_signal: int | None = None, ocr_path: str | None = None, detail: str | None = None) -> None:
+    payload: dict[str, Any] = {"status": "child_stage", "stage": stage}
+    if fallback_used is not None:
+        payload["fallback_used"] = fallback_used
+    if child_signal is not None:
+        payload["child_signal"] = child_signal
+    if ocr_path is not None:
+        payload["ocr_path"] = ocr_path
+    if detail is not None:
+        payload["detail"] = detail
+    print(json.dumps(payload, sort_keys=True), flush=True)
 
 
 def _extract_word_text_pages(source: PatientPdfSource, *, pdf_bytes: bytes | None = None) -> tuple[list[str], int, str]:
@@ -350,15 +495,64 @@ def _extract_word_text_pages(source: PatientPdfSource, *, pdf_bytes: bytes | Non
 
 def read_pdf_text_from_source(source: PatientPdfSource) -> tuple[list[str], int]:
     pdf_bytes = read_pdf_bytes(source)
+    if _looks_like_ole_doc(pdf_bytes) and not _looks_like_pdf(pdf_bytes):
+        pages, page_count, _parser_name = _extract_word_text_pages(source, pdf_bytes=pdf_bytes)
+        return pages, page_count
+    if source.pdf_path is None:
+        with tempfile.TemporaryDirectory(prefix="instinct-pdf-src-") as temp_dir:
+            temp_path = Path(temp_dir) / "source.pdf"
+            temp_path.write_bytes(pdf_bytes)
+            try:
+                pages, page_count, _method = _read_pdf_text_from_path(temp_path)
+                return pages, page_count
+            except NoTextLayerError:
+                pages, page_count, _method = ocr_pdf_text_pages(temp_path)
+                return pages, page_count
     try:
-        return extract_pdf_text_pages(pdf_bytes)
+        pages, page_count, _method = _read_pdf_text_from_path(source.pdf_path)
+        return pages, page_count
     except NoTextLayerError:
-        return ocr_pdf_text_pages(pdf_bytes)
+        pages, page_count, _method = ocr_pdf_text_pages(source.pdf_path)
+        return pages, page_count
 
 
-def _extract_pdf_text_pages_worker(pdf_bytes: bytes, queue) -> None:
+def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
+    candidates: list[tuple[list[str], str, float]] = []
+    last_error: Exception | None = None
+    for extractor_name, extractor in (
+        ("pdftotext", lambda: safe_extract_pdf_text_pages(pdf_path, timeout_s=45)),
+        ("pypdf", lambda: extract_pdf_text_pages(pdf_path)),
+        ("pymupdf", lambda: _extract_with_pymupdf(pdf_path)),
+    ):
+        start = perf_counter()
+        try:
+            pages, _page_count = extractor()
+            seconds = perf_counter() - start
+            if any(page.strip() for page in pages):
+                candidates.append((pages, extractor_name, seconds))
+            else:
+                last_error = NoTextLayerError(page_count=0)
+            _record_extractor_usage(extractor_name)
+        except NoTextLayerError as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+    if candidates:
+        best = candidates[0]
+        for candidate in candidates[1:]:
+            best = _better_extraction(best, candidate)
+        _emit_extractor_usage_summary()
+        return best[0], len(best[0]), best[1]
+    if last_error is not None:
+        _emit_extractor_usage_summary()
+        raise NoTextLayerError(0) if not isinstance(last_error, NoTextLayerError) else last_error
+    _emit_extractor_usage_summary()
+    raise NoTextLayerError(0)
+
+
+def _extract_pdf_text_pages_worker(pdf_path: str, queue) -> None:
     try:
-        pages, page_count = extract_pdf_text_pages(pdf_bytes)
+        pages, page_count = extract_pdf_text_pages(Path(pdf_path))
         queue.put(("ok", {"pages": pages, "page_count": page_count}))
     except NoTextLayerError as exc:
         queue.put(
@@ -382,75 +576,206 @@ def _extract_pdf_text_pages_worker(pdf_bytes: bytes, queue) -> None:
         )
 
 
-def safe_extract_pdf_text_pages(pdf_bytes: bytes, *, timeout_s: int = 45) -> tuple[list[str], int]:
-    ctx = get_context("spawn")
-    queue = ctx.Queue()
-    proc = ctx.Process(target=_extract_pdf_text_pages_worker, args=(pdf_bytes, queue), daemon=True)
-    proc.start()
-    proc.join(timeout_s)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(10)
-        if proc.is_alive():
-            proc.kill()
-            proc.join(5)
-        raise RuntimeError(f"PDF text extraction exceeded {timeout_s} seconds")
-    if queue.empty():
-        rc = proc.exitcode
-        if rc is not None and rc < 0:
-            raise RuntimeError(f"PDF text extraction crashed with signal {-rc}")
-        raise RuntimeError("PDF text extraction worker returned no payload")
-    status, payload = queue.get()
-    if status == "no_text":
-        raise NoTextLayerError(int(payload.get("page_count") or 0))
-    if status != "ok":
-        raise RuntimeError(f"PDF text extraction failed: {payload.get('error_type')}: {payload.get('error')}")
-    return payload["pages"], int(payload["page_count"])
+def safe_extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 45) -> tuple[list[str], int]:
+    fallback_command = shutil.which("pdftotext")
+    pdftotext_result: tuple[list[str], int, int] | None = None
+    if fallback_command:
+        out_path = pdf_path.parent / f"{pdf_path.stem}.pdftotext.txt"
+        fallback_proc = subprocess.run(
+            [fallback_command, "-layout", str(pdf_path), str(out_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=timeout_s,
+            check=False,
+        )
+        if fallback_proc.returncode == 0:
+            text = out_path.read_text(encoding="utf-8", errors="replace")
+            pages = [page.strip() for page in text.split("\f")]
+            text_chars = sum(len(page) for page in pages)
+            if any(page.strip() for page in pages):
+                pdftotext_result = (pages, 0, text_chars)
+            else:
+                raise NoTextLayerError(0)
+        else:
+            stderr_tail = (fallback_proc.stderr or b"").decode("utf-8", errors="replace")[-1000:]
+            if stderr_tail:
+                raise RuntimeError(f"PDF text extraction failed: RuntimeError: {stderr_tail}")
+
+    try:
+        pypdf_pages, pypdf_page_count = extract_pdf_text_pages(pdf_path)
+    except Exception as exc:
+        if pdftotext_result is not None:
+            pdftotext_pages, pdftotext_page_count, _pdftotext_chars = pdftotext_result
+            return pdftotext_pages, pdftotext_page_count
+        raise
+    if pdftotext_result is None:
+        return pypdf_pages, 0
+    pdftotext_pages, pdftotext_page_count, pdftotext_chars = pdftotext_result
+    pypdf_chars = sum(len(page) for page in pypdf_pages)
+    if pypdf_chars > pdftotext_chars:
+        return pypdf_pages, 0
+    return pdftotext_pages, 0
 
 
-def ocr_pdf_text_pages(pdf_bytes: bytes) -> tuple[list[str], int]:
-    gs_command = shutil.which("gs") or shutil.which("ghostscript")
+def _pdftotext_extract_worker(pdf_path: str, timeout_s: int, queue) -> None:
+    fallback_command = shutil.which("pdftotext")
+    if not fallback_command:
+        queue.put(("err", {"error_type": "RuntimeError", "error": "pdftotext unavailable"}))
+        return
+    pdf_path_obj = Path(pdf_path)
+    out_path = pdf_path_obj.parent / f"{pdf_path_obj.stem}.pdftotext.txt"
+    try:
+        fallback_proc = subprocess.run(
+            [fallback_command, "-layout", str(pdf_path_obj), str(out_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=timeout_s,
+                check=False,
+            )
+    except Exception as exc:  # pragma: no cover - child process
+        queue.put(("err", {"error_type": type(exc).__name__, "error": str(exc)}))
+        return
+    if fallback_proc.returncode != 0:
+        queue.put(("err", {"error_type": "RuntimeError", "error": (fallback_proc.stderr or b"").decode("utf-8", errors="replace")[-1000:]}))
+        return
+    text = out_path.read_text(encoding="utf-8", errors="replace")
+    pages = [page.strip() for page in text.split("\f")]
+    page_count = len(pages)
+    text_chars = sum(len(page) for page in pages)
+    if page_count and not any(page.strip() for page in pages):
+        queue.put(("no_text", {"page_count": page_count, "text_chars": 0}))
+        return
+    queue.put(("ok", {"pages": pages, "page_count": page_count, "text_chars": text_chars, "tool": "pdftotext"}))
+
+
+def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[list[str], int, str]:
     tesseract_command = shutil.which("tesseract")
-    if not gs_command or not tesseract_command:
+    if not tesseract_command:
         raise NoTextLayerError(page_count=0)
 
-    with tempfile.TemporaryDirectory(prefix="instinct-ocr-") as temp_dir:
-        temp_path = Path(temp_dir)
-        pdf_path = temp_path / "source.pdf"
-        pdf_path.write_bytes(pdf_bytes)
-        output_prefix = temp_path / "page"
-        raster_cmd = [
-            gs_command,
-            "-dNOPAUSE",
-            "-dBATCH",
-            "-sDEVICE=png16m",
-            "-r200",
-            f"-sOutputFile={output_prefix}-%03d.png",
-            str(pdf_path),
-        ]
-        subprocess.run(raster_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def _run_renderer(
+        raster_cmd: list[str],
+        *,
+        temp_path: Path,
+        renderer_timeout_s: int = 360,
+    ) -> list[Path]:
+        renderer_name = Path(raster_cmd[0]).name
+        print(f"ocr_render_start | renderer={renderer_name}", flush=True)
+        try:
+            completed = subprocess.run(
+                raster_cmd,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=renderer_timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            raise TimeoutError(f"{renderer_name} timed out after {renderer_timeout_s} seconds")
+        except Exception as exc:  # pragma: no cover - child process wrapper
+            raise RuntimeError(f"{renderer_name} launcher failed: {exc}") from exc
 
-        page_files = sorted(temp_path.glob("page-*.png"))
+        if completed.returncode != 0:
+            stderr_tail = (completed.stderr or b"").decode("utf-8", errors="replace")[-2000:]
+            raise RuntimeError(
+                f"{renderer_name} exited with code {completed.returncode}"
+                + (f": {stderr_tail}" if stderr_tail else "")
+            )
+
+        page_files = sorted(temp_path.glob("*.png"))
+        if not page_files:
+            # Some renderers append their own suffixes; keep searching.
+            page_files = sorted(temp_path.glob("*png"))
         if not page_files:
             raise NoTextLayerError(page_count=0)
+        return page_files
 
-        pages: list[str] = []
-        for image_path in page_files:
-            proc = subprocess.run(
-                [tesseract_command, str(image_path), "stdout", "--psm", "6"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+    pdf_path_obj = Path(pdf_path)
+    with tempfile.TemporaryDirectory(prefix="instinct-ocr-") as temp_dir:
+        temp_path = Path(temp_dir)
+        render_pdf_path = temp_path / pdf_path_obj.name
+        shutil.copy2(pdf_path_obj, render_pdf_path)
+        renderers: list[list[str]] = []
+        pdftoppm_command = shutil.which("pdftoppm")
+        if pdftoppm_command:
+            renderers.append(
+                [
+                    pdftoppm_command,
+                    "-png",
+                    "-r",
+                    "200",
+                    str(render_pdf_path),
+                    str(temp_path / "ppm"),
+                ]
             )
-            pages.append((proc.stdout.decode("utf-8", errors="replace") or "").strip())
+        pdftocairo_command = shutil.which("pdftocairo")
+        if pdftocairo_command:
+            renderers.append(
+                [
+                    pdftocairo_command,
+                    "-png",
+                    "-r",
+                    "200",
+                    str(render_pdf_path),
+                    str(temp_path / "cairo"),
+                ]
+            )
+        gs_command = shutil.which("gs") or shutil.which("ghostscript")
+        if gs_command:
+            renderers.append(
+                [
+                    gs_command,
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-sDEVICE=png16m",
+                    "-r200",
+                    f"-sOutputFile={temp_path / 'gs-%03d.png'}",
+                    str(render_pdf_path),
+                ]
+            )
+        if not renderers:
+            raise NoTextLayerError(page_count=0)
 
-        return pages, len(pages)
+        last_error: Exception | None = None
+        for renderer_index, raster_cmd in enumerate(renderers, start=1):
+            renderer_name = Path(raster_cmd[0]).name
+            try:
+                page_files = _run_renderer(raster_cmd, temp_path=temp_path, renderer_timeout_s=timeout_s)
+                pages: list[str] = []
+                page_timeout_s = max(15, min(timeout_s, 5 + (timeout_s // max(len(page_files), 1))))
+                for image_path in page_files:
+                    proc = subprocess.run(
+                        [tesseract_command, str(image_path), "stdout", "--psm", "6"],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        timeout=page_timeout_s,
+                    )
+                    pages.append((proc.stdout.decode("utf-8", errors="replace") or "").strip())
+
+                if pages:
+                    _record_extractor_usage(renderer_name)
+                    _record_extractor_usage("tesseract")
+                    _emit_extractor_usage_summary()
+                    return pages, len(pages), renderer_name
+                raise NoTextLayerError(page_count=0)
+            except Exception as exc:
+                last_error = exc
+                for image_path in temp_path.glob("*.png"):
+                    image_path.unlink(missing_ok=True)
+                continue
+
+        if last_error is not None:
+            raise last_error
+        raise NoTextLayerError(page_count=0)
 
 
-def extract_pdf_text_pages(pdf_bytes: bytes) -> tuple[list[str], int]:
-    reader = PdfReader(BytesIO(pdf_bytes))
-    page_count = len(reader.pages)
+def safe_ocr_pdf_text_pages(pdf_bytes: bytes, *, timeout_s: int = 240) -> tuple[list[str], int]:
+    pages, page_count, _method = ocr_pdf_text_pages(pdf_bytes)
+    return pages, page_count
 
+
+def _extract_pdf_text_pages_impl(pdf_path: str) -> tuple[list[str], int]:
+    reader = PdfReader(pdf_path)
     pages: list[str] = []
     for page in reader.pages:
         try:
@@ -459,9 +784,24 @@ def extract_pdf_text_pages(pdf_bytes: bytes) -> tuple[list[str], int]:
             text = page.extract_text()
         pages.append((text or "").strip())
 
-    if page_count and not any(page_text.strip() for page_text in pages):
-        raise NoTextLayerError(page_count)
-    return pages, page_count
+    if pages and not any(page_text.strip() for page_text in pages):
+        raise NoTextLayerError(0)
+    return pages, 0
+
+
+def extract_pdf_text_pages(pdf_path: Path) -> tuple[list[str], int]:
+    result = _run_child_process("extract", str(pdf_path), timeout_s=120)
+    return result["pages"], 0
+
+
+def ocr_pdf_text_pages(pdf_path: Path) -> tuple[list[str], int, str]:
+    try:
+        result = _run_child_process("ocr", str(pdf_path), timeout_s=600)
+        _child_status_line("ocr", ocr_path="child_process")
+        return result["pages"], int(result["page_count"]), str(result.get("tool") or "ocr")
+    except Exception as exc:
+        _child_status_line("ocr", child_signal=1 if "signal" in str(exc).lower() else None, detail=str(exc))
+        raise
 
 
 def _split_aliases(raw_aliases: str | None) -> tuple[str, ...]:
@@ -1044,6 +1384,7 @@ def chunk_pdf_pages(
     config: ChunkingConfig,
     *,
     term_index: Iterable[DictionaryTerm] | None = None,
+    page_workers: int | None = None,
 ) -> list[Document]:
     terms = list(term_index) if term_index is not None else load_term_index()
     family = _detect_document_family(source, pages)
@@ -1053,31 +1394,98 @@ def chunk_pdf_pages(
     profile_started = perf_counter()
     timing: dict[str, float] = {}
 
+    worker_count = page_workers or int(os.environ.get("EVH_IMPORT_PAGE_WORKERS", "0") or 0)
+    if worker_count <= 0:
+        cpu_count = os.cpu_count() or 2
+        worker_count = max(2, min(8, cpu_count // 2 or 2))
+    worker_count = min(worker_count, max(1, len(pages)))
+    verbose_insight = _verbose_pdf_insight_enabled()
+    if verbose_insight:
+        print(
+            f"chunk_stage_start | pdf_id={source.pdf_id} | pages={len(pages)} | workers={worker_count} | chunk_size={config.chunk_size} | chunk_overlap={config.chunk_overlap} | family={family}",
+            flush=True,
+        )
+
     detect_terms_start = perf_counter()
-    for page_number, page_text in enumerate(pages, start=1):
-        page_terms = detect_terms_in_text(page_text, terms, page_number=page_number)
+    if worker_count <= 1:
+        page_term_results = [
+            (page_number, detect_terms_in_text(page_text, terms, page_number=page_number))
+            for page_number, page_text in enumerate(pages, start=1)
+        ]
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            page_term_results = list(
+                executor.map(
+                    lambda item: (item[0], detect_terms_in_text(item[1], terms, page_number=item[0])),
+                    list(enumerate(pages, start=1)),
+                )
+            )
+    for page_number, page_terms in page_term_results:
         page_terms_by_number[page_number] = page_terms
         full_pdf_terms.extend(page_terms)
     timing["detect_terms_seconds"] = perf_counter() - detect_terms_start
+    if verbose_insight:
+        print(
+            f"chunk_stage_done | pdf_id={source.pdf_id} | stage=detect_terms | pages={len(pages)} | elapsed_s={timing['detect_terms_seconds']:.1f}",
+            flush=True,
+        )
 
     summary_start = perf_counter()
     clinical_summary, summary_style = _build_document_summary(source, pages, full_pdf_terms, family=family)
     timing["summary_seconds"] = perf_counter() - summary_start
+    if verbose_insight:
+        print(
+            f"chunk_stage_done | pdf_id={source.pdf_id} | stage=summary | elapsed_s={timing['summary_seconds']:.1f} | summary_style={summary_style}",
+            flush=True,
+        )
     full_pdf_terms_metadata = detected_terms_to_metadata(full_pdf_terms)
 
     term_summary_start = perf_counter()
     term_summary = summarize_detected_terms(full_pdf_terms)
     timing["term_summary_seconds"] = perf_counter() - term_summary_start
+    if verbose_insight:
+        print(
+            f"chunk_stage_done | pdf_id={source.pdf_id} | stage=term_summary | elapsed_s={timing['term_summary_seconds']:.1f} | terms={len(full_pdf_terms)}",
+            flush=True,
+        )
 
     table_records_start = perf_counter()
     table_records = _extract_table_records(pages, term_summary, family=family)
     timing["table_records_seconds"] = perf_counter() - table_records_start
+    if verbose_insight:
+        print(
+            f"chunk_stage_done | pdf_id={source.pdf_id} | stage=table_records | elapsed_s={timing['table_records_seconds']:.1f} | records={len(table_records)}",
+            flush=True,
+        )
 
     documents: list[Document] = []
     chunk_index = 1
     split_and_chunk_start = perf_counter()
-    for page_number, page_text in enumerate(pages, start=1):
-        for chunk_text in split_text(page_text, chunk_size=config.chunk_size, chunk_overlap=config.chunk_overlap):
+    if worker_count <= 1:
+        chunk_results = [
+            (page_number, split_text(page_text, chunk_size=config.chunk_size, chunk_overlap=config.chunk_overlap))
+            for page_number, page_text in enumerate(pages, start=1)
+        ]
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            chunk_results = list(
+                executor.map(
+                    lambda item: (item[0], split_text(item[1], chunk_size=config.chunk_size, chunk_overlap=config.chunk_overlap)),
+                    list(enumerate(pages, start=1)),
+                )
+            )
+    if verbose_insight:
+        print(
+            f"chunk_stage_done | pdf_id={source.pdf_id} | stage=split_dispatch | elapsed_s={perf_counter() - split_and_chunk_start:.1f}",
+            flush=True,
+        )
+    for page_number, chunks in chunk_results:
+        if verbose_insight:
+            print(
+                f"page_chunk_start | pdf_id={source.pdf_id} | page_number={page_number} | chunks={len(chunks)}",
+                flush=True,
+            )
+        for chunk_text in chunks:
             chunk_terms = detect_terms_in_text(chunk_text, terms, page_number=page_number)
             documents.append(
                 Document(
@@ -1085,6 +1493,8 @@ def chunk_pdf_pages(
                     metadata={
                         "patient_id": source.patient_id,
                         "patient_name": source.patient_name,
+                        "pdf_id": source.pdf_id,
+                        "document_pdf_id": source.pdf_id,
                         "pdf_path": str(source.pdf_path) if source.pdf_path is not None else None,
                         "pdf_url": source.pdf_url,
                         "page_number": page_number,
@@ -1094,7 +1504,6 @@ def chunk_pdf_pages(
                         "clinical_summary": clinical_summary,
                         "clinical_summary_style": summary_style,
                         "term_summary": term_summary,
-                        "table_records": table_records,
                         "detected_terms": detected_terms_to_metadata(chunk_terms),
                         "page_detected_terms": detected_terms_to_metadata(page_terms_by_number.get(page_number, [])),
                         "full_pdf_detected_terms": full_pdf_terms_metadata,
@@ -1102,7 +1511,17 @@ def chunk_pdf_pages(
                 )
             )
             chunk_index += 1
+        if verbose_insight:
+            print(
+                f"page_chunk_done | pdf_id={source.pdf_id} | page_number={page_number} | total_chunks_so_far={len(documents)}",
+                flush=True,
+            )
     timing["split_and_chunk_seconds"] = perf_counter() - split_and_chunk_start
+    if verbose_insight:
+        print(
+            f"chunk_stage_done | pdf_id={source.pdf_id} | stage=split_and_chunk | elapsed_s={timing['split_and_chunk_seconds']:.1f} | documents={len(documents)}",
+            flush=True,
+        )
 
     if profile_pdf:
         timing["total_seconds"] = perf_counter() - profile_started
@@ -1143,49 +1562,294 @@ def chunk_patient_pdf_timed(
     term_index: Iterable[DictionaryTerm] | None = None,
     defer_no_text_page_threshold: int | None = 8,
     extraction_timeout_s: int = 45,
+    page_workers: int | None = None,
+    progress_state: dict[str, Any] | None = None,
 ) -> tuple[list[Document], int, dict[str, float]]:
     download_start = perf_counter()
+    timing: dict[str, float] = {}
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_begin",
+                "phase": "read_pdf_bytes",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     pdf_bytes = read_pdf_bytes(source)
     download_seconds = perf_counter() - download_start
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_done",
+                "phase": "read_pdf_bytes",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "elapsed_seconds": round(download_seconds, 3),
+                "bytes": len(pdf_bytes),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "after_read_before_cache_key",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     cache_key = _cache_key_for_source(source, pdf_bytes)
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "cache_key_done",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "cache_key_prefix": cache_key[:16],
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     cache_dir = DEFAULT_TEXT_CACHE_DIR
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "cache_dir_done",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "cache_dir": str(cache_dir),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     suffix = _source_suffix(source)
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "suffix_done",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "suffix": suffix,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
 
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "before_cache_lookup",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     cached = _load_cached_text_pages(cache_dir, cache_key)
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "after_cache_lookup",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "cached": cached is not None,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     if cached is not None:
-        pages, page_count = cached
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_gap_probe",
+                    "step": "cache_hit_branch",
+                    "pdf_id": source.pdf_id,
+                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        pages, page_count, cached_parser = cached
         extraction_seconds = 0.0
         chunking_start = perf_counter()
-        documents = chunk_pdf_pages(source, pages, config, term_index=term_index)
+        documents = chunk_pdf_pages(source, pages, config, term_index=term_index, page_workers=page_workers)
         chunking_seconds = perf_counter() - chunking_start
         summary_seconds = chunking_seconds if documents else 0.0
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_phase_timing",
+                    "pdf_id": source.pdf_id,
+                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                    "download_seconds": round(download_seconds, 3),
+                    "extraction_seconds": round(extraction_seconds, 3),
+                    "chunking_seconds": round(chunking_seconds, 3),
+                    "summary_seconds": round(summary_seconds, 3),
+                    "cached_text_seconds": 0.0,
+                    "cached_text": True,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         return documents, page_count, {
             "download_seconds": download_seconds,
             "extraction_seconds": extraction_seconds,
             "chunking_seconds": chunking_seconds,
             "summary_seconds": summary_seconds,
             "cached_text_seconds": 0.0,
+            "text_method": cached_parser,
         }
 
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "cache_miss_branch",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "suffix": suffix,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     extraction_start = perf_counter()
+    print(
+        json.dumps(
+            {
+                "status": "pdf_gap_probe",
+                "step": "before_extraction_try",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     try:
         if suffix in {".doc", ".docx"}:
+            print(
+                json.dumps(
+                    {
+                        "status": "pdf_gap_probe",
+                        "step": "word_branch_selected",
+                        "pdf_id": source.pdf_id,
+                        "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "pdf_phase_begin",
+                        "phase": "extract_word_text",
+                        "pdf_id": source.pdf_id,
+                        "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             pages, page_count, parser_name = _extract_word_text_pages(source, pdf_bytes=pdf_bytes)
             _store_cached_text_pages(cache_dir, cache_key, pages, page_count, parser=parser_name)
             extraction_seconds = perf_counter() - extraction_start
             chunking_start = perf_counter()
-            documents = chunk_pdf_pages(source, pages, config, term_index=term_index)
+            documents = chunk_pdf_pages(source, pages, config, term_index=term_index, page_workers=page_workers)
             chunking_seconds = perf_counter() - chunking_start
             summary_seconds = chunking_seconds if documents else 0.0
+            print(
+                json.dumps(
+                    {
+                        "status": "pdf_phase_timing",
+                        "pdf_id": source.pdf_id,
+                        "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                        "download_seconds": round(download_seconds, 3),
+                        "extraction_seconds": round(extraction_seconds, 3),
+                        "chunking_seconds": round(chunking_seconds, 3),
+                        "summary_seconds": round(summary_seconds, 3),
+                        "cached_text_seconds": 0.0,
+                        "cached_text": False,
+                        "parser": parser_name,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             return documents, page_count, {
                 "download_seconds": download_seconds,
                 "extraction_seconds": extraction_seconds,
                 "chunking_seconds": chunking_seconds,
                 "summary_seconds": summary_seconds,
                 "cached_text_seconds": 0.0,
+                "text_method": parser_name,
             }
-        pages, page_count = safe_extract_pdf_text_pages(pdf_bytes, timeout_s=extraction_timeout_s)
-        _store_cached_text_pages(cache_dir, cache_key, pages, page_count, parser="pypdf")
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_gap_probe",
+                    "step": "before_text_stage_choose",
+                    "pdf_id": source.pdf_id,
+                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                    "timeout_s": extraction_timeout_s,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        pages, page_count, text_method = _read_pdf_text_from_path(source.pdf_path)
+        timing["text_method"] = text_method
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_gap_probe",
+                    "step": "after_text_stage_choose",
+                    "pdf_id": source.pdf_id,
+                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                    "page_count": page_count,
+                    "page_lengths": [len(page) for page in pages[:3]],
+                    "text_method": text_method,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        _store_cached_text_pages(cache_dir, cache_key, pages, page_count, parser=text_method)
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_gap_probe",
+                    "step": "after_store_cached_text_pages",
+                    "pdf_id": source.pdf_id,
+                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                    "page_count": page_count,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     except (PdfReadError, RuntimeError, ValueError, OSError) as exc:
         if _looks_like_non_pdf_or_corrupt_pdf(exc):
             raise DeferredOCRDocument(
@@ -1212,24 +1876,105 @@ def chunk_patient_pdf_timed(
                 page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
             except Exception:
                 page_count = 0
-        if defer_no_text_page_threshold is not None and page_count >= defer_no_text_page_threshold:
-            raise DeferredOCRDocument(
-                page_count=page_count,
-                reason=f"Deferred OCR for large no-text-layer PDF (pages={page_count})",
-                metadata={
-                    "patient_id": source.patient_id,
-                    "patient_name": source.patient_name,
-                    "pdf_url": source.pdf_url,
-                    "pdf_path": str(source.pdf_path) if source.pdf_path is not None else None,
+        if progress_state is not None:
+            progress_state["current_ocr_stage"] = "a"
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_phase_begin",
+                    "phase": "ocr_pdf_text_pages",
+                    "pdf_id": source.pdf_id,
                     "filename": source.pdf_path.name if source.pdf_path is not None else None,
                 },
-            )
-        pages, page_count = ocr_pdf_text_pages(pdf_bytes)
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        pages, page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path)
+        if progress_state is not None:
+            progress_state["current_ocr_stage"] = "b"
+        timing["ocr_used"] = True
+        timing["ocr_method"] = ocr_method
     extraction_seconds = perf_counter() - extraction_start
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_done",
+                "phase": "extract_text",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "elapsed_seconds": round(extraction_seconds, 3),
+                "page_count": page_count,
+                "parser": "ocr" if timing.get("ocr_used") else "text",
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
 
     chunking_start = perf_counter()
-    documents = chunk_pdf_pages(source, pages, config, term_index=term_index)
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_begin",
+                "phase": "chunk_pdf_pages",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "page_count": page_count,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    documents = chunk_pdf_pages(source, pages, config, term_index=term_index, page_workers=page_workers)
     chunking_seconds = perf_counter() - chunking_start
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_done",
+                "phase": "chunk_pdf_pages",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "elapsed_seconds": round(chunking_seconds, 3),
+                "documents": len(documents),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_timing",
+                "pdf_id": source.pdf_id,
+                "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                "download_seconds": round(download_seconds, 3),
+                "extraction_seconds": round(extraction_seconds, 3),
+                "chunking_seconds": round(chunking_seconds, 3),
+                "summary_seconds": round(chunking_seconds if documents else 0.0, 3),
+                "cached_text_seconds": 0.0,
+                "cached_text": False,
+                "ocr_used": bool(progress_state and progress_state.get("current_ocr_stage")),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+    if not documents and _detect_document_family(source, pages) == "transaction_history":
+        ocr_start = perf_counter()
+        if progress_state is not None:
+            progress_state["current_ocr_stage"] = "c"
+        ocr_pages, ocr_page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path)
+        timing["ocr_retry_seconds"] = perf_counter() - ocr_start
+        timing["ocr_used"] = True
+        timing["ocr_method"] = ocr_method
+        pages = ocr_pages
+        page_count = ocr_page_count
+        chunking_start = perf_counter()
+        documents = chunk_pdf_pages(source, pages, config, term_index=term_index, page_workers=page_workers)
+        chunking_seconds = perf_counter() - chunking_start
+        timing["ocr_retry_chunking_seconds"] = chunking_seconds
 
     summary_seconds = 0.0
     if documents:
@@ -1238,12 +1983,16 @@ def chunk_patient_pdf_timed(
         # stage splits.
         summary_seconds = chunking_seconds
 
+    if "text_method" not in timing:
+        timing["text_method"] = "unknown"
+
     return documents, page_count, {
         "download_seconds": download_seconds,
         "extraction_seconds": extraction_seconds,
         "chunking_seconds": chunking_seconds,
         "summary_seconds": summary_seconds,
         "cached_text_seconds": 0.0,
+        **{k: v for k, v in timing.items() if k in {"text_method", "ocr_method", "ocr_used"}},
     }
 
 
@@ -1273,6 +2022,10 @@ def _openai_api_key() -> str:
     return api_key
 
 
+def _verbose_pdf_insight_enabled() -> bool:
+    return os.environ.get("EVH_IMPORT_VERBOSE_PDF_INSIGHT", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def embed_texts_openai(
     texts: list[str],
     *,
@@ -1296,7 +2049,7 @@ def embed_texts_openai(
         },
         method="POST",
     )
-    with urllib_request.urlopen(request, timeout=120) as response:
+    with urllib_request.urlopen(request, timeout=240) as response:
         data = json.loads(response.read().decode("utf-8"))
     items = data.get("data") or []
     vectors: list[list[float]] = []
@@ -1308,6 +2061,35 @@ def embed_texts_openai(
     if len(vectors) != len(texts):
         raise RuntimeError("OpenAI embeddings response size did not match requested batch size.")
     return vectors
+
+
+def embed_texts_openai_with_retry(
+    texts: list[str],
+    *,
+    model: str = DEFAULT_EMBEDDING_MODEL,
+    dimensions: int | None = DEFAULT_EMBEDDING_DIMENSIONS,
+    max_attempts: int = 3,
+    base_delay_s: float = 2.0,
+) -> list[list[float]]:
+    if not texts:
+        return []
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return embed_texts_openai(texts, model=model, dimensions=dimensions)
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            sleep_s = base_delay_s * (2 ** (attempt - 1))
+            print(
+                f"embedding_retry | attempt={attempt} | max_attempts={max_attempts} | batch_size={len(texts)} | error_type={type(exc).__name__} | error={exc} | sleep_s={sleep_s}",
+                flush=True,
+            )
+            time.sleep(sleep_s)
+    raise RuntimeError(
+        f"OpenAI embedding request failed after {max_attempts} attempts for batch_size={len(texts)}: {last_error}"
+    ) from last_error
 
 
 def vector_literal(values: Iterable[float]) -> str:
@@ -1425,25 +2207,115 @@ CREATE INDEX IF NOT EXISTS {table_name}_source_idx
 """.strip()
 
 
+def build_ocr_page_schema_sql(table_name: str) -> str:
+    return f"""
+CREATE TABLE IF NOT EXISTS {table_name} (
+    id BIGSERIAL PRIMARY KEY,
+    document_pdf_id TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_uri TEXT,
+    page_number INTEGER NOT NULL,
+    page_text TEXT NOT NULL DEFAULT '',
+    page_kind TEXT NOT NULL DEFAULT 'ocr',
+    ocr_method TEXT NOT NULL DEFAULT 'unknown',
+    status TEXT NOT NULL DEFAULT 'complete',
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS {table_name}_pdf_page_idx
+    ON {table_name} (document_pdf_id, page_number);
+
+CREATE INDEX IF NOT EXISTS {table_name}_pdf_idx
+    ON {table_name} (document_pdf_id);
+""".strip()
+
+
+def build_ocr_page_upsert_sql(
+    table_name: str,
+    *,
+    pdf_id: str,
+    source_name: str,
+    source_uri: str | None,
+    page_number: int,
+    page_text: str,
+    page_kind: str = "ocr",
+    ocr_method: str = "tesseract",
+    status: str = "complete",
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    metadata_json = json.dumps(metadata or {}, sort_keys=True)
+    return f"""
+INSERT INTO {table_name} (
+    document_pdf_id,
+    source_name,
+    source_uri,
+    page_number,
+    page_text,
+    page_kind,
+    ocr_method,
+    status,
+    metadata
+)
+VALUES (
+    {sql_quote(pdf_id)},
+    {sql_quote(source_name)},
+    {sql_quote(source_uri)},
+    {int(page_number)},
+    {sql_quote(page_text)},
+    {sql_quote(page_kind)},
+    {sql_quote(ocr_method)},
+    {sql_quote(status)},
+    {sql_quote(metadata_json)}
+)
+ON CONFLICT (document_pdf_id, page_number) DO UPDATE SET
+    source_name = EXCLUDED.source_name,
+    source_uri = EXCLUDED.source_uri,
+    page_text = EXCLUDED.page_text,
+    page_kind = EXCLUDED.page_kind,
+    ocr_method = EXCLUDED.ocr_method,
+    status = EXCLUDED.status,
+    metadata = EXCLUDED.metadata,
+    processed_at = now();
+""".strip()
+
+
 def build_deferred_ocr_schema_sql(table_name: str) -> str:
     return f"""
 CREATE TABLE IF NOT EXISTS {table_name} (
     id BIGSERIAL PRIMARY KEY,
     source_name TEXT NOT NULL,
     source_uri TEXT,
-    patient_id TEXT,
     patient_name TEXT,
-    pdf_id TEXT NOT NULL,
-    filename TEXT NOT NULL,
     page_count INTEGER,
     reason TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb
+    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+    disk_filename TEXT,
+    document_pdf_id TEXT,
+    source_system TEXT,
+    document_pdf_id TEXT,
+    original_filename TEXT,
+    remote_content_length BIGINT,
+    downloaded_sha256 TEXT,
+    fetch_uri TEXT,
+    fetch_uri_observed_at TIMESTAMPTZ,
+    local_cache_path TEXT,
+    content_hash TEXT,
+    content_length BIGINT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS {table_name}_pdf_id_idx
-    ON {table_name} (pdf_id);
+CREATE UNIQUE INDEX IF NOT EXISTS {table_name}_document_pdf_id_idx
+    ON {table_name} (document_pdf_id);
+
+CREATE INDEX IF NOT EXISTS {table_name}_content_hash_idx
+    ON {table_name} (content_hash)
+    WHERE content_hash IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS {table_name}_status_content_hash_idx
+    ON {table_name} (status, content_hash)
+    WHERE content_hash IS NOT NULL;
 """.strip()
 
 
@@ -1517,51 +2389,113 @@ def build_deferred_ocr_upsert_sql(
     *,
     source_name: str,
     source_uri: str | None,
-    patient_id: str | None,
     patient_name: str | None,
-    pdf_id: str,
-    filename: str,
     page_count: int | None,
     reason: str,
+    status: str = "pending",
     metadata: dict[str, Any] | None = None,
+    patient_id: str | None = None,
+    pdf_id: str,
+    filename: str,
+    content_hash: str | None = None,
+    content_length: int | None = None,
 ) -> str:
     metadata_json = json.dumps(metadata or {}, sort_keys=True)
     return f"""
 INSERT INTO {table_name} (
     source_name,
     source_uri,
-    patient_id,
     patient_name,
-    pdf_id,
-    filename,
     page_count,
     reason,
     status,
-    metadata
+    metadata,
+    disk_filename,
+    document_pdf_id,
+    source_system,
+    remote_content_length,
+    downloaded_sha256,
+    fetch_uri,
+    fetch_uri_observed_at,
+    local_cache_path,
+    content_hash,
+    content_length
 )
 VALUES (
     {sql_quote(source_name)},
     {sql_quote(source_uri)},
-    {sql_quote(patient_id)},
     {sql_quote(patient_name)},
-    {sql_quote(pdf_id)},
-    {sql_quote(filename)},
     {('NULL' if page_count is None else str(int(page_count)))},
     {sql_quote(reason)},
-    'pending',
-    {sql_quote(metadata_json)}
+    {sql_quote(status)},
+    {sql_quote(metadata_json)},
+    {sql_quote(filename)},
+    {sql_quote(pdf_id)},
+    {sql_quote('instinct')},
+    NULL,
+    {sql_quote(content_hash)},
+    {sql_quote(source_uri)},
+    NULL,
+    NULL,
+    {sql_quote(content_hash)},
+    {('NULL' if content_length is None else str(int(content_length)))}
 )
-ON CONFLICT (pdf_id) DO UPDATE SET
+ON CONFLICT (document_pdf_id) DO UPDATE SET
     source_name = EXCLUDED.source_name,
     source_uri = EXCLUDED.source_uri,
-    patient_id = EXCLUDED.patient_id,
     patient_name = EXCLUDED.patient_name,
-    filename = EXCLUDED.filename,
     page_count = EXCLUDED.page_count,
     reason = EXCLUDED.reason,
     status = EXCLUDED.status,
     metadata = EXCLUDED.metadata,
+    disk_filename = EXCLUDED.disk_filename,
+    source_system = EXCLUDED.source_system,
+    document_pdf_id = EXCLUDED.document_pdf_id,
+    remote_content_length = COALESCE(EXCLUDED.remote_content_length, {table_name}.remote_content_length),
+    downloaded_sha256 = COALESCE(EXCLUDED.downloaded_sha256, {table_name}.downloaded_sha256),
+    fetch_uri = COALESCE(EXCLUDED.fetch_uri, {table_name}.fetch_uri),
+    fetch_uri_observed_at = COALESCE(EXCLUDED.fetch_uri_observed_at, {table_name}.fetch_uri_observed_at),
+    local_cache_path = COALESCE(EXCLUDED.local_cache_path, {table_name}.local_cache_path),
+    content_hash = COALESCE(EXCLUDED.content_hash, {table_name}.content_hash),
+    content_length = COALESCE(EXCLUDED.content_length, {table_name}.content_length),
     detected_at = now();
+""".strip()
+
+
+def build_deferred_ocr_content_hash_lookup_sql(table_name: str, content_hash: str) -> str:
+    return f"""
+SELECT pdf_id, status
+FROM {table_name}
+WHERE content_hash = {sql_quote(content_hash)}
+ORDER BY detected_at DESC
+LIMIT 1;
+""".strip()
+
+
+def build_deferred_ocr_backfill_content_hash_sql(table_name: str, source_document_table_name: str) -> str:
+    return f"""
+UPDATE {table_name} d
+SET content_hash = s.content_hash,
+    content_length = s.content_length,
+    metadata = COALESCE(d.metadata, '{{}}'::jsonb) || jsonb_build_object(
+        'backfilled_content_hash', true,
+        'backfill_source', s.source_name
+    )
+FROM {source_document_table_name} s
+WHERE d.content_hash IS NULL
+  AND s.content_hash IS NOT NULL
+  AND (
+      s.metadata->>'pdf_id' = d.pdf_id
+      OR s.metadata->>'document_pdf_id' = d.pdf_id
+  );
+""".strip()
+
+
+def build_deferred_ocr_normalize_loaded_status_sql(table_name: str) -> str:
+    return f"""
+UPDATE {table_name}
+SET status = 'loaded'
+WHERE status <> 'loaded';
 """.strip()
 
 
@@ -1624,7 +2558,7 @@ def build_processed_check_sql(table_name: str, content_hash: str) -> str:
 SELECT 1
 FROM {table_name}
 WHERE content_hash = {sql_quote(content_hash)}
-  AND status = 'complete'
+  AND status = 'loaded'
 LIMIT 1;
 """.strip()
 
@@ -1745,7 +2679,7 @@ def build_source_document_backfill_sql(
         content_length=content_length,
         page_count=page_count,
         chunk_count=chunk_count,
-        clinical_summary=summary,
+        summary=summary,
         metadata=metadata,
     )
 
@@ -1831,24 +2765,25 @@ def run_psql(database_url: str, sql: str) -> subprocess.CompletedProcess[str]:
             temp_sql.write(sql_text)
             temp_sql_path = temp_sql.name
         try:
-            print(
-                json.dumps(
-                    {
-                        "stage": "psql_start",
-                        "sql_bytes": len(sql_text.encode("utf-8")),
-                        "sql_preview": sql_preview,
-                        "extra_args": extra_args,
-                        "pg_host": env.get("PGHOST"),
-                        "pg_port": env.get("PGPORT"),
-                        "pg_user": env.get("PGUSER"),
-                        "pg_database": env.get("PGDATABASE"),
-                        "pg_sslmode": env.get("PGSSLMODE"),
-                    },
-                    indent=2,
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
+            if SQL_VERBOSE_LOGGING:
+                print(
+                    json.dumps(
+                        {
+                            "stage": "psql_start",
+                            "sql_bytes": len(sql_text.encode("utf-8")),
+                            "sql_preview": sql_preview,
+                            "extra_args": extra_args,
+                            "pg_host": env.get("PGHOST"),
+                            "pg_port": env.get("PGPORT"),
+                            "pg_user": env.get("PGUSER"),
+                            "pg_database": env.get("PGDATABASE"),
+                            "pg_sslmode": env.get("PGSSLMODE"),
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
             start = time.perf_counter()
             completed = subprocess.run(
                 ["psql", "-v", "ON_ERROR_STOP=1", "-q", "-X", "-A", "-t", *extra_args, "-f", temp_sql_path],
@@ -1856,23 +2791,24 @@ def run_psql(database_url: str, sql: str) -> subprocess.CompletedProcess[str]:
                 text=True,
                 capture_output=True,
                 env=env,
-                timeout=180,
+                timeout=360,
             )
             elapsed = time.perf_counter() - start
-            print(
-                json.dumps(
-                    {
-                        "stage": "psql_done",
-                        "elapsed_seconds": round(elapsed, 3),
-                        "stdout_bytes": len(completed.stdout or ""),
-                        "stderr_bytes": len(completed.stderr or ""),
-                        "sql_preview": sql_preview,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
+            if SQL_VERBOSE_LOGGING:
+                print(
+                    json.dumps(
+                        {
+                            "stage": "psql_done",
+                            "elapsed_seconds": round(elapsed, 3),
+                            "stdout_bytes": len(completed.stdout or ""),
+                            "stderr_bytes": len(completed.stderr or ""),
+                            "sql_preview": sql_preview,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
             return completed
         except subprocess.TimeoutExpired as exc:
             print(
@@ -1916,14 +2852,16 @@ def run_psql(database_url: str, sql: str) -> subprocess.CompletedProcess[str]:
 
     if _apply_env_from_shell():
         try:
-            print(json.dumps({"stage": "psql_env_source", "mode": "shell"}, indent=2, sort_keys=True), flush=True)
+            if SQL_VERBOSE_LOGGING:
+                print(json.dumps({"stage": "psql_env_source", "mode": "shell"}, indent=2, sort_keys=True), flush=True)
             return _run_psql_with_args([])
         except subprocess.CalledProcessError:
             raise
 
     if _apply_env_from_url(database_url):
         try:
-            print(json.dumps({"stage": "psql_env_source", "mode": "url"}, indent=2, sort_keys=True), flush=True)
+            if SQL_VERBOSE_LOGGING:
+                print(json.dumps({"stage": "psql_env_source", "mode": "url"}, indent=2, sort_keys=True), flush=True)
             return _run_psql_with_args([])
         except subprocess.CalledProcessError:
             raise
@@ -1931,14 +2869,16 @@ def run_psql(database_url: str, sql: str) -> subprocess.CompletedProcess[str]:
     dsn = _dsn_from_env()
     if dsn:
         try:
-            print(json.dumps({"stage": "psql_env_source", "mode": "dsn"}, indent=2, sort_keys=True), flush=True)
+            if SQL_VERBOSE_LOGGING:
+                print(json.dumps({"stage": "psql_env_source", "mode": "dsn"}, indent=2, sort_keys=True), flush=True)
             return _run_psql_with_args([dsn])
         except subprocess.CalledProcessError:
             raise
 
     sanitized_url = _clean(database_url) or database_url
     try:
-        print(json.dumps({"stage": "psql_env_source", "mode": "sanitized_url"}, indent=2, sort_keys=True), flush=True)
+        if SQL_VERBOSE_LOGGING:
+            print(json.dumps({"stage": "psql_env_source", "mode": "sanitized_url"}, indent=2, sort_keys=True), flush=True)
         return _run_psql_with_args([sanitized_url])
     except subprocess.CalledProcessError as exc:
         print(
@@ -1964,6 +2904,81 @@ def has_processed_pdf(database_url: str, table_name: str, content_hash: str) -> 
     return bool(result.stdout.strip())
 
 
+def has_processed_pdf_id(
+    database_url: str,
+    source_document_table_name: str,
+    chunk_table_name: str,
+    pdf_id: str,
+) -> bool:
+    """Return whether this external Instinct PDF ID is already loaded."""
+    quoted_pdf_id = sql_quote(str(pdf_id))
+    sql = f"""
+SELECT 1
+WHERE EXISTS (
+    SELECT 1
+    FROM {source_document_table_name}
+    WHERE metadata->>'pdf_id' = {quoted_pdf_id}
+      AND status = 'loaded'
+)
+OR EXISTS (
+    SELECT 1
+    FROM {chunk_table_name}
+    WHERE metadata->>'pdf_id' = {quoted_pdf_id}
+       OR metadata->>'document_pdf_id' = {quoted_pdf_id}
+       OR source_uri LIKE '%' || {quoted_pdf_id} || '%'
+)
+OR EXISTS (
+    SELECT 1
+    FROM {source_document_table_name}
+    WHERE metadata->>'document_pdf_id' = {quoted_pdf_id}
+      AND status = 'loaded'
+)
+LIMIT 1;
+""".strip()
+    result = run_psql(database_url, sql)
+    return bool(result.stdout.strip())
+
+
+def fetch_processed_pdf_ids(
+    database_url: str,
+    source_document_table_name: str,
+    chunk_table_name: str,
+    pdf_ids: Sequence[str],
+) -> set[str]:
+    """Return the subset of PDF IDs already present in Postgres.
+
+    This is the bulk-friendly version of :func:`has_processed_pdf_id`.
+    It is intended for client-scoped preflight so we can pay the Postgres
+    round-trip once per client instead of once per PDF.
+    """
+    cleaned_ids = [str(pdf_id) for pdf_id in pdf_ids if str(pdf_id).strip()]
+    if not cleaned_ids:
+        return set()
+    values_clause = ", ".join(f"({sql_quote(pdf_id)})" for pdf_id in cleaned_ids)
+    sql = f"""
+WITH input_ids(pdf_id) AS (
+    VALUES {values_clause}
+)
+SELECT DISTINCT input_ids.pdf_id
+FROM input_ids
+WHERE EXISTS (
+    SELECT 1
+    FROM {source_document_table_name}
+    WHERE metadata->>'pdf_id' = input_ids.pdf_id
+      AND status = 'loaded'
+)
+OR EXISTS (
+    SELECT 1
+    FROM {source_document_table_name}
+    WHERE metadata->>'document_pdf_id' = input_ids.pdf_id
+      AND status = 'loaded'
+)
+ORDER BY input_ids.pdf_id;
+""".strip()
+    result = run_psql(database_url, sql)
+    return {row.strip() for row in result.stdout.splitlines() if row.strip()}
+
+
 def load_into_postgres(
     *,
     database_url: str,
@@ -1975,29 +2990,103 @@ def load_into_postgres(
     vector_dimensions: int,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
     embedding_batch_size: int = 64,
+    embedding_workers: int = 1,
     load_batch_size: int = 500,
 ) -> tuple[float, float]:
     rows: list[dict[str, Any]] = []
     embed_start = perf_counter()
+    verbose_insight = _verbose_pdf_insight_enabled()
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_begin",
+                "phase": "load_into_postgres",
+                "subphase": "embed_prepare",
+                "source_name": source_name,
+                "document_count": len(documents),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     source_summary: str = ""
     source_summary_kind: str = "structured_only"
     source_page_count = 0
     texts = [document.page_content for document in documents]
     embeddings: list[list[float]] = []
     batch_size = max(1, embedding_batch_size)
-    for batch_start in range(0, len(texts), batch_size):
-        embeddings.extend(
-            embed_texts_openai(
-                texts[batch_start : batch_start + batch_size],
-                model=embedding_model,
-                dimensions=vector_dimensions,
-            )
+    batches = [texts[batch_start : batch_start + batch_size] for batch_start in range(0, len(texts), batch_size)]
+    worker_count = max(1, embedding_workers)
+    if verbose_insight:
+        print(
+            f"embedding_plan | docs={len(documents)} | batches={len(batches)} | batch_size={batch_size} | workers={worker_count}",
+            flush=True,
         )
+    if len(batches) <= 1 or worker_count <= 1:
+        for batch_index, batch in enumerate(batches, start=1):
+            batch_start = perf_counter()
+            if verbose_insight:
+                print(
+                    f"embedding_batch_start | mode=serial | batch_index={batch_index} | batch_docs={len(batch)}",
+                    flush=True,
+                )
+            embeddings.extend(
+                embed_texts_openai_with_retry(
+                    batch,
+                    model=embedding_model,
+                    dimensions=vector_dimensions,
+                )
+            )
+            if verbose_insight:
+                print(
+                    f"embedding_batch_done | mode=serial | batch_index={batch_index} | batch_docs={len(batch)} | elapsed_s={perf_counter() - batch_start:.1f}",
+                    flush=True,
+                )
+    else:
+        worker_count = min(worker_count, len(batches))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = []
+            for batch_index, batch in enumerate(batches, start=1):
+                if verbose_insight:
+                    print(
+                        f"embedding_batch_start | mode=parallel | batch_index={batch_index} | batch_docs={len(batch)}",
+                        flush=True,
+                    )
+                futures.append((batch_index, len(batch), perf_counter(), executor.submit(embed_texts_openai_with_retry, batch, model=embedding_model, dimensions=vector_dimensions)))
+            for batch_index, batch_docs, batch_start, future in futures:
+                batch_vectors = future.result()
+                embeddings.extend(batch_vectors)
+                if verbose_insight:
+                    print(
+                        f"embedding_batch_done | mode=parallel | batch_index={batch_index} | batch_docs={batch_docs} | elapsed_s={perf_counter() - batch_start:.1f}",
+                        flush=True,
+                    )
+    if verbose_insight:
+        print(
+            f"embedding_phase_done | docs={len(documents)} | batches={len(batches)} | elapsed_s={perf_counter() - embed_start:.1f}",
+            flush=True,
+        )
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_done",
+                "phase": "load_into_postgres",
+                "subphase": "embed",
+                "source_name": source_name,
+                "document_count": len(documents),
+                "elapsed_seconds": round(perf_counter() - embed_start, 3),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     for document, embedding in zip(documents, embeddings):
         clean_chunk_text = _strip_nuls(document.page_content)
+        chunk_metadata = dict(document.metadata)
+        chunk_metadata.pop("table_records", None)
         clean_metadata = _strip_nuls(
             {
-                **document.metadata,
+                **chunk_metadata,
                 "source_name": source_name,
                 "source_uri": source_uri,
             }
@@ -2023,11 +3112,56 @@ def load_into_postgres(
     embedding_seconds = perf_counter() - embed_start
 
     load_start = perf_counter()
-    conn = psycopg.connect(database_url)
+    print(
+        json.dumps(
+            {
+                "status": "pdf_phase_begin",
+                "phase": "load_into_postgres",
+                "subphase": "postgres_connect",
+                "source_name": source_name,
+                "row_count": len(rows),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    if verbose_insight:
+        print(
+            f"postgres_load_plan | rows={len(rows)} | load_batch_size={load_batch_size}",
+            flush=True,
+        )
+    conn = _get_postgres_connection(database_url)
     try:
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_phase_done",
+                    "phase": "load_into_postgres",
+                    "subphase": "postgres_connect",
+                    "source_name": source_name,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_phase_begin",
+                    "phase": "load_into_postgres",
+                    "subphase": "source_document_upsert",
+                    "source_name": source_name,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         conn.execute("SET SESSION statement_timeout = 0")
         if documents:
             source_document = documents[0]
+            conn.execute(
+                f"ALTER TABLE {source_document_table_name} ADD COLUMN IF NOT EXISTS table_records JSONB NOT NULL DEFAULT '[]'::jsonb"
+            )
             clean_source_name = _strip_nuls(source_name)
             clean_source_uri = _strip_nuls(source_uri)
             clean_summary = _strip_nuls(source_summary)
@@ -2035,9 +3169,12 @@ def load_into_postgres(
                 {
                     "patient_id": source_document.metadata.get("patient_id"),
                     "patient_name": source_document.metadata.get("patient_name"),
+                    "pdf_id": source_document.metadata.get("pdf_id"),
+                    "document_pdf_id": source_document.metadata.get("pdf_id"),
                     "summary_style": source_summary_kind,
                     "term_summary": source_document.metadata.get("term_summary"),
                     "full_pdf_detected_terms": source_document.metadata.get("full_pdf_detected_terms"),
+                    "table_records": source_document.metadata.get("table_records", []),
                 }
             )
             conn.execute(
@@ -2050,10 +3187,11 @@ def load_into_postgres(
                     page_count,
                     chunk_count,
                     summary,
+                    table_records,
                     status,
                     metadata
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'complete', %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
                 ON CONFLICT (content_hash) DO UPDATE SET
                     source_name = EXCLUDED.source_name,
                     source_uri = EXCLUDED.source_uri,
@@ -2061,6 +3199,7 @@ def load_into_postgres(
                     page_count = EXCLUDED.page_count,
                     chunk_count = EXCLUDED.chunk_count,
                     summary = EXCLUDED.summary,
+                    table_records = EXCLUDED.table_records,
                     status = EXCLUDED.status,
                     processed_at = now(),
                     metadata = EXCLUDED.metadata
@@ -2073,11 +3212,24 @@ def load_into_postgres(
                     source_page_count,
                     len(documents),
                     clean_summary,
+                    json.dumps(source_document.metadata.get("table_records", []), sort_keys=True),
                     json.dumps(
                         clean_source_metadata,
                         sort_keys=True,
                     ),
                 ),
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "pdf_phase_done",
+                        "phase": "load_into_postgres",
+                        "subphase": "source_document_upsert",
+                        "source_name": source_name,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
             )
         if rows:
             chunk_rows = [
@@ -2096,6 +3248,27 @@ def load_into_postgres(
             load_batch_size = max(1, load_batch_size)
             with conn.cursor() as cur:
                 for row_start in range(0, len(chunk_rows), load_batch_size):
+                    row_end = min(row_start + load_batch_size, len(chunk_rows))
+                    print(
+                        json.dumps(
+                            {
+                                "status": "pdf_phase_begin",
+                                "phase": "load_into_postgres",
+                                "subphase": "chunk_batch",
+                                "source_name": source_name,
+                                "row_start": row_start,
+                                "row_end": row_end,
+                                "batch_rows": row_end - row_start,
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                    if verbose_insight:
+                        print(
+                            f"postgres_load_batch_start | batch_rows={row_end - row_start} | row_start={row_start} | row_end={row_end}",
+                            flush=True,
+                        )
                     cur.executemany(
                         f"""
                         INSERT INTO {table_name} (
@@ -2117,12 +3290,53 @@ def load_into_postgres(
                             embedding = EXCLUDED.embedding,
                             metadata = EXCLUDED.metadata
                         """,
-                        chunk_rows[row_start : row_start + load_batch_size],
+                        chunk_rows[row_start:row_end],
+                    )
+                    if verbose_insight:
+                        print(
+                            f"postgres_load_batch_done | batch_rows={row_end - row_start} | row_start={row_start} | row_end={row_end}",
+                            flush=True,
+                        )
+                    print(
+                        json.dumps(
+                            {
+                                "status": "pdf_phase_done",
+                                "phase": "load_into_postgres",
+                                "subphase": "chunk_batch",
+                                "source_name": source_name,
+                                "row_start": row_start,
+                                "row_end": row_end,
+                                "batch_rows": row_end - row_start,
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
                     )
         conn.commit()
-    finally:
-        conn.close()
+        print(
+            json.dumps(
+                {
+                    "status": "pdf_phase_done",
+                    "phase": "load_into_postgres",
+                    "subphase": "commit",
+                    "source_name": source_name,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    except Exception:
+        try:
+            conn.rollback()
+        finally:
+            _discard_postgres_connection(database_url, conn)
+        raise
     load_seconds = perf_counter() - load_start
+    if verbose_insight:
+        print(
+            f"postgres_load_done | rows={len(rows)} | embedding_seconds={embedding_seconds:.1f} | load_seconds={load_seconds:.1f}",
+            flush=True,
+        )
     return embedding_seconds, load_seconds
 
 

@@ -19,7 +19,10 @@ def _build_db_url() -> str:
     host = os.environ["EVH_PGHOST"]
     port = os.environ["EVH_PGPORT"]
     db = os.environ["EVH_PGDATABASE"]
-    return f"postgresql://{user}:{pw}@{host}:{port}/{db}"
+    # RDS rejects the non-encrypted fallback; require TLS explicitly so a
+    # bad credential cannot be masked by a misleading pg_hba/no-encryption
+    # error on the second connection attempt.
+    return f"postgresql://{user}:{pw}@{host}:{port}/{db}?sslmode=require"
 
 
 def main() -> int:
@@ -62,6 +65,12 @@ def main() -> int:
         "--delete-local-after-load",
         "--expected-clients",
         "12053",
+        "--client-pdf-workers",
+        "1",
+        "--page-workers",
+        "1",
+        "--embedding-workers",
+        "1",
     ]
 
     with log_file.open("a", encoding="utf-8") as log:
