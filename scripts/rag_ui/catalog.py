@@ -1262,10 +1262,26 @@ def _refresh_postgres_catalog_from_instinct() -> None:
     client_secret = str(secret.get("client_secret") or secret.get("clientSecret") or secret.get("password") or "").strip()
     if not client_id or not client_secret:
         raise RuntimeError("Instinct secret is missing client credentials")
-    from scripts.instinct_identity_sync import InstinctApiSyncClient, refresh_identity_tables, _connect
+    try:
+        from scripts.instinct_identity_sync import InstinctApiSyncClient, refresh_identity_tables, _connect
+    except ModuleNotFoundError as exc:
+        print(
+            "[RAG_TIMING] instinct_refresh_skipped "
+            f"reason={type(exc).__name__} message={exc}",
+            flush=True,
+        )
+        return
 
     client = InstinctApiSyncClient(_instinct_base_url(), client_id, client_secret)
-    conn = _connect()
+    try:
+        conn = _connect()
+    except Exception as exc:
+        print(
+            "[RAG_TIMING] instinct_refresh_skipped "
+            f"reason={type(exc).__name__} message={exc}",
+            flush=True,
+        )
+        return
     try:
         refresh_identity_tables(client, conn)
         print(
