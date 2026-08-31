@@ -1347,6 +1347,14 @@ def test_index_uses_request_driven_search_lifecycle():
     assert 'clearClientMenu()' in html
 
 
+@pytest.mark.unit
+def test_index_uses_instinct_emr_data_sprite_frame():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert 'const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];' in html
+    assert 'background-size:640px 64px' in html
+    assert 'familySpritePos("instinct_emr_data")' in html
+
+
 @pytest.fixture(scope="module")
 def live_instinct_catalog():
     _ensure_instinct_credentials_from_secrets_manager()

@@ -124,7 +124,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .source-nav-btn[disabled]{opacity:.28}
 .source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer;padding:0}
 .source-chip:hover,.source-chip:focus-visible{border-color:#b8c8d8;box-shadow:0 0 0 3px rgba(40,95,143,.08);outline:none}
-.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
+.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:640px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
 .source-chip .count{position:absolute;right:-4px;bottom:-4px;min-width:18px;height:18px;line-height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
 .source-popover{position:fixed;z-index:80;max-width:min(460px,calc(100vw - 24px));max-height:min(380px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
 .source-popover.open{display:block}
@@ -206,7 +206,7 @@ const SEARCH_DEBOUNCE_MS=250;
 const citationUrl=(documentId,pageNumber)=>
   `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
 
-const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other"];
+const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];
 const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
 const normalizeFamily=family=>familyOrder.includes(family)?family:"other";
 const familySpritePos=family=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
@@ -735,9 +735,7 @@ function clearTranscript(){
 }
 
 function updateQuestionPrompt(){
-  $("question").placeholder=state.firstAnswerSubmitted
-    ?"Ask another question…"
-    :"When was the last dental cleaning?";
+  $("question").placeholder=state.firstAnswerSubmitted ? "" : "When was the last dental cleaning?";
   const helper=$("question-helper");
   if(helper){
     helper.textContent=state.firstAnswerSubmitted
@@ -1058,7 +1056,7 @@ function sourceChip(doc,terms){
   button.setAttribute("aria-label",doc.document_title||"Source PDF");
   button.dataset.docId=doc.document_id||"";
   button.dataset.page=doc.pages[0]||1;
-  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("other")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
+  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("instinct_emr_data")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
 
   button.addEventListener("click",()=>{
     if(doc.document_id){
@@ -1219,6 +1217,7 @@ async function submitQuestion(){
     }
 
     $("question").value="";
+    $("question").defaultValue="";
     autoResize($("question"));
     state.firstAnswerSubmitted=true;
     updateQuestionPrompt();
