@@ -1092,6 +1092,10 @@ _CATALOG_REFRESH_STARTED_AT = 0.0
 
 
 def load_catalog_cached() -> RagCatalog | None:
+    explicit_path = os.environ.get("RAG_UI_DB_PATH", "").strip() or os.environ.get("RAG_UI_DATA_PATH", "").strip()
+    if explicit_path:
+        print("[RAG_TIMING] client_catalog_step1_cache_read source=skipped_explicit_path", flush=True)
+        return None
     if _CATALOG_MEMORY is None:
         print("[RAG_TIMING] client_catalog_step1_cache_read source=miss", flush=True)
         return None
@@ -1337,7 +1341,7 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
     print(f"[RAG_TIMING] refresh_catalog_enter data_path={str(data_path or '')!r} force={int(force)}", flush=True)
     explicit_path = data_path
     if explicit_path is None and _is_test_context():
-        explicit_path = os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip()
+        explicit_path = os.environ.get("RAG_UI_DB_PATH", "").strip() or os.environ.get("RAG_UI_DATA_PATH", "").strip()
     if explicit_path:
         catalog = _load_cached_file_catalog(resolve_data_path(explicit_path), force=force)
         print(f"[RAG_TIMING] refresh_catalog_exit source=file elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
