@@ -1178,6 +1178,94 @@ def test_lambda_exposes_synthetic_instinct_documents_in_references(monkeypatch):
 
 
 @pytest.mark.integration
+def test_lambda_preserves_synthetic_document_source_uris_in_citations(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setenv("TOKEN", "test-token")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([
+        {
+            "document_id": "doc-a",
+            "document_title": "Prior Doc",
+            "page_number": 1,
+            "page_label": "Page 1",
+            "source_page_url": "https://example.test/doc-a#page=1",
+            "snippet": "Prior evidence.",
+            "confidence": 0.99,
+            "date": "2026-08-02",
+        }
+    ], {"total_seconds": 0.01}))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks, **kwargs: "All set.")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "Follow-up question?"},
+            "body": json.dumps({
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Minnie"},
+                    "financials": {"account_id": "client-1", "balance": 12.34},
+                    "reminders": [],
+                    "documents": [
+                        {
+                            "document_id": "instinct-client-info-client-1",
+                            "document_title": "Instinct Client Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                            "page_number": 1,
+                            "page_label": "Live Account Summary",
+                            "source_page_url": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                        },
+                        {
+                            "document_id": "instinct-patient-info-pet-1",
+                            "document_title": "Instinct Patient Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/patient/pet-1",
+                            "page_number": 1,
+                            "page_label": "Live Patient Information",
+                            "source_page_url": "https://app.instinctvet.cloud/#/patient/pet-1",
+                        },
+                    ],
+                },
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert any(ref["document_id"] == "instinct-client-info-client-1" and ref["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1" for ref in payload["references"])
+    assert any(ref["document_id"] == "instinct-patient-info-pet-1" and ref["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1" for ref in payload["references"])
+    assert payload["citation_map"]["instinct-client-info-client-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+    assert payload["citation_map"]["instinct-patient-info-pet-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1"
+
+
+@pytest.mark.integration
+def test_lambda_document_page_routes_synthetic_instinct_docs_to_stable_urls(monkeypatch):
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/documents/instinct-client-info-client-1/pages/1",
+            "queryStringParameters": {"page": "1"},
+            "requestContext": {"http": {"method": "GET"}},
+        }
+    )
+    assert response["statusCode"] == 302
+    assert response["headers"]["location"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/documents/instinct-patient-info-pet-1/pages/1",
+            "queryStringParameters": {"page": "1"},
+            "requestContext": {"http": {"method": "GET"}},
+        }
+    )
+    assert response["statusCode"] == 302
+    assert response["headers"]["location"] == "https://app.instinctvet.cloud/#/patient/pet-1"
+
+
+@pytest.mark.integration
 def test_lambda_selected_context_survives_financials_failure(monkeypatch):
     fake_catalog = types.SimpleNamespace(
         clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},

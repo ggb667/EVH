@@ -893,7 +893,10 @@ function citationLink(ref){
   const label=ref.document_title||ref.documentTitle||ref.page_label||`Page ${page}`;
   const link=document.createElement("a");
   link.textContent=`${label} — Page ${page}`;
-  if(docId){
+  const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
+  if(sourceUri){
+    link.href=sourceUri;
+  }else if(docId){
     link.href=citationUrl(docId,page);
     link.target="_blank";
     link.rel="noopener";
@@ -909,7 +912,7 @@ function citationMarkerLink(match,citationMap){
   const link=document.createElement("a");
   link.textContent=`${docId} p.${page}`;
   if(ref.document_title)link.title=ref.document_title;
-  link.href=docId?citationUrl(docId,page):"#";
+  link.href=ref.source_uri||ref.sourcePageUrl||ref.source_page_url|| (docId?citationUrl(docId,page):"#");
   link.target="_blank";
   link.rel="noopener";
   return link;

@@ -562,6 +562,17 @@ def _resolve_cached_instinct_url(document_id: str, page_number: int, *, force_re
     return fragment_url
 
 
+def _synthetic_instinct_document_url(document_id: str) -> str:
+    document_id = str(document_id or "").strip()
+    if document_id.startswith("instinct-client-info-"):
+        client_id = document_id.removeprefix("instinct-client-info-").strip()
+        return f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
+    if document_id.startswith("instinct-patient-info-"):
+        patient_id = document_id.removeprefix("instinct-patient-info-").strip()
+        return f"https://app.instinctvet.cloud/#/patient/{patient_id}" if patient_id else ""
+    return ""
+
+
 def _summarize_context_chunks(chunks: list[dict]) -> str:
     lines: list[str] = []
     for idx, item in enumerate(chunks[:8], start=1):
@@ -802,7 +813,7 @@ def _build_document_url_map(documents: list[dict], conversation_refs: list[dict]
         parts = urlsplit(raw)
         if not parts.scheme and not parts.netloc:
             return raw.split("#", 1)[0]
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
+        return raw
 
     entries: dict[tuple[str, int], dict[str, str]] = {}
     for item in list(documents or []) + list(conversation_refs or []):
@@ -1398,7 +1409,9 @@ def _serve_options(event: dict) -> dict:
     items: list[dict]
     if os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip():
         catalog_started = time.perf_counter()
-        catalog = load_catalog()
+        catalog = load_catalog_cached()
+        if catalog is None:
+            catalog, _ = load_catalog_with_status(allow_stale=True)
         catalog_elapsed = time.perf_counter() - catalog_started
         print(f"[RAG_TIMING] options_catalog_seconds={catalog_elapsed:.3f}", flush=True)
 
@@ -1416,7 +1429,9 @@ def _serve_options(event: dict) -> dict:
         print(f"[RAG_TIMING] options_search_seconds={search_elapsed:.3f} count={len(items)}", flush=True)
     else:
         catalog_started = time.perf_counter()
-        catalog = load_catalog()
+        catalog = load_catalog_cached()
+        if catalog is None:
+            catalog, _ = load_catalog_with_status(allow_stale=True)
         catalog_elapsed = time.perf_counter() - catalog_started
         print(f"[RAG_TIMING] options_catalog_seconds={catalog_elapsed:.3f}", flush=True)
 
@@ -1717,7 +1732,7 @@ def _serve_document_page(event: dict) -> dict:
     except ValueError:
         page_number = 1
     try:
-        target = _resolve_cached_instinct_url(document_id, page_number)
+        target = _synthetic_instinct_document_url(document_id) or _resolve_cached_instinct_url(document_id, page_number)
     except Exception as exc:
         elapsed = time.perf_counter() - started
         print(
