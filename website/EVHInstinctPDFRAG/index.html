@@ -665,7 +665,9 @@ function setCatalogNotice(message){
     notice.className="status";
     notice.style.marginTop="0";
     const headerLeft=$(".header-left");
-    headerLeft.appendChild(notice);
+    if(headerLeft){
+      headerLeft.appendChild(notice);
+    }
   }
   notice.textContent=catalogNoticeText;
   notice.style.display=catalogNoticeText?"block":"none";
@@ -744,6 +746,15 @@ function updateQuestionPrompt(){
   }
 }
 
+function clearQuestionComposer(){
+  const question=$("question");
+  if(!question)return;
+  question.value="";
+  question.defaultValue="";
+  autoResize(question);
+  updateAsk();
+}
+
 function clearPatientSelection(){
   ensureComposerPlacement();
   persistCurrentConversation();
@@ -755,6 +766,7 @@ function clearPatientSelection(){
   $("pet-input").disabled=!state.client;
   $("pet-input").placeholder=state.client?"Type a patient name":"Select a client first";
   $("composer").style.display=state.client ? "" : "none";
+  clearQuestionComposer();
   updateSelectionMeta();
   updateAsk();
 }
@@ -775,6 +787,7 @@ function clearClientSelection(){
   $("pet-input").disabled=true;
   $("pet-input").placeholder="Select a client first";
   $("composer").style.display="none";
+  clearQuestionComposer();
   updateSelectionMeta();
   clearTranscript();
   updateAsk();
@@ -792,6 +805,7 @@ function chooseClient(item){
   clearPatientSelection();
   $("pet-input").disabled=false;
   $("pet-input").placeholder="Type a patient name";
+  clearQuestionComposer();
 
   if(!hasConversationForSelection(item.id, state.pet?.id || "")){
     clearTranscript();
@@ -824,6 +838,7 @@ function choosePet(item){
   $("pet-status").textContent=patientDisplayText(item);
   updateSelectionMeta();
   restoreConversationFor(state.client.id,item.id);
+  clearQuestionComposer();
   if(!hasConversationForSelection(state.client.id,item.id)){
     clearTranscript();
   }
@@ -919,10 +934,14 @@ function renderAnswerWithCitations(answer,citationMap){
 }
 
 function groupedRefs(turn){
-  const refs=(turn.citations||turn.references||[]).map(ref=>({
+  const sourceRefs=Array.isArray(turn.citations) && turn.citations.length
+    ? turn.citations
+    : (Array.isArray(turn.references) ? turn.references : []);
+  const refs=sourceRefs.map(ref=>({
     document_id:ref.document_id||ref.documentId||"",
     page_number:ref.page_number||ref.pageNumber||1,
     document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",
+    source_uri:ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"",
     snippet:ref.snippet||"",
     terms:Array.isArray(ref.terms)?ref.terms:[]
   }));
@@ -933,10 +952,12 @@ function groupedRefs(turn){
     const existing=byId.get(id)||{
       document_id:ref.document_id,
       document_title:ref.document_title,
+      source_uri:ref.source_uri||"",
       pages:[],
       snippets:[],
       terms:[]
     };
+    if(!existing.source_uri && ref.source_uri)existing.source_uri=ref.source_uri;
     existing.pages.push(ref.page_number);
     if(ref.snippet)existing.snippets.push(ref.snippet);
     if(ref.terms.length)existing.terms.push(...ref.terms);
@@ -1059,8 +1080,9 @@ function sourceChip(doc,terms){
   button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("instinct_emr_data")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
 
   button.addEventListener("click",()=>{
-    if(doc.document_id){
-      window.open(citationUrl(doc.document_id,doc.pages[0]||1),"_blank","noopener");
+    const target=doc.source_uri|| (doc.document_id ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
+    if(target){
+      window.open(target,"_blank","noopener");
     }
   });
   button.addEventListener("mouseenter",()=>showSourcePopover(button,doc,terms));
@@ -1169,6 +1191,10 @@ async function submitQuestion(){
     return;
   }
 
+  $("question").value="";
+  $("question").defaultValue="";
+  autoResize($("question"));
+
   state.loading=true;
   updateAsk();
   setAskStatus("Searching patient records and answering…");
@@ -1215,10 +1241,6 @@ async function submitQuestion(){
     }else{
       setCatalogNotice("");
     }
-
-    $("question").value="";
-    $("question").defaultValue="";
-    autoResize($("question"));
     state.firstAnswerSubmitted=true;
     updateQuestionPrompt();
     const elapsedSeconds=Number(data.elapsed_seconds);

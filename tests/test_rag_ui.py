@@ -1127,8 +1127,54 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
     assert response["statusCode"] == 200
     assert payload["answer"] == "All set."
     docs = captured["kwargs"]["selected_context"]["documents"]
-    assert docs[0]["document_id"] == "instinct-account-client-1"
+    assert docs[0]["document_id"] == "instinct-client-info-client-1"
+    assert docs[0]["document_title"] == "Instinct Client Info"
+    assert docs[0]["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+    assert docs[1]["document_id"] == "instinct-patient-info-pet-1"
+    assert docs[1]["document_title"] == "Instinct Patient Info"
+    assert docs[1]["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1"
     assert any(doc["document_id"] == "doc-x" for doc in docs)
+
+
+@pytest.mark.integration
+def test_lambda_exposes_synthetic_instinct_documents_in_references(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setenv("TOKEN", "test-token")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks, **kwargs: "All set.")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What reminders does he have?"},
+            "body": json.dumps({
+                "patient_context": {
+                    "patient_name": "Minnie",
+                    "species": "Canine",
+                    "breed": "Yorkshire Terrier",
+                    "owner_name": "Deborah Burchill",
+                },
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Minnie"},
+                    "financials": {"account_id": "client-1", "balance": 12.34},
+                    "reminders": [{"title": "Annual exam"}],
+                    "documents": [],
+                },
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    refs = payload["references"]
+    assert any(ref["document_id"] == "instinct-client-info-client-1" and ref["document_title"] == "Instinct Client Info" and ref["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1" for ref in refs)
+    assert any(ref["document_id"] == "instinct-patient-info-pet-1" and ref["document_title"] == "Instinct Patient Info" and ref["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1" for ref in refs)
 
 
 @pytest.mark.integration

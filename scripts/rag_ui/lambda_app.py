@@ -352,7 +352,7 @@ query searchAccountsIndexFinancials($params: SearchAccountIndexParams, $overdueI
 
 def _instinct_financial_document(client_record: dict[str, object], financials: dict[str, object]) -> dict[str, object]:
     account_id = _normalize_text(financials.get("account_id") or client_record.get("id"))
-    title = "Instinct Current Account Summary and Financials"
+    title = "Instinct Client Info"
     source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{account_id}" if account_id else ""
     lines = [
         f"Client: {_normalize_text(client_record.get('name'))}",
@@ -365,7 +365,7 @@ def _instinct_financial_document(client_record: dict[str, object], financials: d
         f"Invoices To Review: {json.dumps(financials.get('invoices_to_review') or [], sort_keys=True)}",
     ]
     return {
-        "document_id": f"instinct-account-{account_id}" if account_id else "instinct-account",
+        "document_id": f"instinct-client-info-{account_id}" if account_id else "instinct-client-info",
         "document_title": title,
         "page_label": "Live Account Summary",
         "page_number": 1,
@@ -386,7 +386,7 @@ def _instinct_patient_document(
 ) -> dict[str, object]:
     patient_id = _normalize_text(patient_record.get("id"))
     client_id = _normalize_text(client_record.get("id"))
-    title = "Instinct Current Patient Information"
+    title = "Instinct Patient Info"
     visit_id = _normalize_text(visit_id)
     if patient_id and visit_id:
         source_uri = f"https://app.instinctvet.cloud/#/patient/{patient_id}/charts?visitId={visit_id}"
@@ -408,7 +408,7 @@ def _instinct_patient_document(
     if financials and _normalize_text(financials.get("balance")):
         lines.append(f"Linked Account Balance: {_normalize_text(financials.get('balance'))}")
     return {
-        "document_id": f"instinct-patient-{patient_id}" if patient_id else "instinct-patient",
+        "document_id": f"instinct-patient-info-{patient_id}" if patient_id else "instinct-patient-info",
         "document_title": title,
         "page_label": "Live Patient Information",
         "page_number": 1,
@@ -660,9 +660,11 @@ def _merge_selected_context(
             merged_documents.append(
                 {
                     "document_id": doc_id,
+                    "document_title": str(doc.get("document_title") or doc.get("title") or "Source PDF"),
                     "title": str(doc.get("document_title") or doc.get("title") or "Source PDF"),
                     "type": str(doc.get("type") or doc.get("family") or ""),
-                    "source_page_url": str(doc.get("source_page_url") or ""),
+                    "source_uri": str(doc.get("source_uri") or doc.get("source_page_url") or ""),
+                    "source_page_url": str(doc.get("source_page_url") or doc.get("source_uri") or ""),
                 }
             )
     merged["documents"] = merged_documents
@@ -842,7 +844,7 @@ def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict
                 "document_id": document_id,
                 "page_number": page_number,
                 "document_title": doc.get("document_title") or hit.get("document_title"),
-                "source_uri": doc.get("source_uri") or hit.get("source_page_url"),
+                "source_uri": doc.get("source_uri") or doc.get("source_page_url") or hit.get("source_page_url"),
             }
         )
     for doc in documents:
