@@ -1091,10 +1091,14 @@ _CATALOG_REFRESH_STARTED_AT = 0.0
 
 def load_catalog_cached() -> RagCatalog | None:
     if _CATALOG_MEMORY is None:
+        print("[RAG_TIMING] load_catalog_cached source=miss", flush=True)
         return None
     cached_at, catalog = _CATALOG_MEMORY
     if (time.time() - cached_at) >= _refresh_interval_seconds():
+        print("[RAG_TIMING] load_catalog_cached source=expired", flush=True)
         return None
+    age = time.time() - cached_at
+    print(f"[RAG_TIMING] load_catalog_cached source=memory age_seconds={age:.3f}", flush=True)
     return catalog
 
 
@@ -1379,7 +1383,9 @@ def load_catalog_with_status(data_path: str | None = None, *, allow_stale: bool 
     catalog = refresh_catalog(data_path)
     if data_path is None:
         _CATALOG_MEMORY = (time.time(), catalog)
-    print(f"[RAG_TIMING] load_catalog_exit source=refresh elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        print(f"[RAG_TIMING] load_catalog_exit source=refresh switched_to_updated_catalog elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+    else:
+        print(f"[RAG_TIMING] load_catalog_exit source=refresh data_path={str(data_path or '')!r} elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     return catalog, {"source": "refresh", "stale": False, "age_seconds": 0.0, "refresh_running": _CATALOG_REFRESH_RUNNING}
 
 
