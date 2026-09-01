@@ -1091,14 +1091,14 @@ _CATALOG_REFRESH_STARTED_AT = 0.0
 
 def load_catalog_cached() -> RagCatalog | None:
     if _CATALOG_MEMORY is None:
-        print("[RAG_TIMING] load_catalog_cached source=miss", flush=True)
+        print("[RAG_TIMING] client_catalog_step1_cache_read source=miss", flush=True)
         return None
     cached_at, catalog = _CATALOG_MEMORY
     if (time.time() - cached_at) >= _refresh_interval_seconds():
-        print("[RAG_TIMING] load_catalog_cached source=expired", flush=True)
+        print("[RAG_TIMING] client_catalog_step1_cache_read source=expired", flush=True)
         return None
     age = time.time() - cached_at
-    print(f"[RAG_TIMING] load_catalog_cached source=memory age_seconds={age:.3f}", flush=True)
+    print(f"[RAG_TIMING] client_catalog_step1_cache_read source=memory age_seconds={age:.3f}", flush=True)
     return catalog
 
 
@@ -1379,10 +1379,13 @@ def load_catalog_with_status(data_path: str | None = None, *, allow_stale: bool 
             print(f"[RAG_TIMING] load_catalog_exit source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return catalog, {"source": "memory", "stale": False, "age_seconds": round(age, 3)}
     if data_path is None:
+        print("[RAG_TIMING] client_catalog_step2_instinct_refresh_start", flush=True)
         _maybe_start_catalog_refresh()
     catalog = refresh_catalog(data_path)
     if data_path is None:
+        print(f"[RAG_TIMING] client_catalog_step3_postgres_update_complete elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         _CATALOG_MEMORY = (time.time(), catalog)
+        print(f"[RAG_TIMING] client_catalog_step4_switch_to_updated_list elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         print(f"[RAG_TIMING] load_catalog_exit source=refresh switched_to_updated_catalog elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     else:
         print(f"[RAG_TIMING] load_catalog_exit source=refresh data_path={str(data_path or '')!r} elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
