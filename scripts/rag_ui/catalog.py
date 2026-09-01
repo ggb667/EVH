@@ -769,6 +769,7 @@ def _ensure_client_search_initialized() -> None:
     started = time.perf_counter()
     print("[RAG_TIMING] client_search_init_enter", flush=True)
     if CLIENT_SEARCH_INITIALIZED and (CLIENTS or CLIENT_BY_ID or CLIENT_FRAGMENT_INDEX):
+        print(f"[RAG_TIMING] client_catalog_step1_cache_read source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         print(f"[RAG_TIMING] client_catalog_cache_hit=1 elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return
     if not all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
@@ -779,6 +780,7 @@ def _ensure_client_search_initialized() -> None:
     load_seconds = time.perf_counter() - load_started
     CLIENT_SEARCH_INITIALIZED = True
     print(f"[RAG_TIMING] client_catalog_load_seconds={load_seconds:.3f} client_count={len(CLIENTS)}", flush=True)
+    print(f"[RAG_TIMING] client_catalog_step4_switch_to_updated_list elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     print(f"[RAG_TIMING] client_search_init_exit elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
 
 
