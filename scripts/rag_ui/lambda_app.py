@@ -797,9 +797,11 @@ def _extract_citations(chunks: list[dict]) -> list[dict]:
         {
             "document_id": hit["document_id"],
             "page_number": hit["page_number"],
+            "document_title": hit.get("document_title") or hit.get("page_label") or "Source PDF",
             "source_page_url": hit["source_page_url"],
             "snippet": hit["snippet"],
             "confidence": hit.get("confidence", 0.0),
+            "source_type": hit.get("source_type") or hit.get("family") or hit.get("type") or "",
         }
         for hit in chunks
     ]
@@ -858,6 +860,8 @@ def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict
                 "page_number": page_number,
                 "document_title": doc.get("document_title") or hit.get("document_title"),
                 "source_uri": doc.get("source_uri") or doc.get("source_page_url") or hit.get("source_page_url"),
+                "source_type": doc.get("source_type") or doc.get("family") or doc.get("type") or hit.get("source_type") or hit.get("family") or hit.get("type") or "",
+                "snippet": hit.get("snippet") or "",
             }
         )
     for doc in documents:
@@ -878,6 +882,8 @@ def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict
                 "page_number": page_number,
                 "document_title": doc.get("document_title") or doc.get("documentTitle") or doc.get("page_label") or "Source PDF",
                 "source_uri": doc.get("source_uri") or doc.get("source_page_url") or "",
+                "source_type": doc.get("source_type") or doc.get("family") or doc.get("type") or "",
+                "snippet": doc.get("snippet") or "",
             }
         )
     return references
@@ -1163,28 +1169,40 @@ def _answer_messages(
     }
     selected_context_text = json.dumps(structured_selected_context, indent=2, sort_keys=True)
     history_text = json.dumps(conversation_turns, indent=2, sort_keys=True)
-    evidence_refs = [
-        {
-            "document_id": str(item.get("document_id") or "").strip(),
-            "page_number": int(item.get("page_number") or 1),
-            "document_title": str(item.get("document_title") or "Source PDF").strip() or "Source PDF",
-            "source_uri": str(item.get("source_page_url") or "").strip(),
-        }
-        for item in context_chunks
-        if str(item.get("document_id") or "").strip()
-    ]
-    for ref in conversation_refs:
+    evidence_refs: list[dict[str, object]] = []
+    evidence_ref_keys: set[tuple[str, int]] = set()
+
+    def add_evidence_ref(ref: dict[str, object]) -> None:
         document_id = str(ref.get("document_id") or "").strip()
         if not document_id:
-            continue
+            return
+        try:
+            page_number = int(ref.get("page_number") or ref.get("pageNumber") or ref.get("page") or 1)
+        except (TypeError, ValueError):
+            page_number = 1
+        key = (document_id, page_number)
+        if key in evidence_ref_keys:
+            return
+        evidence_ref_keys.add(key)
         evidence_refs.append(
             {
                 "document_id": document_id,
-                "page_number": int(ref.get("page_number") or 1),
+                "page_number": page_number,
                 "document_title": str(ref.get("document_title") or "Source PDF").strip() or "Source PDF",
-                "source_uri": str(ref.get("source_uri") or "").strip(),
+                "source_uri": str(ref.get("source_uri") or ref.get("source_page_url") or "").strip(),
+                "source_type": str(ref.get("source_type") or ref.get("family") or ref.get("type") or "").strip(),
             }
         )
+
+    for ref in selected_context.get("documents") or []:
+        if isinstance(ref, dict):
+            add_evidence_ref(ref)
+    for ref in context_chunks:
+        if isinstance(ref, dict):
+            add_evidence_ref(ref)
+    for ref in conversation_refs:
+        if isinstance(ref, dict):
+            add_evidence_ref(ref)
     context_text = _summarize_context_chunks(context_chunks)
     practice_stack_context = (practice_stack_context or DEFAULT_PRACTICE_STACK_CONTEXT).strip()
     system_text = (
@@ -1211,7 +1229,9 @@ def _answer_messages(
         "Keep the answer concise and clinically useful.\n"
         "If multiple documents support the answer, synthesize them clearly.\n"
         "Do not require exact wording from a retrieved document when a reasonable evidence-based inference is supported.\n"
-        "When citing a source, emit machine-readable markers like [CITE document_id=\"61173\" page=\"1\"] and do not invent URLs."
+        "Every factual claim supported by an item in the Evidence reference map must end with its machine-readable citation marker.\n"
+        "When using selected Instinct financial or patient data, cite the corresponding Instinct Client Info or Instinct Patient Info document.\n"
+        "Emit markers exactly like [CITE document_id=\"61173\" page=\"1\"] and do not invent document IDs, pages, or URLs."
     )
     user_text = (
         f"Selected conversation context:\n{selected_context_text}\n\n"

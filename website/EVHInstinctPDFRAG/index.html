@@ -74,6 +74,13 @@ input:disabled::placeholder{
   color:#a8adb4;
 }
 textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
+textarea:disabled{
+  background:#f1f2f4;
+  color:#69727b;
+  border-color:#d8dce0;
+  box-shadow:none;
+  cursor:wait;
+}
 .menu{
   position:absolute;
   z-index:30;
@@ -212,8 +219,18 @@ function isInstinctUrl(url){
 
 const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];
 const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
-const normalizeFamily=family=>familyOrder.includes(family)?family:"other";
+const normalizeFamily=family=>{
+  const value=String(family||"").trim().toLowerCase().replace(/[\s-]+/g,"_");
+  if(["instinct","synthetic","synthetic_document","instinct_synthetic"].includes(value))return "instinct_emr_data";
+  return familyOrder.includes(value)?value:"other";
+};
 const familySpritePos=family=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
+const evidenceFamily=ref=>{
+  const explicit=ref?.source_type||ref?.sourceType||ref?.family||ref?.document_family||ref?.documentFamily||ref?.type||"";
+  if(explicit)return explicit;
+  const label=`${ref?.document_title||ref?.documentTitle||""} ${ref?.source_name||ref?.sourceName||""}`;
+  return /\binstinct\b/i.test(label)?"instinct_emr_data":"other";
+};
 
 const state={
   client:null,
@@ -649,7 +666,9 @@ function scheduleOptionSearch({
 
 function updateAsk(){
   const ask=$("ask");
-  const enabled=state.client&&state.pet&&$("question").value.trim();
+  const question=$("question");
+  const enabled=state.client&&state.pet&&question.value.trim();
+  question.disabled=Boolean(state.loading);
   ask.disabled=!enabled||state.loading;
   ask.classList.toggle("ready",Boolean(enabled)&&!state.loading);
   ask.classList.toggle("running",Boolean(state.loading));
@@ -952,14 +971,16 @@ function renderAnswerWithCitations(answer,citationMap){
 }
 
 function groupedRefs(turn){
-  const sourceRefs=Array.isArray(turn.citations) && turn.citations.length
-    ? turn.citations
-    : (Array.isArray(turn.references) ? turn.references : []);
+  const sourceRefs=[
+    ...(Array.isArray(turn.citations)?turn.citations:[]),
+    ...(Array.isArray(turn.references)?turn.references:[])
+  ];
   const refs=sourceRefs.map(ref=>({
     document_id:ref.document_id||ref.documentId||"",
     page_number:ref.page_number||ref.pageNumber||1,
     document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",
     source_uri:ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"",
+    family:evidenceFamily(ref),
     snippet:ref.snippet||"",
     terms:Array.isArray(ref.terms)?ref.terms:[]
   }));
@@ -971,11 +992,13 @@ function groupedRefs(turn){
       document_id:ref.document_id,
       document_title:ref.document_title,
       source_uri:ref.source_uri||"",
+      family:ref.family,
       pages:[],
       snippets:[],
       terms:[]
     };
     if(!existing.source_uri && ref.source_uri)existing.source_uri=ref.source_uri;
+    if(existing.family==="other"&&ref.family!=="other")existing.family=ref.family;
     existing.pages.push(ref.page_number);
     if(ref.snippet)existing.snippets.push(ref.snippet);
     if(ref.terms.length)existing.terms.push(...ref.terms);
@@ -1095,16 +1118,16 @@ function sourceChip(doc,terms){
   button.setAttribute("aria-label",doc.document_title||"Source PDF");
   button.dataset.docId=doc.document_id||"";
   button.dataset.page=doc.pages[0]||1;
-  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("instinct_emr_data")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
+  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos(doc.family)}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
 
   button.addEventListener("click",()=>{
     const target=doc.source_uri|| (doc.document_id ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
     if(target){
       if(isInstinctUrl(target)){
         window.location.href=target;
-      }else{
-        window.open(target,"_blank","noopener");
+        return;
       }
+      window.open(target,"_blank","noopener");
     }
   });
   button.addEventListener("mouseenter",()=>showSourcePopover(button,doc,terms));
@@ -1213,10 +1236,6 @@ async function submitQuestion(){
     return;
   }
 
-  $("question").value="";
-  $("question").defaultValue="";
-  autoResize($("question"));
-
   state.loading=true;
   updateAsk();
   setAskStatus("Searching patient records and answering…");
@@ -1273,6 +1292,9 @@ async function submitQuestion(){
   }catch(error){
     setAskStatus(`Unable to answer: ${error.message}`);
   }finally{
+    $("question").value="";
+    $("question").defaultValue="";
+    autoResize($("question"));
     state.loading=false;
     updateAsk();
   }
