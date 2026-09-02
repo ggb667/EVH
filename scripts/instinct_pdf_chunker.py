@@ -2389,6 +2389,7 @@ def build_deferred_ocr_upsert_sql(
     *,
     source_name: str,
     source_uri: str | None,
+    client_id: str | None = None,
     patient_name: str | None,
     page_count: int | None,
     reason: str,
@@ -2400,7 +2401,10 @@ def build_deferred_ocr_upsert_sql(
     content_hash: str | None = None,
     content_length: int | None = None,
 ) -> str:
-    metadata_json = json.dumps(metadata or {}, sort_keys=True)
+    metadata_payload = dict(metadata or {})
+    if client_id is not None:
+        metadata_payload.setdefault("client_id", client_id)
+    metadata_json = json.dumps(metadata_payload, sort_keys=True)
     return f"""
 INSERT INTO {table_name} (
     source_name,
@@ -3098,6 +3102,7 @@ def load_into_postgres(
             {
                 "source_name": source_name,
                 "source_uri": source_uri,
+                "document_pdf_id": document_pdf_id,
                 "page_number": document.metadata["page_number"],
                 "chunk_index": document.metadata["chunk_index"],
                 "chunk_text": clean_chunk_text,
@@ -3180,6 +3185,7 @@ def load_into_postgres(
             conn.execute(
                 f"""
                 INSERT INTO {source_document_table_name} (
+                    document_pdf_id,
                     source_name,
                     source_uri,
                     content_hash,
@@ -3191,8 +3197,9 @@ def load_into_postgres(
                     status,
                     metadata
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
                 ON CONFLICT (content_hash) DO UPDATE SET
+                    document_pdf_id = EXCLUDED.document_pdf_id,
                     source_name = EXCLUDED.source_name,
                     source_uri = EXCLUDED.source_uri,
                     content_length = EXCLUDED.content_length,
@@ -3205,6 +3212,7 @@ def load_into_postgres(
                     metadata = EXCLUDED.metadata
                 """,
                 (
+                    source_document.metadata.get("document_pdf_id") or source_document.metadata.get("pdf_id"),
                     clean_source_name,
                     clean_source_uri,
                     hashlib.sha256((source_uri or source_name).encode("utf-8")).hexdigest(),
@@ -3234,6 +3242,7 @@ def load_into_postgres(
         if rows:
             chunk_rows = [
                 (
+                    _strip_nuls(row.get("document_pdf_id")),
                     _strip_nuls(row["source_name"]),
                     _strip_nuls(row.get("source_uri")),
                     int(row["page_number"]),
@@ -3270,8 +3279,9 @@ def load_into_postgres(
                             flush=True,
                         )
                     cur.executemany(
-                        f"""
+                    f"""
                         INSERT INTO {table_name} (
+                            document_pdf_id,
                             source_name,
                             source_uri,
                             page_number,
@@ -3281,8 +3291,9 @@ def load_into_postgres(
                             embedding,
                             metadata
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (chunk_hash) DO UPDATE SET
+                            document_pdf_id = EXCLUDED.document_pdf_id,
                             source_uri = EXCLUDED.source_uri,
                             page_number = EXCLUDED.page_number,
                             chunk_index = EXCLUDED.chunk_index,
