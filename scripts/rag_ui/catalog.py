@@ -230,6 +230,23 @@ def _pg_connect():
         )
 
 
+@lru_cache(maxsize=4096)
+def _instinct_chart_file_url(document_id: str) -> str:
+    document_id = str(document_id or "").strip()
+    if not document_id:
+        return ""
+    mutation = """
+mutation createChartFileUrl($id: ID!, $inline: Boolean) {
+  createChartFileUrl(id: $id, inline: $inline)
+}
+""".strip()
+    data = _instinct_graphql_json(mutation, {"id": document_id, "inline": True})
+    url = str(((data.get("data") or {}).get("createChartFileUrl")) or "").strip()
+    if not url:
+        return ""
+    return url
+
+
 def _openai_api_key() -> str:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if api_key:
@@ -508,14 +525,14 @@ def load_patient_documents(client_id: str, pet_id: str | None = None) -> list[di
         if not document_id or document_id in seen:
             continue
         seen.add(document_id)
+        source_uri = _instinct_chart_file_url(document_id)
         documents.append(
             {
                 "document_id": document_id,
                 "document_title": str(document_title or "Source PDF"),
-                "source_uri": "",
+                "source_uri": source_uri,
                 "page_number": int(page_number or 1),
                 "page_label": str(page_label or f"Page {page_number or 1}"),
-                "source_page_url": "",
             }
         )
     materialize_seconds = time.perf_counter() - materialize_started

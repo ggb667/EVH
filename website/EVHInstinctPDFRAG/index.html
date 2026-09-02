@@ -206,6 +206,10 @@ const SEARCH_DEBOUNCE_MS=250;
 const citationUrl=(documentId,pageNumber)=>
   `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
 
+function isInstinctUrl(url){
+  return String(url||"").startsWith("https://app.instinctvet.cloud/");
+}
+
 const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];
 const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
 const normalizeFamily=family=>familyOrder.includes(family)?family:"other";
@@ -896,6 +900,12 @@ function citationLink(ref){
   const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
   if(sourceUri){
     link.href=sourceUri;
+    if(isInstinctUrl(sourceUri)){
+      link.target="_self";
+    }else{
+      link.target="_blank";
+      link.rel="noopener";
+    }
   }else if(docId){
     link.href=citationUrl(docId,page);
     link.target="_blank";
@@ -912,9 +922,14 @@ function citationMarkerLink(match,citationMap){
   const link=document.createElement("a");
   link.textContent=`${docId} p.${page}`;
   if(ref.document_title)link.title=ref.document_title;
-  link.href=ref.source_uri||ref.sourcePageUrl||ref.source_page_url|| (docId?citationUrl(docId,page):"#");
-  link.target="_blank";
-  link.rel="noopener";
+  const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
+  link.href=sourceUri|| (docId?citationUrl(docId,page):"#");
+  if(isInstinctUrl(sourceUri)){
+    link.target="_self";
+  }else{
+    link.target="_blank";
+    link.rel="noopener";
+  }
   return link;
 }
 
@@ -1085,7 +1100,11 @@ function sourceChip(doc,terms){
   button.addEventListener("click",()=>{
     const target=doc.source_uri|| (doc.document_id ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
     if(target){
-      window.open(target,"_blank","noopener");
+      if(isInstinctUrl(target)){
+        window.location.href=target;
+      }else{
+        window.open(target,"_blank","noopener");
+      }
     }
   });
   button.addEventListener("mouseenter",()=>showSourcePopover(button,doc,terms));

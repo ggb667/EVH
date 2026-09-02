@@ -813,7 +813,9 @@ def _build_document_url_map(documents: list[dict], conversation_refs: list[dict]
         parts = urlsplit(raw)
         if not parts.scheme and not parts.netloc:
             return raw.split("#", 1)[0]
-        return raw
+        if parts.netloc.endswith("instinctvet.cloud"):
+            return raw
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
     entries: dict[tuple[str, int], dict[str, str]] = {}
     for item in list(documents or []) + list(conversation_refs or []):

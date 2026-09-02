@@ -434,6 +434,44 @@ def test_catalog_search_reads_sqlite_database(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_load_patient_documents_resolves_instinct_chart_url(monkeypatch):
+    class FakeCursor:
+        def execute(self, sql, params):
+            self.sql = sql
+            self.params = params
+
+        def fetchall(self):
+            return [
+                ("133774", "Emmett Bleu Burchill Part 2 [Pages 161-280].pdf", 1, "Page 1", 42),
+            ]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(rag_catalog, "_pg_connect", lambda: FakeConnection())
+    monkeypatch.setattr(rag_catalog, "_instinct_chart_file_url", lambda document_id: f"https://app.instinctvet.cloud/#/chart-file/{document_id}")
+
+    documents = rag_catalog.load_patient_documents("17579316-5a67-41e4-90ef-0ae73f4b9c9c", "11525")
+
+    assert documents == [
+        {
+            "document_id": "133774",
+            "document_title": "Emmett Bleu Burchill Part 2 [Pages 161-280].pdf",
+            "source_uri": "https://app.instinctvet.cloud/#/chart-file/133774",
+            "page_number": 1,
+            "page_label": "Page 1",
+        }
+    ]
+
+
+@pytest.mark.unit
 def test_load_catalog_refreshes_after_fifteen_minutes(tmp_path, monkeypatch):
     sample = tmp_path / "sample.json"
     write_sample_catalog(sample)
@@ -1152,7 +1190,7 @@ def test_lambda_exposes_synthetic_instinct_documents_in_references(monkeypatch):
     response = lambda_handler(
         {
             "rawPath": "/api/rag/answer",
-            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What reminders does he have?"},
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is Deborah Burchill's balance?"},
             "body": json.dumps({
                 "patient_context": {
                     "patient_name": "Minnie",
@@ -1165,7 +1203,15 @@ def test_lambda_exposes_synthetic_instinct_documents_in_references(monkeypatch):
                     "patient": {"id": "pet-1", "name": "Minnie"},
                     "financials": {"account_id": "client-1", "balance": 12.34},
                     "reminders": [{"title": "Annual exam"}],
-                    "documents": [],
+                    "documents": [
+                        {
+                            "document_id": "instinct-client-info-client-1",
+                            "document_title": "Instinct Client Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                            "page_number": 1,
+                            "page_label": "Live Account Summary",
+                        }
+                    ],
                 },
             }),
             "requestContext": {"http": {"method": "POST"}},
@@ -1173,8 +1219,12 @@ def test_lambda_exposes_synthetic_instinct_documents_in_references(monkeypatch):
     )
     payload = json.loads(response["body"])
     refs = payload["references"]
+    assert response["statusCode"] == 200
+    assert "What is Deborah Burchill's balance?" in payload["question"]
     assert any(ref["document_id"] == "instinct-client-info-client-1" and ref["document_title"] == "Instinct Client Info" and ref["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1" for ref in refs)
     assert any(ref["document_id"] == "instinct-patient-info-pet-1" and ref["document_title"] == "Instinct Patient Info" and ref["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1" for ref in refs)
+    assert payload["citation_map"]["instinct-client-info-client-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+    assert payload["citation_map"]["instinct-patient-info-pet-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1"
 
 
 @pytest.mark.integration
