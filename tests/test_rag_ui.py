@@ -1583,6 +1583,8 @@ def test_index_routes_real_documents_through_lambda_for_fresh_instinct_urls():
     assert "if(isSyntheticInstinctDocument(documentId)&&isInstinctUrl(sourceUri))return sourceUri;" in html
     assert 'return documentId?citationUrl(documentId,pageNumber):"#";' in html
     assert "never expose stored deferred-disk locators" in html
+    assert "if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){" in html
+    assert "link.href=docId?citationUrl(docId,page):" in html
 
 
 @pytest.fixture(scope="module")

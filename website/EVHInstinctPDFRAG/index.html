@@ -930,16 +930,15 @@ function citationLink(ref){
   const link=document.createElement("a");
   link.textContent=`${label} — Page ${page}`;
   const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
-  if(sourceUri){
+  if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
     link.href=sourceUri;
-    if(isInstinctUrl(sourceUri)){
-      link.target="_self";
-    }else{
-      link.target="_blank";
-      link.rel="noopener";
-    }
+    link.target="_self";
   }else if(docId){
     link.href=citationUrl(docId,page);
+    link.target="_blank";
+    link.rel="noopener";
+  }else if(sourceUri){
+    link.href=sourceUri;
     link.target="_blank";
     link.rel="noopener";
   }
@@ -955,10 +954,11 @@ function citationMarkerLink(match,citationMap){
   link.textContent=`${docId} p.${page}`;
   if(ref.document_title)link.title=ref.document_title;
   const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
-  link.href=sourceUri|| (docId?citationUrl(docId,page):"#");
-  if(isInstinctUrl(sourceUri)){
+  if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
+    link.href=sourceUri;
     link.target="_self";
   }else{
+    link.href=docId?citationUrl(docId,page):(sourceUri||"#");
     link.target="_blank";
     link.rel="noopener";
   }
