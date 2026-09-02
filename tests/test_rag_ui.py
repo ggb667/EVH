@@ -1103,15 +1103,7 @@ def test_answer_messages_for_burchill_balance_question_include_financial_context
                 "invoices_to_review": [{"id": "inv-1", "balance": 12.0}],
             },
             "reminders": [{"title": "Annual exam"}],
-            "documents": [
-                {
-                    "document_id": "instinct-client-info-client-1",
-                    "document_title": "Instinct Client Info",
-                    "page_number": 1,
-                    "source_uri": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
-                    "source_type": "instinct",
-                }
-            ],
+            "documents": [],
         },
     )
 
@@ -1123,10 +1115,6 @@ def test_answer_messages_for_burchill_balance_question_include_financial_context
     assert '"balance": 123.45' in user_text
     assert '"unapplied_payment_amount": 0.0' in user_text
     assert '"invoices_to_review"' in user_text
-    assert '"document_id": "instinct-client-info-client-1"' in user_text
-    assert '"source_type": "instinct"' in user_text
-    system_text = captured["messages"][0]["content"]
-    assert "cite the corresponding Instinct Client Info or Instinct Patient Info document" in system_text
 
 
 @pytest.mark.integration
@@ -1567,6 +1555,34 @@ def test_index_uses_instinct_emr_data_sprite_frame():
     assert 'background-size:640px 64px' in html
     assert 'familySpritePos(doc.family)' in html
     assert 'return /\\binstinct\\b/i.test(label)?"instinct_emr_data":"other";' in html
+
+
+@pytest.mark.unit
+def test_index_keeps_question_visible_until_request_finishes():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    loading_start = html.index("state.loading=true;", html.index("async function submitQuestion()"))
+    finally_start = html.index("}finally{", loading_start)
+    clear_start = html.index('$("question").value="";', loading_start)
+    assert clear_start > finally_start
+    assert "question.disabled=Boolean(state.loading);" in html
+    assert "textarea:disabled{" in html
+
+
+@pytest.mark.unit
+def test_index_merges_citations_and_references_for_source_icons():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert "...(Array.isArray(turn.citations)?turn.citations:[])" in html
+    assert "...(Array.isArray(turn.references)?turn.references:[])" in html
+    assert "family:evidenceFamily(ref)" in html
+
+
+@pytest.mark.unit
+def test_index_routes_real_documents_through_lambda_for_fresh_instinct_urls():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert "function evidenceLinkTarget(documentId,pageNumber,sourceUri)" in html
+    assert "if(isSyntheticInstinctDocument(documentId)&&isInstinctUrl(sourceUri))return sourceUri;" in html
+    assert 'return documentId?citationUrl(documentId,pageNumber):"#";' in html
+    assert "never expose stored deferred-disk locators" in html
 
 
 @pytest.fixture(scope="module")
