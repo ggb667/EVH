@@ -1580,11 +1580,13 @@ def test_index_merges_citations_and_references_for_source_icons():
 def test_index_routes_real_documents_through_lambda_for_fresh_instinct_urls():
     html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
     assert "function evidenceLinkTarget(documentId,pageNumber,sourceUri)" in html
+    assert "function isDeferredDiskUrl(url)" in html
     assert "if(isSyntheticInstinctDocument(documentId)&&isInstinctUrl(sourceUri))return sourceUri;" in html
-    assert 'return documentId?citationUrl(documentId,pageNumber):"#";' in html
+    assert "else if(docId && !isDeferredDiskUrl(sourceUri)){" in html
     assert "never expose stored deferred-disk locators" in html
     assert "if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){" in html
-    assert "link.href=docId?citationUrl(docId,page):" in html
+    assert "const target=isSyntheticInstinctDocument(doc.document_id)" in html
+    assert ": (doc.document_id && !isDeferredDiskUrl(doc.source_uri) ? citationUrl(doc.document_id,doc.pages[0]||1) : \"\");" in html or "citationUrl(doc.document_id,doc.pages[0]||1)" in html
 
 
 @pytest.fixture(scope="module")

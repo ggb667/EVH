@@ -217,6 +217,10 @@ function isInstinctUrl(url){
   return String(url||"").startsWith("https://app.instinctvet.cloud/");
 }
 
+function isDeferredDiskUrl(url){
+  return String(url||"").startsWith("deferred-disk:");
+}
+
 function isSyntheticInstinctDocument(documentId){
   const value=String(documentId||"");
   return value.startsWith("instinct-client-info-")||value.startsWith("instinct-patient-info-");
@@ -933,7 +937,7 @@ function citationLink(ref){
   if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
     link.href=sourceUri;
     link.target="_self";
-  }else if(docId){
+  }else if(docId && !isDeferredDiskUrl(sourceUri)){
     link.href=citationUrl(docId,page);
     link.target="_blank";
     link.rel="noopener";
@@ -958,7 +962,7 @@ function citationMarkerLink(match,citationMap){
     link.href=sourceUri;
     link.target="_self";
   }else{
-    link.href=docId?citationUrl(docId,page):(sourceUri||"#");
+    link.href=(docId && !isDeferredDiskUrl(sourceUri))?citationUrl(docId,page):(sourceUri||"#");
     link.target="_blank";
     link.rel="noopener";
   }
@@ -1136,7 +1140,7 @@ function sourceChip(doc,terms){
   button.addEventListener("click",()=>{
     const target=isSyntheticInstinctDocument(doc.document_id)
       ? evidenceLinkTarget(doc.document_id,doc.pages[0]||1,doc.source_uri)
-      : (doc.document_id ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
+      : (doc.document_id && !isDeferredDiskUrl(doc.source_uri) ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
     if(target){
       if(isSyntheticInstinctDocument(doc.document_id)&&isInstinctUrl(target)){
         window.location.href=target;
