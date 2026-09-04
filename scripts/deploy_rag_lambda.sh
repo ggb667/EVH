@@ -7,6 +7,49 @@ FUNCTION_NAME="${FUNCTION_NAME:-evh_instinct_rag_search}"
 
 cd "$ROOT_DIR"
 
+echo "[bootstrap] load lambda postgres env"
+eval "$(
+python3 - <<'PY'
+import json
+import subprocess
+
+required = ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")
+
+def current_env():
+    try:
+        result = subprocess.run(
+            [
+                "aws",
+                "lambda",
+                "get-function-configuration",
+                "--function-name",
+                "evh_instinct_rag_search",
+                "--query",
+                "Environment.Variables",
+                "--output",
+                "json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(exc.stderr or exc.stdout or str(exc))
+    data = json.loads(result.stdout or "{}")
+    if not isinstance(data, dict):
+        raise SystemExit("lambda environment payload was not a JSON object")
+    return data
+
+env = current_env()
+missing = [name for name in required if not str(env.get(name) or "").strip()]
+if missing:
+    raise SystemExit(f"missing lambda postgres env vars: {', '.join(missing)}")
+for name in required:
+    value = str(env[name]).replace("'", "'\"'\"'")
+    print(f"export {name}='{value}'")
+PY
+)"
+
 echo "[preflight] py_compile"
 python -m py_compile \
   scripts/rag_ui/catalog.py \

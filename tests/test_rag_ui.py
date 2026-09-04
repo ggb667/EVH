@@ -111,6 +111,55 @@ def _ensure_instinct_credentials_from_secrets_manager() -> None:
     raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials") from last_error
 
 
+def _ensure_postgres_credentials_from_secrets_manager() -> None:
+    if all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
+        return
+
+    secret_arn = os.environ.get("EVH_PGDATABASE_SECRET_ARN", "").strip() or os.environ.get("EVH_PG_SECRET_ARN", "").strip()
+    if not secret_arn:
+        raise AssertionError("EVH_PGDATABASE_SECRET_ARN or EVH_PG_SECRET_ARN is required for live Postgres access")
+
+    result = subprocess.run(
+        [
+            "aws",
+            "secretsmanager",
+            "get-secret-value",
+            "--region",
+            "us-east-1",
+            "--secret-id",
+            secret_arn,
+            "--query",
+            "SecretString",
+            "--output",
+            "text",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    secret_string = str(result.stdout or "").strip().strip('"')
+    if not secret_string:
+        raise AssertionError(f"Postgres secret {secret_arn} was empty")
+    payload = json.loads(secret_string)
+    if not isinstance(payload, dict):
+        raise AssertionError(f"Postgres secret {secret_arn} did not contain JSON object credentials")
+
+    def pick(*names: str) -> str:
+        for name in names:
+            value = str(payload.get(name) or "").strip()
+            if value:
+                return value
+        return ""
+
+    os.environ["EVH_PGHOST"] = pick("host", "hostname", "dbHost", "rdsHost", "PGHOST")
+    os.environ["EVH_PGPORT"] = pick("port", "dbPort", "PGPORT") or "5432"
+    os.environ["EVH_PGDATABASE"] = pick("database", "dbname", "dbName", "PGDATABASE")
+    os.environ["EVH_PGUSER"] = pick("username", "user", "dbUser", "PGUSER")
+    os.environ["EVH_PGPASSWORD"] = pick("password", "secret", "dbPassword", "PGPASSWORD")
+    if not all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
+        raise AssertionError(f"Postgres secret {secret_arn} did not contain the needed connection fields")
+
+
 def write_sample_catalog(path: Path) -> None:
     payload = {
         "accounts": [
