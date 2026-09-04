@@ -327,14 +327,20 @@ def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
                         {
                             "id": "p-1",
                             "isActive": True,
-                            "remindOn": "2027-08-04",
+                            "remindOn": "2026-06-11",
                             "reminderLabel": {"label": "Heartworm Prevention"},
                         },
                         {
                             "id": "p-2",
                             "isActive": True,
-                            "remindOn": "2027-08-04",
+                            "remindOn": "2026-06-13",
                             "reminderLabel": {"label": "Flea / Tick / Heartworm Prevention"},
+                        },
+                        {
+                            "id": "p-3",
+                            "isActive": True,
+                            "remindOn": "2026-09-30",
+                            "reminderLabel": {"label": "Librela Inj."},
                         },
                     ],
                     "vaccine": [
@@ -342,7 +348,19 @@ def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
                             "id": "v-1",
                             "isActive": True,
                             "remindOn": "2027-08-04",
-                            "reminderLabel": {"label": "Librela Injection"},
+                            "reminderLabel": {"label": "Bordetella Oral Parainfluenza Vaccine"},
+                        },
+                        {
+                            "id": "v-2",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "DA2P + Leptospirosis 4"},
+                        },
+                        {
+                            "id": "v-3",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Rabies Vaccine (Canine)"},
                         }
                     ],
                 }
@@ -352,13 +370,71 @@ def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
     monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
 
     reminders = lambda_app._fetch_instinct_reminders(
-        {"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "Deborah Burchill", "pims_code": "8762"},
+        {"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "Dorothy Burchill", "pims_code": "8762"},
         {"id": "11525", "name": "Emmett Bleu (#4) Burchill"},
     )
 
     assert "getPatientRemindersQuery" in captured["query"]
     assert captured["variables"] == {"params": {"filters": {}, "patientId": "11525"}}
-    assert [rem["title"] for rem in reminders] == ["Heartworm Prevention", "Flea / Tick / Heartworm Prevention", "Librela Injection"]
+    assert [rem["title"] for rem in reminders] == [
+        "Heartworm Prevention",
+        "Flea / Tick / Heartworm Prevention",
+        "Librela Inj.",
+        "Bordetella Oral Parainfluenza Vaccine",
+        "DA2P + Leptospirosis 4",
+        "Rabies Vaccine (Canine)",
+    ]
+    assert [rem["due_date"] for rem in reminders] == [
+        "2026-06-11",
+        "2026-06-13",
+        "2026-09-30",
+        "2027-08-04",
+        "2027-08-04",
+        "2027-08-04",
+    ]
+
+
+@pytest.mark.integration
+def test_lambda_answer_includes_emmett_burchill_vaccine_due_dates(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Dorothy Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Emmett Bleu (#4) Burchill", species="Canine", breed="Dog", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr(
+        "scripts.rag_ui.lambda_app._fetch_instinct_reminders",
+        lambda client_record, patient_record: [
+            {"title": "Bordetella Oral Parainfluenza Vaccine", "due_date": "2027-08-04", "status": "active"},
+            {"title": "DA2P + Leptospirosis 4", "due_date": "2027-08-04", "status": "active"},
+            {"title": "Rabies Vaccine (Canine)", "due_date": "2027-08-04", "status": "active"},
+        ],
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+
+    captured = {}
+
+    def fake_answer(question, chunks, **kwargs):
+        captured["question"] = question
+        captured["kwargs"] = kwargs
+        return "Emmett's vaccines are due on 2027-08-04."
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", fake_answer)
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "For Emmett Bleu (#4) Burchill, Dorothy Burchill's dog, when are his vaccines due?"},
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert payload["answer"] == "Emmett's vaccines are due on 2027-08-04."
+    assert captured["question"] == "For Emmett Bleu (#4) Burchill, Dorothy Burchill's dog, when are his vaccines due?"
+    assert captured["kwargs"]["selected_context"]["patient"]["name"] == "Emmett Bleu (#4) Burchill"
+    assert captured["kwargs"]["selected_context"]["reminders"][0]["due_date"] == "2027-08-04"
+    assert captured["kwargs"]["selected_context"]["reminders"][1]["title"] == "DA2P + Leptospirosis 4"
 
 
 @pytest.mark.unit

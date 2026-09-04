@@ -488,7 +488,7 @@ query getPatientRemindersQuery($params: ListPatientReminderParams!) {
                     or ((row.get("reminderLabel") or {}) if isinstance(row.get("reminderLabel"), dict) else {}).get("label")
                 ),
                 "type": _normalize_text(row.get("type") or row.get("reminderType") or row.get("category")),
-                "due_date": _normalize_text(row.get("dueAt") or row.get("dueDate") or row.get("due")),
+                "due_date": _normalize_text(row.get("dueAt") or row.get("dueDate") or row.get("due") or row.get("remindOn")),
                 "status": _normalize_text(row.get("status") or row.get("state") or row.get("reminderStatus")),
             }
         )
