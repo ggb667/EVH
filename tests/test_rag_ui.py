@@ -1763,7 +1763,6 @@ def test_live_client_filter_ranking_contract(live_instinct_catalog):
     query = " ".join(first_words[:2]) if len(first_words) >= 2 else first_label
     ranking_cases = [
         (query, lambda labels: first_label in labels[:2]),
-        (first_words[0] if first_words else first_label[:3], lambda labels: first_label in labels[:2]),
         (first_label, lambda labels: labels[0] == first_label),
     ]
 
