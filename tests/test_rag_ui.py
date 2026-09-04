@@ -737,7 +737,7 @@ def test_answer_messages_include_selected_context_bundle(monkeypatch):
     monkeypatch.setattr(lambda_app, "_openai_api_key", lambda: "test-key")
 
     answer = lambda_app._call_openai_answer(
-        "What is due soon?",
+        "What vaccines are due or overdue, and when?",
         [],
         patient_context={
             "patient_name": "Minnie",
@@ -749,7 +749,7 @@ def test_answer_messages_include_selected_context_bundle(monkeypatch):
             "client": {"id": "client-1", "name": "Deborah Burchill"},
             "patient": {"id": "pet-1", "name": "Minnie"},
             "financials": {"balance": 12.34},
-            "reminders": [{"title": "Annual exam"}],
+            "reminders": [{"title": "Annual exam", "due_date": "2026-10-01", "status": "active"}],
             "documents": [{"title": "Visit Summary"}],
         },
     )
@@ -759,6 +759,7 @@ def test_answer_messages_include_selected_context_bundle(monkeypatch):
     assert "Selected conversation context:" in user_text
     assert '"balance": 12.34' in user_text
     assert '"Annual exam"' in user_text
+    assert '"due_date": "2026-10-01"' in user_text
     assert '"Visit Summary"' in user_text
     assert '"Deborah Burchill"' in user_text
 
@@ -786,7 +787,7 @@ def test_lambda_serves_rag_answer_with_selected_context_bundle(monkeypatch):
     response = lambda_handler(
         {
             "rawPath": "/api/rag/answer",
-            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What vaccines are due or overdue, and when?"},
             "body": json.dumps({
                 "selected_context": {
                     "client": {"id": "client-1", "name": "Deborah Burchill"},
@@ -819,7 +820,7 @@ def test_lambda_builds_selected_context_for_first_client_pet_answer(monkeypatch)
         "pims_code": "8762",
         "label": "Deborah Burchill",
         "number_of_patients": 1,
-        "balance": 123.45,
+        "balance": 0.0,
         "unapplied_payment_amount": 0.0,
         "aged_balances": {"current": 12.0, "over30": 34.0, "over60": 0.0, "over90": 0.0, "over120": 0.0},
         "invoices_to_review": [{"id": "inv-1", "balance": 12.0}],
@@ -855,7 +856,7 @@ def test_lambda_builds_selected_context_for_first_client_pet_answer(monkeypatch)
     assert captured["question"] == "Do you have billing information for Deborah?"
     assert captured["kwargs"]["selected_context"]["client"]["name"] == "Deborah Burchill"
     assert captured["kwargs"]["selected_context"]["patient"]["name"] == "Emmett Bleu (#4)"
-    assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 123.45
+    assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 0.0
     assert captured["kwargs"]["selected_context"]["documents"][0]["document_id"] == "doc-x"
     assert captured["kwargs"]["selected_context"]["financials"]["account_id"] == "client-1"
 
@@ -960,7 +961,7 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
     response = lambda_handler(
         {
             "rawPath": "/api/rag/answer",
-            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What vaccines are due or overdue, and when?"},
             "body": json.dumps({
                 "patient_context": {
                     "patient_name": "Minnie",
@@ -1008,7 +1009,7 @@ def test_lambda_selected_context_survives_financials_failure(monkeypatch):
     response = lambda_handler(
         {
             "rawPath": "/api/rag/answer",
-            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What vaccines are due or overdue, and when?"},
             "requestContext": {"http": {"method": "POST"}},
         }
     )
@@ -1043,7 +1044,7 @@ def test_lambda_selected_context_survives_document_load_failure(monkeypatch):
     response = lambda_handler(
         {
             "rawPath": "/api/rag/answer",
-            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What vaccines are due or overdue, and when?"},
             "requestContext": {"http": {"method": "POST"}},
         }
     )
@@ -1080,14 +1081,14 @@ def test_lambda_answer_survives_empty_retrieval(monkeypatch):
     response = lambda_handler(
         {
             "rawPath": "/api/rag/answer",
-            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is due soon?"},
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What vaccines are due or overdue, and when?"},
             "requestContext": {"http": {"method": "POST"}},
         }
     )
     payload = json.loads(response["body"])
     assert response["statusCode"] == 200
     assert payload["answer"] == "All set."
-    assert captured["question"] == "What is due soon?"
+    assert captured["question"] == "What vaccines are due or overdue, and when?"
     assert captured["chunks"] == []
     assert captured["kwargs"]["selected_context"]["financials"]["balance"] == 12.34
     assert captured["kwargs"]["selected_context"]["reminders"][0]["title"] == "Annual exam"

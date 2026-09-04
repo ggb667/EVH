@@ -252,46 +252,62 @@ query getAccountsFinancials($params: ListAccountsParams, $overdueInvoicesOnly: B
   }
 }
 """.strip()
-    variables = {
-        "params": {"q": name or pims_code, "includeZeroBalances": False, "perPage": 25},
-        "overdueInvoicesOnly": False,
-    }
-    data = _instinct_graphql_json(query, variables)
-    accounts = (((data.get("data") or {}).get("accounts")) or [])
-    if not isinstance(accounts, list):
-        return {}
     target_id = _normalize_text(client_record.get("id"))
     target_pims = _normalize_text(client_record.get("pims_code"))
     target_name = _normalize_text(client_record.get("name")).lower()
-    selected = None
-    for account in accounts:
-        if not isinstance(account, dict):
+
+    def _pick_account(accounts: list[dict[str, object]]) -> dict[str, object] | None:
+        selected = None
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            if target_id and _normalize_text(account.get("id")) == target_id:
+                selected = account
+                break
+            if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
+                selected = account
+                break
+            label = _normalize_text(account.get("label")).lower()
+            if target_name and (label == target_name or target_name in label):
+                selected = account
+                break
+        if selected is None and accounts:
+            selected = accounts[0]
+        return selected if isinstance(selected, dict) else None
+
+    searches = [
+        {"q": name or pims_code, "includeZeroBalances": False, "perPage": 25},
+        {"q": pims_code or name, "includeZeroBalances": True, "perPage": 50},
+    ]
+    best: dict[str, object] = {}
+    for attempt, params in enumerate(searches, start=1):
+        data = _instinct_graphql_json(query, {"params": params, "overdueInvoicesOnly": False})
+        accounts = (((data.get("data") or {}).get("accounts")) or [])
+        if not isinstance(accounts, list):
             continue
-        if target_id and _normalize_text(account.get("id")) == target_id:
-            selected = account
-            break
-        if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
-            selected = account
-            break
-        label = _normalize_text(account.get("label")).lower()
-        if target_name and (label == target_name or target_name in label):
-            selected = account
-            break
-    if selected is None and accounts:
-        selected = accounts[0]
-    if not isinstance(selected, dict):
-        return {}
-    running = selected.get("runningLedger") or {}
-    return {
-        "account_id": _normalize_text(selected.get("id")),
-        "pims_code": _normalize_text(selected.get("pimsCode")),
-        "label": _normalize_text(selected.get("label")) or _normalize_text(client_record.get("name")),
-        "number_of_patients": selected.get("numberOfPatients"),
-        "balance": running.get("balance"),
-        "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
-        "aged_balances": running.get("agedBalances") or {},
-        "invoices_to_review": running.get("invoicesToReview") or [],
-    }
+        selected = _pick_account(accounts)
+        if not isinstance(selected, dict):
+            continue
+        running = selected.get("runningLedger") or {}
+        best = {
+            "account_id": _normalize_text(selected.get("id")),
+            "pims_code": _normalize_text(selected.get("pimsCode")),
+            "label": _normalize_text(selected.get("label")) or _normalize_text(client_record.get("name")),
+            "number_of_patients": selected.get("numberOfPatients"),
+            "balance": running.get("balance"),
+            "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
+            "aged_balances": running.get("agedBalances") or {},
+            "invoices_to_review": running.get("invoicesToReview") or [],
+        }
+        print(
+            "[RAG_TIMING] financials_selected "
+            f"attempt={attempt} account_id={best['account_id']} pims_code={best['pims_code']} "
+            f"label={best['label']} has_balance={best['balance'] is not None}",
+            flush=True,
+        )
+        if best.get("balance") is not None:
+            return best
+    return best
 
 
 def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: dict[str, object]) -> list[dict[str, object]]:
