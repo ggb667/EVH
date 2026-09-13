@@ -100,13 +100,15 @@ aws lambda update-function-configuration \
 aws lambda wait function-updated --function-name "$FUNCTION_NAME"
 
 echo "[deploy] configure env"
+APP_VERSION="$(git rev-parse --short HEAD)"
 CURRENT_ENV_JSON="$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Environment.Variables' --output json)"
-python3 - "$CURRENT_ENV_JSON" "$QUEUE_URL" "$QUEUE_ARN" <<'PY'
+python3 - "$CURRENT_ENV_JSON" "$QUEUE_URL" "$QUEUE_ARN" "$APP_VERSION" <<'PY'
 import json, os, subprocess, sys
 current = json.loads(sys.argv[1] or "{}")
 current["EVH_IMPORT_QUEUE_URL"] = sys.argv[2]
 current["EVH_IMPORT_QUEUE_ARN"] = sys.argv[3]
 current["EVH_BATCH_FLOW_VERSION"] = "1"
+current["RAG_IMPORT_DELTA_VERSION"] = sys.argv[4]
 current["STEP13_DOCUMENT_LIMIT"] = os.environ.get("STEP13_DOCUMENT_LIMIT", "1000").strip() or "1000"
 payload = json.dumps({"Variables": current})
 subprocess.check_call([
