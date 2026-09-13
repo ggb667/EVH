@@ -45,7 +45,7 @@ TRACE_FUNCTION_CALLS = os.environ.get("EVH_IMPORT_TRACE_CALLS", "").strip().lowe
 _CHECKPOINT_SHUTDOWN_CALLBACK: Callable[[], None] | None = None
 
 from scripts.evh_reminder_importer import InstinctApiAdapter
-from scripts.instinct_shard_utils import iter_clients_from_index
+from scripts.instinct_batch_walk import iter_clients_from_index
 from scripts.instinct_pdf_chunker import (
     ChunkingConfig,
     DEFAULT_EMBEDDING_DIMENSIONS,
@@ -1629,9 +1629,9 @@ def main(argv: list[str] | None = None) -> int:
         "--pdf-storage-dir",
         default=os.environ.get(
             "EVH_PDF_STORAGE_DIR",
-            str(DATA_ROOT / "instinct-pdfs"),
+            "/tmp/evh_instinct_import/pdfs",
         ),
-        help="Permanent storage directory for downloaded source PDFs.",
+        help="Storage directory for downloaded source PDFs.",
     )
     parser.add_argument(
         "--checkpoint",
@@ -1676,12 +1676,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--deferred-ocr-table-name", default=DEFAULT_DEFERRED_OCR_TABLE_NAME)
     parser.add_argument(
         "--deferred-pdf-dir",
-        default=str(DATA_ROOT / "instinct-pdfs-deferred"),
+        default=os.environ.get("EVH_DEFERRED_PDF_DIR", "/tmp/evh_instinct_import/deferred"),
         help="Move unprocessed/deferred PDFs here when OCR/load cannot finish yet.",
     )
     parser.add_argument(
         "--processed-pdf-dir",
-        default=str(DATA_ROOT / "instinct-pdfs-processed"),
+        default=os.environ.get("EVH_PROCESSED_PDF_DIR", "/tmp/evh_instinct_import/processed"),
         help="Move successfully processed PDFs here after load completes.",
     )
     parser.add_argument("--limit-clients", type=int, default=0, help="Optional cap for testing.")

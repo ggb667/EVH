@@ -2,15 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ZIP_PATH="${ZIP_PATH:-$ROOT_DIR/deploy/evh_instinct_rag_search.zip}"
-FUNCTION_NAME="${FUNCTION_NAME:-evh_instinct_rag_search}"
+ZIP_PATH="${ZIP_PATH:-$ROOT_DIR/deploy/evh_instinct_rag_import_delta.zip}"
+FUNCTION_NAME="${FUNCTION_NAME:-evh_instinct_rag_import_delta}"
 
 cd "$ROOT_DIR"
 
 echo "[preflight] py_compile"
 python -m py_compile \
-  scripts/rag_ui/catalog.py \
-  scripts/rag_ui/lambda_app.py
+  scripts/rag_import_delta_lambda.py \
+  scripts/instinct_cache_sync_pipeline.py \
+  scripts/instinct_identity_sync.py
 
 echo "[preflight] import smoke"
 python - <<'PY'
@@ -18,13 +19,10 @@ import sys
 import types
 
 sys.modules.setdefault("boto3", types.ModuleType("boto3"))
-import scripts.rag_ui.catalog
-import scripts.rag_ui.lambda_app
+import scripts.rag_import_delta_lambda
+import scripts.instinct_cache_sync_pipeline
 print("import smoke passed")
 PY
-
-echo "[preflight] rag ui tests"
-python -m pytest tests/test_rag_ui.py -q
 
 echo "[package] build lambda zip"
 ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
@@ -37,8 +35,8 @@ import zipfile
 from pathlib import Path
 
 root = Path(os.environ["ROOT_DIR"])
-zip_path = root / "deploy/evh_instinct_rag_search.zip"
-build_dir = Path(tempfile.mkdtemp(prefix="evh-rag-lambda-build-"))
+zip_path = root / "deploy/evh_instinct_rag_import_delta.zip"
+build_dir = Path(tempfile.mkdtemp(prefix="evh-rag-import-delta-build-"))
 staging = build_dir
 package_root = root
 zip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,26 +53,23 @@ subprocess.check_call([
     "--implementation",
     "cp",
     "--python-version",
-    "314",
+    "313",
     "--abi",
-    "cp314",
+    "cp313",
     "--target",
     str(staging),
     "psycopg==3.2.13",
     "psycopg-binary==3.2.13",
-    "pg8000==1.31.2",
+    "requests==2.32.3",
     "boto3==1.35.99",
     "botocore==1.35.99",
 ])
 
 for arc, src in [
     ("scripts/__init__.py", package_root / "scripts/__init__.py"),
-    ("scripts/rag_ui/lambda_app.py", package_root / "scripts/rag_ui/lambda_app.py"),
-    ("scripts/rag_ui/catalog.py", package_root / "scripts/rag_ui/catalog.py"),
-    ("scripts/rag_ui/__init__.py", package_root / "scripts/rag_ui/__init__.py"),
-    ("scripts/rag_ui/README.md", package_root / "scripts/rag_ui/README.md"),
-    ("website/EVHInstinctPDFRAG/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
-    ("scripts/rag_ui/static/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
+    ("scripts/rag_import_delta_lambda.py", package_root / "scripts/rag_import_delta_lambda.py"),
+    ("scripts/instinct_cache_sync_pipeline.py", package_root / "scripts/instinct_cache_sync_pipeline.py"),
+    ("scripts/instinct_identity_sync.py", package_root / "scripts/instinct_identity_sync.py"),
 ]:
     dest = staging / arc
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -109,46 +104,59 @@ import sys
 
 version = sys.argv[1]
 current = json.loads(sys.argv[2] or "{}")
-current["RAG_UI_VERSION"] = version
+current["RAG_IMPORT_DELTA_VERSION"] = version
+current["STEP13_DOCUMENT_LIMIT"] = os.environ.get("STEP13_DOCUMENT_LIMIT", "1000").strip() or "1000"
 
 required = ("EVH_PGDATABASE", "EVH_PGHOST", "EVH_PGPORT", "EVH_PGUSER", "EVH_PGPASSWORD")
-missing = [name for name in required if not os.environ.get(name, "").strip()]
-if missing:
-    raise SystemExit(f"Missing required deploy env vars: {', '.join(missing)}")
 for name in required:
-    current[name] = os.environ[name]
+    value = os.environ.get(name, "").strip() or str(current.get(name, "")).strip()
+    if not value:
+        raise SystemExit(f"Missing required deploy env var: {name}")
+    current[name] = value
 
-for optional in ("INSTINCT_CLIENT_SECRET_ARN", "OPENAI_API_KEY_SECRET_ARN"):
-    value = os.environ.get(optional, "").strip()
+for name in ("INSTINCT_CLIENT_ID", "INSTINCT_CLIENT_SECRET"):
+    value = os.environ.get(name, "").strip() or str(current.get(name, "")).strip()
+    if not value:
+        raise SystemExit(f"Missing required deploy env var: {name}")
+    current[name] = value
+
+optional = ("EVH_PGDATABASE_URL", "INSTINCT_API_BASE_URL")
+for name in optional:
+    value = os.environ.get(name, "").strip()
     if value:
-        current[optional] = value
+        current[name] = value
+
+for name in ("INSTINCT_CLIENT_SECRET_ARN", "OPENAI_API_KEY_SECRET_ARN"):
+    value = os.environ.get(name, "").strip() or str(current.get(name, "")).strip()
+    if value:
+        current[name] = value
 
 payload = json.dumps({"Variables": current})
 subprocess.check_call([
     "aws", "lambda", "update-function-configuration",
-    "--function-name", "evh_instinct_rag_search",
+    "--function-name", "evh_instinct_rag_import_delta",
     "--environment", payload,
     "--output", "json",
 ])
 PY
 
-echo "[smoke] live lambda route check"
+echo "[smoke] lambda invoke"
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"rawPath":"/api/options","requestContext":{"http":{"method":"GET"}},"queryStringParameters":{"kind":"client","q":"Deborah"}}' \
-  /tmp/evh_options_smoke.json \
-  >/tmp/evh_options_smoke.meta.json
+  --payload '{"patient_limit":1,"document_limit":1}' \
+  /tmp/evh_rag_import_delta_smoke.json \
+  >/tmp/evh_rag_import_delta_smoke.meta.json
 
 python - <<'PY'
 import json
 from pathlib import Path
 
-payload = json.loads(Path("/tmp/evh_options_smoke.json").read_text())
+payload = json.loads(Path("/tmp/evh_rag_import_delta_smoke.json").read_text())
 if payload.get("statusCode") != 200:
-    raise SystemExit(f"live lambda options smoke failed: {payload}")
+    raise SystemExit(f"lambda smoke failed: {payload}")
 body = json.loads(payload["body"])
-if body.get("kind") != "client":
-    raise SystemExit(f"unexpected live lambda options smoke body: {body}")
-print("live lambda options smoke passed")
+if body.get("status") != "ok":
+    raise SystemExit(f"unexpected lambda smoke body: {body}")
+print("lambda smoke passed")
 PY

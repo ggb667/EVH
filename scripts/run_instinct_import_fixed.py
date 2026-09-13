@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import json
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,15 +15,63 @@ def _build_db_url() -> str:
     db_url = os.environ.get("EVH_PGDATABASE_URL", "").strip()
     if db_url:
         return db_url
-    user = os.environ["EVH_PGUSER"]
-    pw = quote(os.environ["EVH_PGPASSWORD"], safe="")
+
+    required = ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")
+    if not all(os.environ.get(name, "").strip() for name in required):
+        secret_arn = os.environ.get("DB_SECRET_ARN", "").strip()
+        if not secret_arn:
+            missing = ", ".join(name for name in required if not os.environ.get(name, "").strip())
+            raise RuntimeError(
+                "Missing EVH_PG* env vars and DB_SECRET_ARN is not set. "
+                f"Missing vars: {missing or 'unknown'}"
+            )
+        proc = subprocess.run(
+            [
+                "aws",
+                "secretsmanager",
+                "get-secret-value",
+                "--region",
+                os.environ.get("AWS_REGION", "us-east-1"),
+                "--secret-id",
+                secret_arn,
+                "--query",
+                "SecretString",
+                "--output",
+                "text",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError((proc.stderr or proc.stdout or "").strip() or f"Failed to read Secrets Manager secret {secret_arn}.")
+        secret = str(proc.stdout or "").strip()
+        if not secret:
+            raise RuntimeError(f"Secrets Manager returned an empty secret for {secret_arn!r}.")
+        data = json.loads(secret)
+        if not isinstance(data, dict):
+            raise RuntimeError("Secret must be a JSON object")
+
+        host = str(data.get("host") or data.get("hostname") or data.get("PGHOST") or "").strip()
+        port = str(data.get("port") or data.get("PGPORT") or "5432").strip()
+        db = str(data.get("dbname") or data.get("database") or data.get("PGDATABASE") or "").strip()
+        user = str(data.get("username") or data.get("user") or data.get("PGUSER") or "").strip()
+        password = str(data.get("password") or data.get("PGPASSWORD") or "").strip()
+        if not all([host, port, db, user, password]):
+            raise RuntimeError("Secret did not contain the full Postgres tuple. Need host, port, dbname, user, and password.")
+
+        os.environ["EVH_PGHOST"] = host
+        os.environ["EVH_PGPORT"] = port
+        os.environ["EVH_PGDATABASE"] = db
+        os.environ["EVH_PGUSER"] = user
+        os.environ["EVH_PGPASSWORD"] = password
+
     host = os.environ["EVH_PGHOST"]
     port = os.environ["EVH_PGPORT"]
     db = os.environ["EVH_PGDATABASE"]
-    # RDS rejects the non-encrypted fallback; require TLS explicitly so a
-    # bad credential cannot be masked by a misleading pg_hba/no-encryption
-    # error on the second connection attempt.
-    return f"postgresql://{user}:{pw}@{host}:{port}/{db}?sslmode=require"
+    user = os.environ["EVH_PGUSER"]
+    password = quote(os.environ["EVH_PGPASSWORD"], safe="")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}?sslmode=require"
 
 
 def main() -> int:
@@ -34,8 +83,6 @@ def main() -> int:
     exitcode_file = Path("/tmp/evh_instinct_import_fixed.exitcode")
     launcher_pid_file = Path("/tmp/evh_instinct_import_fixed.launcher.pid")
     checkpoint = Path("/tmp/evh_instinct_import.checkpoint.json")
-    output_dir = Path("/tmp/evh_instinct_import")
-    output_dir.mkdir(parents=True, exist_ok=True)
     log_file.write_text("", encoding="utf-8")
     status_file.write_text("", encoding="utf-8")
     exitcode_file.write_text("", encoding="utf-8")
@@ -43,13 +90,14 @@ def main() -> int:
 
     env = os.environ.copy()
     env["UV_CACHE_DIR"] = env.get("UV_CACHE_DIR", "/tmp/uv-cache")
+    env["EVH_PDF_STORAGE_DIR"] = "/tmp/evh_instinct_import/pdfs"
+    env["EVH_DEFERRED_PDF_DIR"] = "/tmp/evh_instinct_import/deferred"
+    env["EVH_PROCESSED_PDF_DIR"] = "/tmp/evh_instinct_import/processed"
     cmd = [
         str(venv_python if venv_python.exists() else Path(sys.executable)),
         str(project_root / "scripts" / "instinct_full_import_fixed.py"),
         "--database-url",
         _build_db_url(),
-        "--output-dir",
-        str(output_dir),
         "--checkpoint",
         str(checkpoint),
         "--embedding-model",
