@@ -77,31 +77,38 @@ def _ensure_instinct_credentials_from_secrets_manager() -> None:
     os.environ["INSTINCT_CLIENT_SECRET_ARN"] = secret_arn
     os.environ["INSTINCT_CLIENT_ID"] = client_id
     os.environ["INSTINCT_CLIENT_SECRET"] = client_secret
+    from urllib import parse, request as urllib_request
 
-    token_response = subprocess.run(
-        [
-            "curl",
-            "-sS",
-            "-X",
-            "POST",
-            "-G",
-            "--data-urlencode",
-            "grant_type=client_credentials",
-            "--data-urlencode",
-            f"client_id={client_id}",
-            "--data-urlencode",
-            f"client_secret={client_secret}",
-            "https://partner.instinctvet.com/v1/auth/token",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    payload = json.loads(token_response.stdout)
-    token = str(payload.get("access_token") or payload.get("token") or payload.get("jwt") or "").strip()
-    if not token:
-        raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials")
-    os.environ["TOKEN"] = token
+    base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").rstrip("/")
+    last_error = None
+    for attempt in range(1, 5):
+        try:
+            payload = parse.urlencode(
+                {
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                }
+            ).encode("utf-8")
+            req = urllib_request.Request(
+                f"{base_url}/v1/auth/token",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with urllib_request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            token = str(data.get("access_token") or data.get("token") or data.get("jwt") or "").strip()
+            if not token:
+                raise RuntimeError("token response missing access token")
+            os.environ["TOKEN"] = token
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt == 4:
+                raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials") from exc
+            time.sleep(2 * attempt)
+    raise AssertionError("Could not acquire live Instinct token from Secrets Manager credentials") from last_error
 
 
 def write_sample_catalog(path: Path) -> None:
@@ -226,6 +233,18 @@ def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch)
 
     def fake_graphql(query, variables=None):
         calls.append((query, variables or {}))
+        if "getAccountLedger" in query:
+            return {
+                "data": {
+                    "account": {
+                        "id": "client-1",
+                        "pimsCode": "8762",
+                        "label": "Deborah Burchill",
+                        "numberOfPatients": 9,
+                        "runningLedger": {"balance": 207.24, "agedBalances": {"current": 207.24, "over30": 0.0, "over60": 0.0, "over90": 0.0, "over120": 0.0}},
+                    }
+                }
+            }
         if "searchAccountsIndexFinancials" in query:
             return {
                 "data": {
@@ -245,7 +264,7 @@ def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch)
                     }
                 }
             }
-        raise AssertionError("unexpected fallback ledger query")
+        raise AssertionError("unexpected graphql query")
 
     monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
 
@@ -256,7 +275,127 @@ def test_fetch_instinct_financials_uses_har_style_search_and_ledger(monkeypatch)
     assert financials["balance"] == 207.24
     assert financials["aged_balances"]["current"] == 207.24
     assert len(calls) == 1
-    assert "searchAccountsIndexFinancials" in calls[0][0]
+    assert "getAccountLedger" in calls[0][0]
+
+
+@pytest.mark.unit
+def test_fetch_instinct_financials_tries_exact_uuid_before_search(monkeypatch):
+    calls = []
+
+    def fake_graphql(query, variables=None):
+        calls.append((query, variables or {}))
+        if "getAccountLedger" in query:
+            return {
+                "data": {
+                    "account": {
+                        "id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c",
+                        "pimsCode": "8762",
+                        "label": "Deborah Burchill",
+                        "numberOfPatients": 9,
+                        "runningLedger": {
+                            "balance": 207.24,
+                            "unappliedPaymentAmount": None,
+                            "invoicesToReview": [],
+                            "agedBalances": {"current": 207.24, "over30": 0.0, "over60": 0.0, "over90": 0.0, "over120": 0.0},
+                        },
+                    }
+                }
+            }
+        raise AssertionError("unexpected search query; exact UUID lookup should win first")
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
+
+    financials = lambda_app._fetch_instinct_financials({"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "", "pims_code": ""})
+
+    assert financials["account_id"] == "17579316-5a67-41e4-90ef-0ae73f4b9c9c"
+    assert financials["balance"] == 207.24
+    assert len(calls) == 1
+    assert "getAccountLedger" in calls[0][0]
+
+
+@pytest.mark.unit
+def test_fetch_instinct_reminders_uses_har_shape(monkeypatch):
+    captured = {}
+
+    def fake_graphql(query, variables=None):
+        captured["query"] = query
+        captured["variables"] = variables or {}
+        return {
+            "data": {
+                "listPatientReminders": {
+                    "product": [
+                        {
+                            "id": "p-1",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Heartworm Prevention"},
+                        },
+                        {
+                            "id": "p-2",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Flea / Tick / Heartworm Prevention"},
+                        },
+                    ],
+                    "vaccine": [
+                        {
+                            "id": "v-1",
+                            "isActive": True,
+                            "remindOn": "2027-08-04",
+                            "reminderLabel": {"label": "Librela Injection"},
+                        }
+                    ],
+                }
+            }
+        }
+
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._instinct_graphql_json", fake_graphql)
+
+    reminders = lambda_app._fetch_instinct_reminders(
+        {"id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c", "name": "Deborah Burchill", "pims_code": "8762"},
+        {"id": "11525", "name": "Emmett Bleu (#4) Burchill"},
+    )
+
+    assert "getPatientRemindersQuery" in captured["query"]
+    assert captured["variables"] == {"params": {"filters": {}, "patientId": "11525"}}
+    assert [rem["title"] for rem in reminders] == ["Heartworm Prevention", "Flea / Tick / Heartworm Prevention", "Librela Injection"]
+
+
+@pytest.mark.unit
+def test_build_selected_context_bundle_includes_patient_and_financial_links(monkeypatch):
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: None)
+    monkeypatch.setattr(
+        "scripts.rag_ui.lambda_app._fetch_instinct_financials",
+        lambda client_record: {
+            "account_id": "17579316-5a67-41e4-90ef-0ae73f4b9c9c",
+            "pims_code": "8762",
+            "label": "Deborah Burchill",
+            "balance": 207.24,
+            "aged_balances": {"current": 207.24},
+            "invoices_to_review": [],
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.rag_ui.lambda_app._fetch_instinct_reminders",
+        lambda client_record, patient_record: [{"title": "Heartworm Prevention"}],
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+
+    bundle = lambda_app._build_selected_context_bundle(
+        "17579316-5a67-41e4-90ef-0ae73f4b9c9c",
+        "11525",
+        patient_context={
+            "owner_name": "Deborah Burchill",
+            "patient_name": "Emmett Bleu (#4) Burchill",
+            "visit_id": "29219",
+        },
+    )
+
+    docs = bundle["documents"]
+    assert any(doc["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/17579316-5a67-41e4-90ef-0ae73f4b9c9c" for doc in docs)
+    assert any(doc["source_uri"] == "https://app.instinctvet.cloud/#/patient/11525/charts?visitId=29219" for doc in docs)
+    assert bundle["financial_source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/17579316-5a67-41e4-90ef-0ae73f4b9c9c"
+    assert bundle["reminders"][0]["title"] == "Heartworm Prevention"
 
 
 #
@@ -292,6 +431,44 @@ def test_catalog_search_reads_sqlite_database(tmp_path, monkeypatch):
     assert [item["label"] for item in catalog.search_clients("alp")] == ["Alpha Client"]
     assert [item["label"] for item in catalog.search_pets("client-1", "")] == ["Milo", "Mika"]
     assert [item["label"] for item in catalog.search_pets("client-1", "mil")] == ["Milo"]
+
+
+@pytest.mark.unit
+def test_load_patient_documents_resolves_instinct_chart_url(monkeypatch):
+    class FakeCursor:
+        def execute(self, sql, params):
+            self.sql = sql
+            self.params = params
+
+        def fetchall(self):
+            return [
+                ("133774", "Emmett Bleu Burchill Part 2 [Pages 161-280].pdf", 1, "Page 1", 42),
+            ]
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(rag_catalog, "_pg_connect", lambda: FakeConnection())
+    monkeypatch.setattr(rag_catalog, "_instinct_chart_file_url", lambda document_id: f"https://app.instinctvet.cloud/#/chart-file/{document_id}")
+
+    documents = rag_catalog.load_patient_documents("17579316-5a67-41e4-90ef-0ae73f4b9c9c", "11525")
+
+    assert documents == [
+        {
+            "document_id": "133774",
+            "document_title": "Emmett Bleu Burchill Part 2 [Pages 161-280].pdf",
+            "source_uri": "https://app.instinctvet.cloud/#/chart-file/133774",
+            "page_number": 1,
+            "page_label": "Page 1",
+        }
+    ]
 
 
 @pytest.mark.unit
@@ -926,7 +1103,7 @@ def test_answer_messages_for_burchill_balance_question_include_financial_context
                 "invoices_to_review": [{"id": "inv-1", "balance": 12.0}],
             },
             "reminders": [{"title": "Annual exam"}],
-            "documents": [{"document_id": "doc-x", "title": "Visit Summary"}],
+            "documents": [],
         },
     )
 
@@ -978,7 +1155,24 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
                     "patient": {"id": "pet-1", "name": "Minnie"},
                     "financials": {"balance": 12.34},
                     "reminders": [{"title": "Annual exam"}],
-                    "documents": [],
+                    "documents": [
+                        {
+                            "document_id": "instinct-client-info-client-1",
+                            "document_title": "Instinct Client Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                            "page_number": 1,
+                            "page_label": "Live Account Summary",
+                            "source_type": "instinct",
+                        },
+                        {
+                            "document_id": "instinct-patient-info-pet-1",
+                            "document_title": "Instinct Patient Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/patient/pet-1",
+                            "page_number": 1,
+                            "page_label": "Live Patient Information",
+                            "source_type": "instinct",
+                        },
+                    ],
                 },
             }),
             "requestContext": {"http": {"method": "POST"}},
@@ -988,8 +1182,154 @@ def test_lambda_merges_patient_documents_into_selected_context(monkeypatch):
     assert response["statusCode"] == 200
     assert payload["answer"] == "All set."
     docs = captured["kwargs"]["selected_context"]["documents"]
-    assert docs[0]["document_id"] == "instinct-account-client-1"
+    assert docs[0]["document_id"] == "instinct-client-info-client-1"
+    assert docs[0]["document_title"] == "Instinct Client Info"
+    assert docs[0]["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+    assert docs[1]["document_id"] == "instinct-patient-info-pet-1"
+    assert docs[1]["document_title"] == "Instinct Patient Info"
+    assert docs[1]["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1"
     assert any(doc["document_id"] == "doc-x" for doc in docs)
+
+
+@pytest.mark.integration
+def test_lambda_exposes_synthetic_instinct_documents_in_references(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setenv("TOKEN", "test-token")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [{"title": "Annual exam"}])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([], {"total_seconds": 0.0}))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks, **kwargs: "All set.")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "What is Deborah Burchill's balance?"},
+            "body": json.dumps({
+                "patient_context": {
+                    "patient_name": "Minnie",
+                    "species": "Canine",
+                    "breed": "Yorkshire Terrier",
+                    "owner_name": "Deborah Burchill",
+                },
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Minnie"},
+                    "financials": {"account_id": "client-1", "balance": 12.34},
+                    "reminders": [{"title": "Annual exam"}],
+                    "documents": [
+                        {
+                            "document_id": "instinct-client-info-client-1",
+                            "document_title": "Instinct Client Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                            "page_number": 1,
+                            "page_label": "Live Account Summary",
+                        }
+                    ],
+                },
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    refs = payload["references"]
+    assert response["statusCode"] == 200
+    assert "What is Deborah Burchill's balance?" in payload["question"]
+    assert any(ref["document_id"] == "instinct-client-info-client-1" and ref["document_title"] == "Instinct Client Info" and ref["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1" for ref in refs)
+    assert any(ref["document_id"] == "instinct-patient-info-pet-1" and ref["document_title"] == "Instinct Patient Info" and ref["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1" for ref in refs)
+    assert payload["citation_map"]["instinct-client-info-client-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+    assert payload["citation_map"]["instinct-patient-info-pet-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1"
+
+
+@pytest.mark.integration
+def test_lambda_preserves_synthetic_document_source_uris_in_citations(monkeypatch):
+    fake_catalog = types.SimpleNamespace(
+        clients_by_id={"client-1": types.SimpleNamespace(id="client-1", label="Deborah Burchill", secondary="8762", primary_phone="", email="")},
+        pets_by_id={"pet-1": types.SimpleNamespace(id="pet-1", client_id="client-1", label="Minnie", species="Canine", breed="Yorkshire Terrier", birthdate="2020-01-01", secondary="21369")},
+    )
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_catalog_cached", lambda: fake_catalog)
+    monkeypatch.setenv("TOKEN", "test-token")
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.load_patient_documents", lambda client_id, pet_id: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._fetch_instinct_reminders", lambda client_record, patient_record: [])
+    monkeypatch.setattr("scripts.rag_ui.lambda_app.search_pet_chunks_by_embedding", lambda client_id, pet_id, question: ([
+        {
+            "document_id": "doc-a",
+            "document_title": "Prior Doc",
+            "page_number": 1,
+            "page_label": "Page 1",
+            "source_page_url": "https://example.test/doc-a#page=1",
+            "snippet": "Prior evidence.",
+            "confidence": 0.99,
+            "date": "2026-08-02",
+        }
+    ], {"total_seconds": 0.01}))
+    monkeypatch.setattr("scripts.rag_ui.lambda_app._call_openai_answer", lambda question, chunks, **kwargs: "All set.")
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/answer",
+            "queryStringParameters": {"client_id": "client-1", "pet_id": "pet-1", "q": "Follow-up question?"},
+            "body": json.dumps({
+                "selected_context": {
+                    "client": {"id": "client-1", "name": "Deborah Burchill"},
+                    "patient": {"id": "pet-1", "name": "Minnie"},
+                    "financials": {"account_id": "client-1", "balance": 12.34},
+                    "reminders": [],
+                    "documents": [
+                        {
+                            "document_id": "instinct-client-info-client-1",
+                            "document_title": "Instinct Client Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                            "page_number": 1,
+                            "page_label": "Live Account Summary",
+                            "source_page_url": "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1",
+                        },
+                        {
+                            "document_id": "instinct-patient-info-pet-1",
+                            "document_title": "Instinct Patient Info",
+                            "source_uri": "https://app.instinctvet.cloud/#/patient/pet-1",
+                            "page_number": 1,
+                            "page_label": "Live Patient Information",
+                            "source_page_url": "https://app.instinctvet.cloud/#/patient/pet-1",
+                        },
+                    ],
+                },
+            }),
+            "requestContext": {"http": {"method": "POST"}},
+        }
+    )
+    payload = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert any(ref["document_id"] == "instinct-client-info-client-1" and ref["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1" for ref in payload["references"])
+    assert any(ref["document_id"] == "instinct-patient-info-pet-1" and ref["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1" for ref in payload["references"])
+    assert payload["citation_map"]["instinct-client-info-client-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+    assert payload["citation_map"]["instinct-patient-info-pet-1:1"]["source_uri"] == "https://app.instinctvet.cloud/#/patient/pet-1"
+
+
+@pytest.mark.integration
+def test_lambda_document_page_routes_synthetic_instinct_docs_to_stable_urls(monkeypatch):
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/documents/instinct-client-info-client-1/pages/1",
+            "queryStringParameters": {"page": "1"},
+            "requestContext": {"http": {"method": "GET"}},
+        }
+    )
+    assert response["statusCode"] == 302
+    assert response["headers"]["location"] == "https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1"
+
+    response = lambda_handler(
+        {
+            "rawPath": "/api/rag/documents/instinct-patient-info-pet-1/pages/1",
+            "queryStringParameters": {"page": "1"},
+            "requestContext": {"http": {"method": "GET"}},
+        }
+    )
+    assert response["statusCode"] == 302
+    assert response["headers"]["location"] == "https://app.instinctvet.cloud/#/patient/pet-1"
 
 
 @pytest.mark.integration
@@ -1206,6 +1546,45 @@ def test_index_uses_request_driven_search_lifecycle():
     assert 'showCachedPatients()' in html
     assert 'Searching…' in html
     assert 'clearClientMenu()' in html
+
+
+@pytest.mark.unit
+def test_index_uses_instinct_emr_data_sprite_frame():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert 'const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];' in html
+    assert 'background-size:640px 64px' in html
+    assert 'familySpritePos(doc.family)' in html
+    assert 'return /\\binstinct\\b/i.test(label)?"instinct_emr_data":"other";' in html
+
+
+@pytest.mark.unit
+def test_index_keeps_question_visible_until_request_finishes():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    loading_start = html.index("state.loading=true;", html.index("async function submitQuestion()"))
+    finally_start = html.index("}finally{", loading_start)
+    clear_start = html.index('$("question").value="";', loading_start)
+    assert clear_start > finally_start
+    assert "question.disabled=Boolean(state.loading);" in html
+    assert "textarea:disabled{" in html
+
+
+@pytest.mark.unit
+def test_index_merges_citations_and_references_for_source_icons():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert "...(Array.isArray(turn.citations)?turn.citations:[])" in html
+    assert "...(Array.isArray(turn.references)?turn.references:[])" in html
+    assert "family:evidenceFamily(ref)" in html
+
+
+@pytest.mark.unit
+def test_index_routes_real_documents_through_lambda_for_fresh_instinct_urls():
+    html = Path("website/EVHInstinctPDFRAG/index.html").read_text(encoding="utf-8")
+    assert "function evidenceLinkTarget(documentId,pageNumber,sourceUri)" in html
+    assert "if(isSyntheticInstinctDocument(documentId)&&isInstinctUrl(sourceUri))return sourceUri;" in html
+    assert 'return documentId?citationUrl(documentId,pageNumber):"#";' in html
+    assert "never expose stored deferred-disk locators" in html
+    assert "if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){" in html
+    assert "link.href=docId?citationUrl(docId,page):" in html
 
 
 @pytest.fixture(scope="module")

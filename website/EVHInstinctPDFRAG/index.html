@@ -74,6 +74,13 @@ input:disabled::placeholder{
   color:#a8adb4;
 }
 textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
+textarea:disabled{
+  background:#f1f2f4;
+  color:#69727b;
+  border-color:#d8dce0;
+  box-shadow:none;
+  cursor:wait;
+}
 .menu{
   position:absolute;
   z-index:30;
@@ -124,7 +131,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .source-nav-btn[disabled]{opacity:.28}
 .source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer;padding:0}
 .source-chip:hover,.source-chip:focus-visible{border-color:#b8c8d8;box-shadow:0 0 0 3px rgba(40,95,143,.08);outline:none}
-.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
+.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:640px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
 .source-chip .count{position:absolute;right:-4px;bottom:-4px;min-width:18px;height:18px;line-height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
 .source-popover{position:fixed;z-index:80;max-width:min(460px,calc(100vw - 24px));max-height:min(380px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
 .source-popover.open{display:block}
@@ -206,10 +213,37 @@ const SEARCH_DEBOUNCE_MS=250;
 const citationUrl=(documentId,pageNumber)=>
   `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
 
-const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other"];
+function isInstinctUrl(url){
+  return String(url||"").startsWith("https://app.instinctvet.cloud/");
+}
+
+function isSyntheticInstinctDocument(documentId){
+  const value=String(documentId||"");
+  return value.startsWith("instinct-client-info-")||value.startsWith("instinct-patient-info-");
+}
+
+function evidenceLinkTarget(documentId,pageNumber,sourceUri){
+  // Synthetic records link to stable Instinct application pages. Every real
+  // chart document goes through Lambda so Instinct creates a fresh temporary
+  // file URL at click time; never expose stored deferred-disk locators.
+  if(isSyntheticInstinctDocument(documentId)&&isInstinctUrl(sourceUri))return sourceUri;
+  return documentId?citationUrl(documentId,pageNumber):"#";
+}
+
+const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];
 const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
-const normalizeFamily=family=>familyOrder.includes(family)?family:"other";
+const normalizeFamily=family=>{
+  const value=String(family||"").trim().toLowerCase().replace(/[\s-]+/g,"_");
+  if(["instinct","synthetic","synthetic_document","instinct_synthetic"].includes(value))return "instinct_emr_data";
+  return familyOrder.includes(value)?value:"other";
+};
 const familySpritePos=family=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
+const evidenceFamily=ref=>{
+  const explicit=ref?.source_type||ref?.sourceType||ref?.family||ref?.document_family||ref?.documentFamily||ref?.type||"";
+  if(explicit)return explicit;
+  const label=`${ref?.document_title||ref?.documentTitle||""} ${ref?.source_name||ref?.sourceName||""}`;
+  return /\binstinct\b/i.test(label)?"instinct_emr_data":"other";
+};
 
 const state={
   client:null,
@@ -645,7 +679,9 @@ function scheduleOptionSearch({
 
 function updateAsk(){
   const ask=$("ask");
-  const enabled=state.client&&state.pet&&$("question").value.trim();
+  const question=$("question");
+  const enabled=state.client&&state.pet&&question.value.trim();
+  question.disabled=Boolean(state.loading);
   ask.disabled=!enabled||state.loading;
   ask.classList.toggle("ready",Boolean(enabled)&&!state.loading);
   ask.classList.toggle("running",Boolean(state.loading));
@@ -665,7 +701,9 @@ function setCatalogNotice(message){
     notice.className="status";
     notice.style.marginTop="0";
     const headerLeft=$(".header-left");
-    headerLeft.appendChild(notice);
+    if(headerLeft){
+      headerLeft.appendChild(notice);
+    }
   }
   notice.textContent=catalogNoticeText;
   notice.style.display=catalogNoticeText?"block":"none";
@@ -735,15 +773,22 @@ function clearTranscript(){
 }
 
 function updateQuestionPrompt(){
-  $("question").placeholder=state.firstAnswerSubmitted
-    ?"Ask another question…"
-    :"When was the last dental cleaning?";
+  $("question").placeholder=state.firstAnswerSubmitted ? "" : "When was the last dental cleaning?";
   const helper=$("question-helper");
   if(helper){
     helper.textContent=state.firstAnswerSubmitted
       ?"Ask a question to continue this patient-specific conversation."
       :"Ask a question to begin a patient-specific conversation.";
   }
+}
+
+function clearQuestionComposer(){
+  const question=$("question");
+  if(!question)return;
+  question.value="";
+  question.defaultValue="";
+  autoResize(question);
+  updateAsk();
 }
 
 function clearPatientSelection(){
@@ -757,6 +802,7 @@ function clearPatientSelection(){
   $("pet-input").disabled=!state.client;
   $("pet-input").placeholder=state.client?"Type a patient name":"Select a client first";
   $("composer").style.display=state.client ? "" : "none";
+  clearQuestionComposer();
   updateSelectionMeta();
   updateAsk();
 }
@@ -777,6 +823,7 @@ function clearClientSelection(){
   $("pet-input").disabled=true;
   $("pet-input").placeholder="Select a client first";
   $("composer").style.display="none";
+  clearQuestionComposer();
   updateSelectionMeta();
   clearTranscript();
   updateAsk();
@@ -794,6 +841,7 @@ function chooseClient(item){
   clearPatientSelection();
   $("pet-input").disabled=false;
   $("pet-input").placeholder="Type a patient name";
+  clearQuestionComposer();
 
   if(!hasConversationForSelection(item.id, state.pet?.id || "")){
     clearTranscript();
@@ -826,6 +874,7 @@ function choosePet(item){
   $("pet-status").textContent=patientDisplayText(item);
   updateSelectionMeta();
   restoreConversationFor(state.client.id,item.id);
+  clearQuestionComposer();
   if(!hasConversationForSelection(state.client.id,item.id)){
     clearTranscript();
   }
@@ -880,8 +929,16 @@ function citationLink(ref){
   const label=ref.document_title||ref.documentTitle||ref.page_label||`Page ${page}`;
   const link=document.createElement("a");
   link.textContent=`${label} — Page ${page}`;
-  if(docId){
+  const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
+  if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
+    link.href=sourceUri;
+    link.target="_self";
+  }else if(docId){
     link.href=citationUrl(docId,page);
+    link.target="_blank";
+    link.rel="noopener";
+  }else if(sourceUri){
+    link.href=sourceUri;
     link.target="_blank";
     link.rel="noopener";
   }
@@ -896,9 +953,15 @@ function citationMarkerLink(match,citationMap){
   const link=document.createElement("a");
   link.textContent=`${docId} p.${page}`;
   if(ref.document_title)link.title=ref.document_title;
-  link.href=docId?citationUrl(docId,page):"#";
-  link.target="_blank";
-  link.rel="noopener";
+  const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
+  if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
+    link.href=sourceUri;
+    link.target="_self";
+  }else{
+    link.href=docId?citationUrl(docId,page):(sourceUri||"#");
+    link.target="_blank";
+    link.rel="noopener";
+  }
   return link;
 }
 
@@ -921,10 +984,16 @@ function renderAnswerWithCitations(answer,citationMap){
 }
 
 function groupedRefs(turn){
-  const refs=(turn.citations||turn.references||[]).map(ref=>({
+  const sourceRefs=[
+    ...(Array.isArray(turn.citations)?turn.citations:[]),
+    ...(Array.isArray(turn.references)?turn.references:[])
+  ];
+  const refs=sourceRefs.map(ref=>({
     document_id:ref.document_id||ref.documentId||"",
     page_number:ref.page_number||ref.pageNumber||1,
     document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",
+    source_uri:ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"",
+    family:evidenceFamily(ref),
     snippet:ref.snippet||"",
     terms:Array.isArray(ref.terms)?ref.terms:[]
   }));
@@ -935,10 +1004,14 @@ function groupedRefs(turn){
     const existing=byId.get(id)||{
       document_id:ref.document_id,
       document_title:ref.document_title,
+      source_uri:ref.source_uri||"",
+      family:ref.family,
       pages:[],
       snippets:[],
       terms:[]
     };
+    if(!existing.source_uri && ref.source_uri)existing.source_uri=ref.source_uri;
+    if(existing.family==="other"&&ref.family!=="other")existing.family=ref.family;
     existing.pages.push(ref.page_number);
     if(ref.snippet)existing.snippets.push(ref.snippet);
     if(ref.terms.length)existing.terms.push(...ref.terms);
@@ -1058,11 +1131,18 @@ function sourceChip(doc,terms){
   button.setAttribute("aria-label",doc.document_title||"Source PDF");
   button.dataset.docId=doc.document_id||"";
   button.dataset.page=doc.pages[0]||1;
-  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("other")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
+  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos(doc.family)}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
 
   button.addEventListener("click",()=>{
-    if(doc.document_id){
-      window.open(citationUrl(doc.document_id,doc.pages[0]||1),"_blank","noopener");
+    const target=isSyntheticInstinctDocument(doc.document_id)
+      ? evidenceLinkTarget(doc.document_id,doc.pages[0]||1,doc.source_uri)
+      : (doc.document_id ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
+    if(target){
+      if(isSyntheticInstinctDocument(doc.document_id)&&isInstinctUrl(target)){
+        window.location.href=target;
+      }else{
+        window.open(target,"_blank","noopener");
+      }
     }
   });
   button.addEventListener("mouseenter",()=>showSourcePopover(button,doc,terms));
@@ -1217,9 +1297,6 @@ async function submitQuestion(){
     }else{
       setCatalogNotice("");
     }
-
-    $("question").value="";
-    autoResize($("question"));
     state.firstAnswerSubmitted=true;
     updateQuestionPrompt();
     const elapsedSeconds=Number(data.elapsed_seconds);
@@ -1230,6 +1307,9 @@ async function submitQuestion(){
   }catch(error){
     setAskStatus(`Unable to answer: ${error.message}`);
   }finally{
+    $("question").value="";
+    $("question").defaultValue="";
+    autoResize($("question"));
     state.loading=false;
     updateAsk();
   }

@@ -230,6 +230,23 @@ def _pg_connect():
         )
 
 
+@lru_cache(maxsize=4096)
+def _instinct_chart_file_url(document_id: str) -> str:
+    document_id = str(document_id or "").strip()
+    if not document_id:
+        return ""
+    mutation = """
+mutation createChartFileUrl($id: ID!, $inline: Boolean) {
+  createChartFileUrl(id: $id, inline: $inline)
+}
+""".strip()
+    data = _instinct_graphql_json(mutation, {"id": document_id, "inline": True})
+    url = str(((data.get("data") or {}).get("createChartFileUrl")) or "").strip()
+    if not url:
+        return ""
+    return url
+
+
 def _openai_api_key() -> str:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if api_key:
@@ -508,14 +525,14 @@ def load_patient_documents(client_id: str, pet_id: str | None = None) -> list[di
         if not document_id or document_id in seen:
             continue
         seen.add(document_id)
+        source_uri = _instinct_chart_file_url(document_id)
         documents.append(
             {
                 "document_id": document_id,
                 "document_title": str(document_title or "Source PDF"),
-                "source_uri": "",
+                "source_uri": source_uri,
                 "page_number": int(page_number or 1),
                 "page_label": str(page_label or f"Page {page_number or 1}"),
-                "source_page_url": "",
             }
         )
     materialize_seconds = time.perf_counter() - materialize_started
@@ -769,6 +786,7 @@ def _ensure_client_search_initialized() -> None:
     started = time.perf_counter()
     print("[RAG_TIMING] client_search_init_enter", flush=True)
     if CLIENT_SEARCH_INITIALIZED and (CLIENTS or CLIENT_BY_ID or CLIENT_FRAGMENT_INDEX):
+        print(f"[RAG_TIMING] client_catalog_step1_cache_read source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         print(f"[RAG_TIMING] client_catalog_cache_hit=1 elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         return
     if not all(os.environ.get(name, "").strip() for name in ("EVH_PGHOST", "EVH_PGPORT", "EVH_PGDATABASE", "EVH_PGUSER", "EVH_PGPASSWORD")):
@@ -779,6 +797,7 @@ def _ensure_client_search_initialized() -> None:
     load_seconds = time.perf_counter() - load_started
     CLIENT_SEARCH_INITIALIZED = True
     print(f"[RAG_TIMING] client_catalog_load_seconds={load_seconds:.3f} client_count={len(CLIENTS)}", flush=True)
+    print(f"[RAG_TIMING] client_catalog_step4_switch_to_updated_list elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     print(f"[RAG_TIMING] client_search_init_exit elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
 
 
@@ -1090,11 +1109,19 @@ _CATALOG_REFRESH_STARTED_AT = 0.0
 
 
 def load_catalog_cached() -> RagCatalog | None:
+    explicit_path = os.environ.get("RAG_UI_DB_PATH", "").strip() or os.environ.get("RAG_UI_DATA_PATH", "").strip()
+    if explicit_path:
+        print("[RAG_TIMING] client_catalog_step1_cache_read source=skipped_explicit_path", flush=True)
+        return None
     if _CATALOG_MEMORY is None:
+        print("[RAG_TIMING] client_catalog_step1_cache_read source=miss", flush=True)
         return None
     cached_at, catalog = _CATALOG_MEMORY
     if (time.time() - cached_at) >= _refresh_interval_seconds():
+        print("[RAG_TIMING] client_catalog_step1_cache_read source=expired", flush=True)
         return None
+    age = time.time() - cached_at
+    print(f"[RAG_TIMING] client_catalog_step1_cache_read source=memory age_seconds={age:.3f}", flush=True)
     return catalog
 
 
@@ -1262,10 +1289,26 @@ def _refresh_postgres_catalog_from_instinct() -> None:
     client_secret = str(secret.get("client_secret") or secret.get("clientSecret") or secret.get("password") or "").strip()
     if not client_id or not client_secret:
         raise RuntimeError("Instinct secret is missing client credentials")
-    from scripts.instinct_identity_sync import InstinctApiSyncClient, refresh_identity_tables, _connect
+    try:
+        from scripts.instinct_identity_sync import InstinctApiSyncClient, refresh_identity_tables, _connect
+    except ModuleNotFoundError as exc:
+        print(
+            "[RAG_TIMING] instinct_refresh_skipped "
+            f"reason={type(exc).__name__} message={exc}",
+            flush=True,
+        )
+        return
 
     client = InstinctApiSyncClient(_instinct_base_url(), client_id, client_secret)
-    conn = _connect()
+    try:
+        conn = _connect()
+    except Exception as exc:
+        print(
+            "[RAG_TIMING] instinct_refresh_skipped "
+            f"reason={type(exc).__name__} message={exc}",
+            flush=True,
+        )
+        return
     try:
         refresh_identity_tables(client, conn)
         print(
@@ -1315,7 +1358,7 @@ def refresh_catalog(data_path: str | None = None, *, force: bool = False) -> Rag
     print(f"[RAG_TIMING] refresh_catalog_enter data_path={str(data_path or '')!r} force={int(force)}", flush=True)
     explicit_path = data_path
     if explicit_path is None and _is_test_context():
-        explicit_path = os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip()
+        explicit_path = os.environ.get("RAG_UI_DB_PATH", "").strip() or os.environ.get("RAG_UI_DATA_PATH", "").strip()
     if explicit_path:
         catalog = _load_cached_file_catalog(resolve_data_path(explicit_path), force=force)
         print(f"[RAG_TIMING] refresh_catalog_exit source=file elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
@@ -1359,11 +1402,16 @@ def load_catalog_with_status(data_path: str | None = None, *, allow_stale: bool 
             print(f"[RAG_TIMING] load_catalog_exit source=memory elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
             return catalog, {"source": "memory", "stale": False, "age_seconds": round(age, 3)}
     if data_path is None:
+        print("[RAG_TIMING] client_catalog_step2_instinct_refresh_start", flush=True)
         _maybe_start_catalog_refresh()
     catalog = refresh_catalog(data_path)
     if data_path is None:
+        print(f"[RAG_TIMING] client_catalog_step3_postgres_update_complete elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
         _CATALOG_MEMORY = (time.time(), catalog)
-    print(f"[RAG_TIMING] load_catalog_exit source=refresh elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        print(f"[RAG_TIMING] client_catalog_step4_switch_to_updated_list elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+        print(f"[RAG_TIMING] load_catalog_exit source=refresh switched_to_updated_catalog elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
+    else:
+        print(f"[RAG_TIMING] load_catalog_exit source=refresh data_path={str(data_path or '')!r} elapsed_seconds={time.perf_counter() - started:.3f}", flush=True)
     return catalog, {"source": "refresh", "stale": False, "age_seconds": 0.0, "refresh_running": _CATALOG_REFRESH_RUNNING}
 
 

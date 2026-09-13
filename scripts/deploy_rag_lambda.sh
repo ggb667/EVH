@@ -10,7 +10,8 @@ cd "$ROOT_DIR"
 echo "[preflight] py_compile"
 python -m py_compile \
   scripts/rag_ui/catalog.py \
-  scripts/rag_ui/lambda_app.py
+  scripts/rag_ui/lambda_app.py \
+  scripts/instinct_identity_sync.py
 
 echo "[preflight] import smoke"
 python - <<'PY'
@@ -55,9 +56,9 @@ subprocess.check_call([
     "--implementation",
     "cp",
     "--python-version",
-    "314",
+    "313",
     "--abi",
-    "cp314",
+    "cp313",
     "--target",
     str(staging),
     "psycopg==3.2.13",
@@ -73,6 +74,7 @@ for arc, src in [
     ("scripts/rag_ui/catalog.py", package_root / "scripts/rag_ui/catalog.py"),
     ("scripts/rag_ui/__init__.py", package_root / "scripts/rag_ui/__init__.py"),
     ("scripts/rag_ui/README.md", package_root / "scripts/rag_ui/README.md"),
+    ("scripts/instinct_identity_sync.py", package_root / "scripts/instinct_identity_sync.py"),
     ("website/EVHInstinctPDFRAG/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
     ("scripts/rag_ui/static/index.html", package_root / "website/EVHInstinctPDFRAG/index.html"),
 ]:

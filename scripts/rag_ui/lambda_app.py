@@ -226,7 +226,39 @@ def _fetch_instinct_financials(client_record: dict[str, object]) -> dict[str, ob
     client_id = _normalize_text(client_record.get("id"))
     if not name and not pims_code and not client_id:
         return {}
-    query = """
+    def _account_financials(account: dict[str, object]) -> dict[str, object]:
+        running = account.get("runningLedger") or {}
+        return {
+            "account_id": _normalize_text(account.get("id")),
+            "pims_code": _normalize_text(account.get("pimsCode")),
+            "label": _normalize_text(account.get("label")) or _normalize_text(client_record.get("name")),
+            "number_of_patients": account.get("numberOfPatients"),
+            "balance": running.get("balance"),
+            "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
+            "aged_balances": running.get("agedBalances") or {},
+            "invoices_to_review": running.get("invoicesToReview") or [],
+        }
+
+    target_id = _normalize_text(client_record.get("id"))
+    target_pims = _normalize_text(client_record.get("pims_code"))
+    target_name = _normalize_text(client_record.get("name")).lower()
+    exact_query = """
+query getAccountLedger($id: ID!) {
+  account(id: $id) {
+    id
+    pimsCode
+    label
+    numberOfPatients
+    runningLedger(summary: true, overdueInvoicesOnly: false) {
+      balance
+      unappliedPaymentAmount
+      invoicesToReview { id balance }
+      agedBalances { current over30 over60 over90 over120 }
+    }
+    }
+}
+""".strip()
+    search_query = """
 query searchAccountsIndexFinancials($params: SearchAccountIndexParams, $overdueInvoicesOnly: Boolean) {
   searchAccountsIndex(params: $params) {
     entries {
@@ -258,83 +290,69 @@ query searchAccountsIndexFinancials($params: SearchAccountIndexParams, $overdueI
   }
 }
 """.strip()
-    variables = {
-        "params": {"q": name or pims_code or client_id, "perPage": 50},
-        "overdueInvoicesOnly": False,
-    }
-    def _account_financials(account: dict[str, object]) -> dict[str, object]:
-        running = account.get("runningLedger") or {}
-        return {
-            "account_id": _normalize_text(account.get("id")),
-            "pims_code": _normalize_text(account.get("pimsCode")),
-            "label": _normalize_text(account.get("label")) or _normalize_text(client_record.get("name")),
-            "number_of_patients": account.get("numberOfPatients"),
-            "balance": running.get("balance"),
-            "unapplied_payment_amount": running.get("unappliedPaymentAmount"),
-            "aged_balances": running.get("agedBalances") or {},
-            "invoices_to_review": running.get("invoicesToReview") or [],
-        }
 
-    data = _instinct_graphql_json(query, variables)
-    accounts = ((((data.get("data") or {}).get("searchAccountsIndex")) or {}).get("entries")) or []
-    if not isinstance(accounts, list):
-        accounts = []
-    target_id = _normalize_text(client_record.get("id"))
-    target_pims = _normalize_text(client_record.get("pims_code"))
-    target_name = _normalize_text(client_record.get("name")).lower()
-    selected = None
-    for account in accounts:
-        if not isinstance(account, dict):
-            continue
-        if target_id and _normalize_text(account.get("id")) == target_id:
-            selected = account
-            break
-        if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
-            selected = account
-            break
-        label = _normalize_text(account.get("label")).lower()
-        if target_name and (label == target_name or target_name in label):
-            selected = account
-            break
-    if selected is None and accounts:
-        selected = accounts[0]
-    if not isinstance(selected, dict):
-        return {}
-    financials = _account_financials(selected)
-    if financials.get("balance") is not None:
-        return financials
+    def _try_exact_account_lookup(account_id: str) -> dict[str, object] | None:
+        if not account_id:
+            return None
+        exact_data = _instinct_graphql_json(exact_query, {"id": account_id})
+        exact_account = ((exact_data.get("data") or {}).get("account"))
+        if isinstance(exact_account, dict):
+            exact_financials = _account_financials(exact_account)
+            if exact_financials.get("balance") is not None:
+                return exact_financials
+        return None
 
-    account_id = financials.get("account_id")
-    if not account_id:
-        return financials
-    exact_query = """
-query getAccountLedger($id: ID!) {
-  account(id: $id) {
-    id
-    pimsCode
-    label
-    numberOfPatients
-    runningLedger(summary: true, overdueInvoicesOnly: false) {
-      balance
-      unappliedPaymentAmount
-      invoicesToReview { id balance }
-      agedBalances { current over30 over60 over90 over120 }
-    }
-  }
-}
-""".strip()
-    exact_data = _instinct_graphql_json(exact_query, {"id": account_id})
-    exact_account = ((exact_data.get("data") or {}).get("account"))
-    if isinstance(exact_account, dict):
-        exact_financials = _account_financials(exact_account)
-        if exact_financials.get("balance") is not None:
-            return exact_financials
-    return financials
+    def _try_search_lookup(query_value: str) -> dict[str, object] | None:
+        if not query_value:
+            return None
+        data = _instinct_graphql_json(
+            search_query,
+            {"params": {"q": query_value, "perPage": 50}, "overdueInvoicesOnly": False},
+        )
+        accounts = ((((data.get("data") or {}).get("searchAccountsIndex")) or {}).get("entries")) or []
+        if not isinstance(accounts, list):
+            return None
+        selected = None
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            if target_id and _normalize_text(account.get("id")) == target_id:
+                selected = account
+                break
+            if target_pims and _normalize_text(account.get("pimsCode")) == target_pims:
+                selected = account
+                break
+            label = _normalize_text(account.get("label")).lower()
+            if target_name and (label == target_name or target_name in label):
+                selected = account
+                break
+        if selected is None and accounts:
+            selected = accounts[0]
+        if not isinstance(selected, dict):
+            return None
+        financials = _account_financials(selected)
+        if financials.get("balance") is not None:
+            return financials
+        if financials.get("account_id"):
+            return _try_exact_account_lookup(str(financials["account_id"]))
+        return None
+
+    for exact_candidate in (target_id, target_pims):
+        found = _try_exact_account_lookup(exact_candidate)
+        if found is not None:
+            return found
+
+    for search_candidate in (target_id, target_pims, target_name):
+        found = _try_search_lookup(search_candidate)
+        if found is not None:
+            return found
+
+    return {}
 
 
 def _instinct_financial_document(client_record: dict[str, object], financials: dict[str, object]) -> dict[str, object]:
     account_id = _normalize_text(financials.get("account_id") or client_record.get("id"))
-    title = "Instinct Current Account Summary and Financials"
+    title = "Instinct Client Info"
     source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{account_id}" if account_id else ""
     lines = [
         f"Client: {_normalize_text(client_record.get('name'))}",
@@ -347,7 +365,7 @@ def _instinct_financial_document(client_record: dict[str, object], financials: d
         f"Invoices To Review: {json.dumps(financials.get('invoices_to_review') or [], sort_keys=True)}",
     ]
     return {
-        "document_id": f"instinct-account-{account_id}" if account_id else "instinct-account",
+        "document_id": f"instinct-client-info-{account_id}" if account_id else "instinct-client-info",
         "document_title": title,
         "page_label": "Live Account Summary",
         "page_number": 1,
@@ -363,11 +381,19 @@ def _instinct_patient_document(
     client_record: dict[str, object],
     patient_record: dict[str, object],
     financials: dict[str, object] | None = None,
+    *,
+    visit_id: str | None = None,
 ) -> dict[str, object]:
     patient_id = _normalize_text(patient_record.get("id"))
     client_id = _normalize_text(client_record.get("id"))
-    title = "Instinct Current Patient Information"
-    source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
+    title = "Instinct Patient Info"
+    visit_id = _normalize_text(visit_id)
+    if patient_id and visit_id:
+        source_uri = f"https://app.instinctvet.cloud/#/patient/{patient_id}/charts?visitId={visit_id}"
+    elif patient_id:
+        source_uri = f"https://app.instinctvet.cloud/#/patient/{patient_id}"
+    else:
+        source_uri = f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
     lines = [
         f"Patient: {_normalize_text(patient_record.get('name'))}",
         f"Patient ID: {patient_id}",
@@ -382,7 +408,7 @@ def _instinct_patient_document(
     if financials and _normalize_text(financials.get("balance")):
         lines.append(f"Linked Account Balance: {_normalize_text(financials.get('balance'))}")
     return {
-        "document_id": f"instinct-patient-{patient_id}" if patient_id else "instinct-patient",
+        "document_id": f"instinct-patient-info-{patient_id}" if patient_id else "instinct-patient-info",
         "document_title": title,
         "page_label": "Live Patient Information",
         "page_number": 1,
@@ -395,47 +421,78 @@ def _instinct_patient_document(
 
 
 def _fetch_instinct_reminders(client_record: dict[str, object], patient_record: dict[str, object]) -> list[dict[str, object]]:
-    query = _normalize_text(patient_record.get("name")) or _normalize_text(client_record.get("name")) or _normalize_text(client_record.get("pims_code"))
-    if not query:
+    patient_id = _normalize_text(patient_record.get("id"))
+    if not patient_id:
         return []
     try:
-        data = _instinct_get_json("/v1/reminders", {"limit": "50", "pageDirection": "after"})
+        data = _instinct_graphql_json(
+            """
+query getPatientRemindersQuery($params: ListPatientReminderParams!) {
+  listPatientReminders(params: $params) {
+    product {
+      lastAdministeredOn
+      deactivationNotes
+      id
+      isActive
+      location { id label }
+      notes
+      reminderLabel { id label }
+      remindOn
+      treatment {
+        id
+        treatmentNotes { id treatmentNote }
+        orderRevision { provider { id } }
+      }
+    }
+    vaccine {
+      lastAdministeredOn
+      deactivationNotes
+      id
+      isActive
+      location { id label }
+      notes
+      reminderLabel { id label }
+      remindOn
+      treatment {
+        id
+        treatmentNotes { id treatmentNote }
+        orderRevision { provider { id } }
+      }
+    }
+  }
+}
+""".strip(),
+            {"params": {"filters": {}, "patientId": patient_id}},
+        )
     except Exception:
         return []
     rows: list[dict[str, object]] = []
     if isinstance(data, dict):
-        for key in ("reminders", "data", "items", "results"):
-            value = data.get(key)
-            if isinstance(value, list):
-                rows = [row for row in value if isinstance(row, dict)]
-                break
-    elif isinstance(data, list):
-        rows = [row for row in data if isinstance(row, dict)]
+        grouped = (data.get("data") or {}).get("listPatientReminders")
+        if isinstance(grouped, dict):
+            for key in ("product", "vaccine"):
+                value = grouped.get(key)
+                if isinstance(value, list):
+                    rows.extend([row for row in value if isinstance(row, dict)])
     if not rows:
         return []
-    lowered = query.lower()
-    filtered: list[dict[str, object]] = []
-    for row in rows:
-        haystack = " ".join(
-            _normalize_text(row.get(key))
-            for key in ("title", "name", "label", "patientName", "patient_name", "accountName", "account_name", "description")
-        ).lower()
-        if lowered and lowered in haystack:
-            filtered.append(row)
-    if filtered:
-        rows = filtered
     reminders: list[dict[str, object]] = []
-    for row in rows[:10]:
+    for row in rows:
         reminders.append(
             {
                 "id": _normalize_text(row.get("id") or row.get("uuid")),
-                "title": _normalize_text(row.get("title") or row.get("name") or row.get("label")),
+                "title": _normalize_text(
+                    row.get("title")
+                    or row.get("name")
+                    or row.get("label")
+                    or ((row.get("reminderLabel") or {}) if isinstance(row.get("reminderLabel"), dict) else {}).get("label")
+                ),
                 "type": _normalize_text(row.get("type") or row.get("reminderType") or row.get("category")),
                 "due_date": _normalize_text(row.get("dueAt") or row.get("dueDate") or row.get("due")),
                 "status": _normalize_text(row.get("status") or row.get("state") or row.get("reminderStatus")),
             }
         )
-    return reminders
+    return reminders[:20]
 
 
 def _create_chart_file_url(chart_id: str, inline: bool = True) -> str:
@@ -505,6 +562,17 @@ def _resolve_cached_instinct_url(document_id: str, page_number: int, *, force_re
     return fragment_url
 
 
+def _synthetic_instinct_document_url(document_id: str) -> str:
+    document_id = str(document_id or "").strip()
+    if document_id.startswith("instinct-client-info-"):
+        client_id = document_id.removeprefix("instinct-client-info-").strip()
+        return f"https://app.instinctvet.cloud/#/app/business-office/account-ledger/{client_id}" if client_id else ""
+    if document_id.startswith("instinct-patient-info-"):
+        patient_id = document_id.removeprefix("instinct-patient-info-").strip()
+        return f"https://app.instinctvet.cloud/#/patient/{patient_id}" if patient_id else ""
+    return ""
+
+
 def _summarize_context_chunks(chunks: list[dict]) -> str:
     lines: list[str] = []
     for idx, item in enumerate(chunks[:8], start=1):
@@ -548,6 +616,8 @@ def _selected_patient_context_from_event(event: dict) -> dict[str, str]:
         ("owner_name", "owner_name"),
         ("pims_code", "pims_code"),
         ("microchip_id", "microchip_id"),
+        ("visit_id", "visit_id"),
+        ("visitId", "visitId"),
     ):
         if not merged.get(key):
             value = params.get(fallback_key) or params.get(fallback_key.lower()) or ""
@@ -601,9 +671,11 @@ def _merge_selected_context(
             merged_documents.append(
                 {
                     "document_id": doc_id,
+                    "document_title": str(doc.get("document_title") or doc.get("title") or "Source PDF"),
                     "title": str(doc.get("document_title") or doc.get("title") or "Source PDF"),
                     "type": str(doc.get("type") or doc.get("family") or ""),
-                    "source_page_url": str(doc.get("source_page_url") or ""),
+                    "source_uri": str(doc.get("source_uri") or doc.get("source_page_url") or ""),
+                    "source_page_url": str(doc.get("source_page_url") or doc.get("source_uri") or ""),
                 }
             )
     merged["documents"] = merged_documents
@@ -725,9 +797,11 @@ def _extract_citations(chunks: list[dict]) -> list[dict]:
         {
             "document_id": hit["document_id"],
             "page_number": hit["page_number"],
+            "document_title": hit.get("document_title") or hit.get("page_label") or "Source PDF",
             "source_page_url": hit["source_page_url"],
             "snippet": hit["snippet"],
             "confidence": hit.get("confidence", 0.0),
+            "source_type": hit.get("source_type") or hit.get("family") or hit.get("type") or "",
         }
         for hit in chunks
     ]
@@ -741,6 +815,8 @@ def _build_document_url_map(documents: list[dict], conversation_refs: list[dict]
         parts = urlsplit(raw)
         if not parts.scheme and not parts.netloc:
             return raw.split("#", 1)[0]
+        if parts.netloc.endswith("instinctvet.cloud"):
+            return raw
         return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
     entries: dict[tuple[str, int], dict[str, str]] = {}
@@ -783,7 +859,31 @@ def _build_reference_map(documents: list[dict], chunks: list[dict]) -> list[dict
                 "document_id": document_id,
                 "page_number": page_number,
                 "document_title": doc.get("document_title") or hit.get("document_title"),
-                "source_uri": doc.get("source_uri") or hit.get("source_page_url"),
+                "source_uri": doc.get("source_uri") or doc.get("source_page_url") or hit.get("source_page_url"),
+                "source_type": doc.get("source_type") or doc.get("family") or doc.get("type") or hit.get("source_type") or hit.get("family") or hit.get("type") or "",
+                "snippet": hit.get("snippet") or "",
+            }
+        )
+    for doc in documents:
+        document_id = str(doc.get("document_id") or "").strip()
+        if not document_id:
+            continue
+        try:
+            page_number = int(doc.get("page_number") or doc.get("pageNumber") or doc.get("page") or 1)
+        except (TypeError, ValueError):
+            page_number = 1
+        key = (document_id, page_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        references.append(
+            {
+                "document_id": document_id,
+                "page_number": page_number,
+                "document_title": doc.get("document_title") or doc.get("documentTitle") or doc.get("page_label") or "Source PDF",
+                "source_uri": doc.get("source_uri") or doc.get("source_page_url") or "",
+                "source_type": doc.get("source_type") or doc.get("family") or doc.get("type") or "",
+                "snippet": doc.get("snippet") or "",
             }
         )
     return references
@@ -1069,28 +1169,40 @@ def _answer_messages(
     }
     selected_context_text = json.dumps(structured_selected_context, indent=2, sort_keys=True)
     history_text = json.dumps(conversation_turns, indent=2, sort_keys=True)
-    evidence_refs = [
-        {
-            "document_id": str(item.get("document_id") or "").strip(),
-            "page_number": int(item.get("page_number") or 1),
-            "document_title": str(item.get("document_title") or "Source PDF").strip() or "Source PDF",
-            "source_uri": str(item.get("source_page_url") or "").strip(),
-        }
-        for item in context_chunks
-        if str(item.get("document_id") or "").strip()
-    ]
-    for ref in conversation_refs:
+    evidence_refs: list[dict[str, object]] = []
+    evidence_ref_keys: set[tuple[str, int]] = set()
+
+    def add_evidence_ref(ref: dict[str, object]) -> None:
         document_id = str(ref.get("document_id") or "").strip()
         if not document_id:
-            continue
+            return
+        try:
+            page_number = int(ref.get("page_number") or ref.get("pageNumber") or ref.get("page") or 1)
+        except (TypeError, ValueError):
+            page_number = 1
+        key = (document_id, page_number)
+        if key in evidence_ref_keys:
+            return
+        evidence_ref_keys.add(key)
         evidence_refs.append(
             {
                 "document_id": document_id,
-                "page_number": int(ref.get("page_number") or 1),
+                "page_number": page_number,
                 "document_title": str(ref.get("document_title") or "Source PDF").strip() or "Source PDF",
-                "source_uri": str(ref.get("source_uri") or "").strip(),
+                "source_uri": str(ref.get("source_uri") or ref.get("source_page_url") or "").strip(),
+                "source_type": str(ref.get("source_type") or ref.get("family") or ref.get("type") or "").strip(),
             }
         )
+
+    for ref in selected_context.get("documents") or []:
+        if isinstance(ref, dict):
+            add_evidence_ref(ref)
+    for ref in context_chunks:
+        if isinstance(ref, dict):
+            add_evidence_ref(ref)
+    for ref in conversation_refs:
+        if isinstance(ref, dict):
+            add_evidence_ref(ref)
     context_text = _summarize_context_chunks(context_chunks)
     practice_stack_context = (practice_stack_context or DEFAULT_PRACTICE_STACK_CONTEXT).strip()
     system_text = (
@@ -1117,7 +1229,9 @@ def _answer_messages(
         "Keep the answer concise and clinically useful.\n"
         "If multiple documents support the answer, synthesize them clearly.\n"
         "Do not require exact wording from a retrieved document when a reasonable evidence-based inference is supported.\n"
-        "When citing a source, emit machine-readable markers like [CITE document_id=\"61173\" page=\"1\"] and do not invent URLs."
+        "Every factual claim supported by an item in the Evidence reference map must end with its machine-readable citation marker.\n"
+        "When using selected Instinct financial or patient data, cite the corresponding Instinct Client Info or Instinct Patient Info document.\n"
+        "Emit markers exactly like [CITE document_id=\"61173\" page=\"1\"] and do not invent document IDs, pages, or URLs."
     )
     user_text = (
         f"Selected conversation context:\n{selected_context_text}\n\n"
@@ -1317,7 +1431,9 @@ def _serve_options(event: dict) -> dict:
     items: list[dict]
     if os.environ.get("RAG_UI_DATA_PATH", "").strip() or os.environ.get("RAG_UI_DB_PATH", "").strip():
         catalog_started = time.perf_counter()
-        catalog = load_catalog()
+        catalog = load_catalog_cached()
+        if catalog is None:
+            catalog, _ = load_catalog_with_status(allow_stale=True)
         catalog_elapsed = time.perf_counter() - catalog_started
         print(f"[RAG_TIMING] options_catalog_seconds={catalog_elapsed:.3f}", flush=True)
 
@@ -1335,7 +1451,9 @@ def _serve_options(event: dict) -> dict:
         print(f"[RAG_TIMING] options_search_seconds={search_elapsed:.3f} count={len(items)}", flush=True)
     else:
         catalog_started = time.perf_counter()
-        catalog = load_catalog()
+        catalog = load_catalog_cached()
+        if catalog is None:
+            catalog, _ = load_catalog_with_status(allow_stale=True)
         catalog_elapsed = time.perf_counter() - catalog_started
         print(f"[RAG_TIMING] options_catalog_seconds={catalog_elapsed:.3f}", flush=True)
 
@@ -1408,6 +1526,7 @@ def _build_selected_context_bundle(
 ) -> dict[str, object]:
     patient_context = patient_context or {}
     selected_context_hint = selected_context_hint or {}
+    visit_id = str(patient_context.get("visit_id") or patient_context.get("visitId") or "").strip()
     catalog = load_catalog_cached()
     catalog_status = {"source": "memory", "stale": catalog is None, "age_seconds": None}
     if catalog is None:
@@ -1484,9 +1603,10 @@ def _build_selected_context_bundle(
         "patient": patient_record,
         "financials": financials,
         "reminders": reminders,
+        "financial_source_uri": _instinct_financial_document(client_record, financials).get("source_uri", ""),
         "documents": [
             _instinct_financial_document(client_record, financials),
-            _instinct_patient_document(client_record, patient_record, financials),
+            _instinct_patient_document(client_record, patient_record, financials, visit_id=visit_id or None),
             *patient_documents,
         ],
     }
@@ -1634,7 +1754,7 @@ def _serve_document_page(event: dict) -> dict:
     except ValueError:
         page_number = 1
     try:
-        target = _resolve_cached_instinct_url(document_id, page_number)
+        target = _synthetic_instinct_document_url(document_id) or _resolve_cached_instinct_url(document_id, page_number)
     except Exception as exc:
         elapsed = time.perf_counter() - started
         print(

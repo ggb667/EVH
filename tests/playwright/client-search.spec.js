@@ -124,6 +124,95 @@ test('source PDF page-count badge keeps 1-2 digit counts fully visible', async (
   }
 });
 
+test('synthetic Instinct docs render source chips with Instinct URLs', async ({ page }) => {
+  const requests = [];
+  await page.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.endsWith('/api/version')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 'test-sha', lambda_version: '$LATEST' }),
+      });
+      return;
+    }
+    if (url.includes('/api/options')) {
+      const kind = new URL(url).searchParams.get('kind') || '';
+      const clientId = new URL(url).searchParams.get('clientId') || '';
+      const query = new URL(url).searchParams.get('q') || '';
+      requests.push({ kind, clientId, query });
+      const body = kind === 'client'
+        ? { items: [{ id: 'client-1', label: 'Mary Theresa Jeffries', secondary: '8762' }] }
+        : clientId === 'client-1'
+          ? { items: [{ id: 'pet-1', label: 'Lassie', secondary: 'Canine · Collie', species: 'Canine', breed: 'Collie' }] }
+          : { items: [] };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+      return;
+    }
+    if (url.includes('/api/rag/answer')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          answer: 'All set.',
+          citations: [],
+          references: [
+            {
+              document_id: 'instinct-client-info-client-1',
+              document_title: 'Instinct Client Info',
+              source_uri: 'https://app.instinctvet.cloud/#/app/business-office/account-ledger/client-1',
+              page_number: 1,
+            },
+            {
+              document_id: 'instinct-patient-info-pet-1',
+              document_title: 'Instinct Patient Info',
+              source_uri: 'https://app.instinctvet.cloud/#/patient/pet-1',
+              page_number: 1,
+            },
+          ],
+          citation_map: {},
+        }),
+      });
+      return;
+    }
+    if (url === 'https://example.test/' || url === 'http://example.test/' || url.endsWith('/')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: html,
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
+  });
+
+  await page.goto('https://example.test/');
+  const client = page.locator('#client-input');
+  const pet = page.locator('#pet-input');
+  const question = page.locator('#question');
+
+  await client.fill('Mary');
+  await page.getByText('Mary Theresa Jeffries').click();
+  await pet.fill('Las');
+  await page.getByText('Lassie').click();
+  await question.fill('What reminders does he have?');
+  await page.getByRole('button', { name: 'Ask' }).click();
+  await expect(question).toHaveValue('');
+  await expect(page.locator('.turn')).toHaveCount(1);
+  await expect(page.locator('.turn .source-chip')).toHaveCount(2);
+  await expect(page.locator('.turn .source-chip[data-doc-id="instinct-client-info-client-1"]')).toHaveAttribute('aria-label', 'Instinct Client Info');
+  await expect(page.locator('.turn .source-chip[data-doc-id="instinct-patient-info-pet-1"]')).toHaveAttribute('aria-label', 'Instinct Patient Info');
+  await expect(page.locator('.turn .source-chip[data-doc-id="instinct-client-info-client-1"] i')).toBeVisible();
+  await expect(page.locator('.turn .source-chip[data-doc-id="instinct-patient-info-pet-1"] i')).toBeVisible();
+  await expect(page.locator('.turn .source-chip[data-doc-id="instinct-client-info-client-1"]')).toHaveAttribute('data-page', '1');
+  await expect(page.locator('.turn .source-chip[data-doc-id="instinct-patient-info-pet-1"]')).toHaveAttribute('data-page', '1');
+  await expect(requests.filter(r => r.kind === 'pet').length).toBe(1);
+});
+
 test('patient list is loaded once per client and reused locally after clear', async ({ page }) => {
   const requests = [];
 
@@ -203,6 +292,7 @@ test('patient list is loaded once per client and reused locally after clear', as
   const clientMenu = page.locator('#client-menu');
   const pet = page.locator('#pet-input');
   const petMenu = page.locator('#pet-menu');
+  const question = page.locator('#question');
   const transcript = page.locator('#transcript');
 
   await client.fill('Mary');
@@ -227,6 +317,8 @@ test('patient list is loaded once per client and reused locally after clear', as
   await page.getByText('Lassie').click();
   await expect(pet).toHaveValue('Lassie');
   await expect(page.locator('#question-helper')).toContainText('Ask a question to begin a patient-specific conversation.');
+  await question.fill('What reminders does he have?');
+  await expect(question).toHaveValue('What reminders does he have?');
 
   await pet.fill('');
   await expect(petMenu).toContainText('Lassie');
@@ -251,6 +343,7 @@ test('patient list is loaded once per client and reused locally after clear', as
   await expect(pet).toBeEnabled();
   await expect(pet).toHaveAttribute('placeholder', 'Type a patient name');
   await expect(page.locator('#question-helper')).toContainText('Ask a question to begin a patient-specific conversation.');
+  await expect(question).toHaveValue('');
   await expect.poll(() => requests.filter(r => r.kind === 'pet').length).toBe(2);
   await pet.focus();
   await expect(petMenu).toContainText('Lassie');
