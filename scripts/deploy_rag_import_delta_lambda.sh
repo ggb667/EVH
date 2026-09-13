@@ -136,6 +136,7 @@ subprocess.check_call([
     "aws", "lambda", "update-function-configuration",
     "--function-name", "evh_instinct_rag_import_delta",
     "--environment", payload,
+    "--query", "{FunctionName:FunctionName,LastModified:LastModified,LastUpdateStatus:LastUpdateStatus,RevisionId:RevisionId}",
     "--output", "json",
 ])
 PY

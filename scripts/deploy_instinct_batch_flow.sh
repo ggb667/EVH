@@ -95,6 +95,7 @@ aws lambda update-function-configuration \
   --function-name "$FUNCTION_NAME" \
   --timeout "$LAMBDA_TIMEOUT" \
   --memory-size "$LAMBDA_MEMORY" \
+  --query '{FunctionName:FunctionName,LastModified:LastModified,Timeout:Timeout,MemorySize:MemorySize,LastUpdateStatus:LastUpdateStatus}' \
   --output json
 aws lambda wait function-updated --function-name "$FUNCTION_NAME"
 
@@ -112,6 +113,7 @@ subprocess.check_call([
     "aws", "lambda", "update-function-configuration",
     "--function-name", "evh_instinct_rag_import_delta",
     "--environment", payload,
+    "--query", "{FunctionName:FunctionName,LastModified:LastModified,LastUpdateStatus:LastUpdateStatus,RevisionId:RevisionId}",
     "--output", "json",
 ])
 PY
