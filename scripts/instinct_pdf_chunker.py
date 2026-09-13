@@ -3088,6 +3088,19 @@ def load_into_postgres(
         clean_chunk_text = _strip_nuls(document.page_content)
         chunk_metadata = dict(document.metadata)
         chunk_metadata.pop("table_records", None)
+        source_document = documents[0] if documents else document
+        chunk_document_pdf_id = _strip_nuls(
+            document.metadata.get("document_pdf_id")
+            or document.metadata.get("pdf_id")
+            or source_document.metadata.get("document_pdf_id")
+            or source_document.metadata.get("pdf_id")
+        )
+        original_filename = _strip_nuls(
+            document.metadata.get("original_filename")
+            or source_document.metadata.get("original_filename")
+            or document.metadata.get("filename")
+            or source_name.rsplit(":", 2)[-1]
+        )
         clean_metadata = _strip_nuls(
             {
                 **chunk_metadata,
@@ -3102,7 +3115,8 @@ def load_into_postgres(
             {
                 "source_name": source_name,
                 "source_uri": source_uri,
-                "document_pdf_id": document_pdf_id,
+                "document_pdf_id": chunk_document_pdf_id,
+                "original_filename": original_filename,
                 "page_number": document.metadata["page_number"],
                 "chunk_index": document.metadata["chunk_index"],
                 "chunk_text": clean_chunk_text,
@@ -3245,6 +3259,7 @@ def load_into_postgres(
                     _strip_nuls(row.get("document_pdf_id")),
                     _strip_nuls(row["source_name"]),
                     _strip_nuls(row.get("source_uri")),
+                    _strip_nuls(row.get("original_filename")),
                     int(row["page_number"]),
                     int(row["chunk_index"]),
                     _strip_nuls(row["chunk_text"]),
@@ -3284,6 +3299,7 @@ def load_into_postgres(
                             document_pdf_id,
                             source_name,
                             source_uri,
+                            original_filename,
                             page_number,
                             chunk_index,
                             chunk_text,
@@ -3291,10 +3307,11 @@ def load_into_postgres(
                             embedding,
                             metadata
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (chunk_hash) DO UPDATE SET
                             document_pdf_id = EXCLUDED.document_pdf_id,
                             source_uri = EXCLUDED.source_uri,
+                            original_filename = EXCLUDED.original_filename,
                             page_number = EXCLUDED.page_number,
                             chunk_index = EXCLUDED.chunk_index,
                             chunk_text = EXCLUDED.chunk_text,

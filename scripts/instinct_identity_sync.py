@@ -268,7 +268,9 @@ def _ensure_identity_schema(conn) -> None:
             DO $$
             BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_owner_lookup_cache_pkey'
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'public.instinct_owner_lookup_cache'::regclass
+                      AND contype = 'p'
                 ) THEN
                     ALTER TABLE public.instinct_owner_lookup_cache
                         ADD CONSTRAINT instinct_owner_lookup_cache_pkey PRIMARY KEY (account_id);
@@ -281,7 +283,9 @@ def _ensure_identity_schema(conn) -> None:
             DO $$
             BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'instinct_patient_lookup_cache_pkey'
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'public.instinct_patient_lookup_cache'::regclass
+                      AND contype = 'p'
                 ) THEN
                     ALTER TABLE public.instinct_patient_lookup_cache
                         ADD CONSTRAINT instinct_patient_lookup_cache_pkey PRIMARY KEY (patient_id);
