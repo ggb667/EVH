@@ -68,6 +68,7 @@ class SyncSummary:
     inserted: int
     updated: int
     seconds: float
+    patients_scanned: int = 0
 
 
 def _upsert_many(conn, sql: str, rows: Iterable[dict[str, Any]]) -> int:
@@ -180,6 +181,8 @@ def sync_documents(
     document_limit: int | None = None,
     candidate_scan_limit: int | None = None,
     stop_after_first_ingestion: bool = False,
+    patient_start: int = 0,
+    max_seconds: float | None = None,
 ) -> SyncSummary:
     import requests
 
@@ -261,8 +264,11 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     with conn.cursor() as cur:
         cur.execute("select patient_id from public.instinct_patient_lookup_cache order by patient_id")
         patient_ids = [str(row["patient_id"]) for row in cur.fetchall()]
+    patient_start = max(0, int(patient_start or 0))
     if patient_limit is not None:
-        patient_ids = patient_ids[:patient_limit]
+        patient_ids = patient_ids[patient_start:patient_start + patient_limit]
+    else:
+        patient_ids = patient_ids[patient_start:]
     emit(log, "documents_patient_list_ready", patients=len(patient_ids))
 
     existing_by_doc_id: dict[str, tuple[str | None, str | None]] = {}
@@ -310,6 +316,9 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     candidate_processing_seconds = 0.0
     document_limit = document_limit if document_limit and document_limit > 0 else None
     for idx, patient_id in enumerate(patient_ids, start=1):
+        if max_seconds is not None and time.perf_counter() - started >= max_seconds:
+            emit(log, "documents_time_budget_reached", next_patient=patient_start + idx - 1)
+            break
         if candidate_scan_limit is not None and idx > candidate_scan_limit:
             emit(log, "documents_candidate_scan_limit_reached", candidate_scan_limit=candidate_scan_limit, completed=idx - 1)
             break
@@ -459,4 +468,4 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         pending_upserts=upsert_candidate_count,
         patients_per_hour=round((len(patient_ids) / max(1e-6, sum(fetch_elapsed_seconds))) * 3600.0, 1) if fetch_elapsed_seconds else 0.0,
     )
-    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(total_seconds, 3))
+    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(total_seconds, 3), patients_scanned=idx if patient_ids else 0)

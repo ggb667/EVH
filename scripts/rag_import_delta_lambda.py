@@ -26,6 +26,8 @@ class LambdaRunSummary:
     inserted: int
     updated: int
     seconds: float
+    next_patient: int
+    complete: bool
 
 
 def _build_db_url() -> str:
@@ -148,19 +150,44 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
     process_all = bool(event.get("process_all"))
     patient_limit = None if process_all else _parse_patient_limit(event)
     document_limit = None if process_all else _parse_document_limit(event)
+    patient_start = max(0, int(event.get("start_patient", event.get("next_patient", 0)) or 0))
+    batch_size = max(1, int(event.get("patient_batch", patient_limit or 500) or 500))
+    max_seconds = min(float(event.get("max_seconds", 720) or 720), 840.0)
 
     client = InstinctApiSyncClient(base_url, client_id, client_secret)
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as conn:
+        run_id = str(event.get("run_id") or f"rd-{int(time.time())}")
+        with conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS public.rag_import_run (
+                run_id text PRIMARY KEY, started_at timestamptz NOT NULL, next_patient integer NOT NULL DEFAULT 0,
+                patients_scanned integer NOT NULL DEFAULT 0, documents_found integer NOT NULL DEFAULT 0,
+                documents_ingested integer NOT NULL DEFAULT 0, documents_failed integer NOT NULL DEFAULT 0,
+                status text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())""")
+            cur.execute("""INSERT INTO public.rag_import_run (run_id, started_at, next_patient, status)
+                VALUES (%s, now(), %s, 'RUNNING') ON CONFLICT (run_id) DO UPDATE SET status='RUNNING', updated_at=now()""", (run_id, patient_start))
+        conn.commit()
         clients_summary = sync_clients(client, conn, log=print)
         patients_summary = sync_patients(client, conn, log=print)
         documents_summary = sync_documents(
             client,
             conn,
             log=print,
-            patient_limit=patient_limit,
             document_limit=document_limit,
+            patient_limit=batch_size,
+            patient_start=patient_start,
+            max_seconds=max_seconds,
         )
 
+    processed_patients = documents_summary.patients_scanned
+    next_patient = patient_start + int(processed_patients)
+    complete = int(processed_patients) < batch_size
+    with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
+        with state_conn.cursor() as cur:
+            cur.execute("""UPDATE public.rag_import_run SET next_patient=%s, patients_scanned=patients_scanned+%s,
+                documents_found=documents_found+%s, documents_ingested=documents_ingested+%s,
+                status=%s, updated_at=now() WHERE run_id=%s""", (next_patient, processed_patients,
+                documents_summary.fetched, documents_summary.inserted, 'COMPLETE' if complete else 'RUNNING', run_id))
+        state_conn.commit()
     payload = LambdaRunSummary(
         step="1.1-1.3",
         patient_limit=patient_limit,
@@ -173,16 +200,25 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         inserted=documents_summary.inserted,
         updated=documents_summary.updated,
         seconds=round(clients_summary.seconds + patients_summary.seconds + documents_summary.seconds, 3),
+        next_patient=next_patient,
+        complete=complete,
     )
     print(json.dumps({
-        "event": "COMPLETE",
+        "event": "COMPLETE" if complete else "CONTINUE",
         "message": "linear ingestion completed normally",
-        "stop_reason": "limits_or_exhausted",
+        "stop_reason": "exhausted" if complete else "continuation_scheduled",
         "patient_limit": patient_limit,
         "document_limit": document_limit,
         "documents_fetched": documents_summary.fetched,
         "seconds": payload.seconds,
     }, sort_keys=True), flush=True)
+    if not complete:
+        import boto3
+        boto3.client("lambda").invoke(
+            FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "evh_instinct_rag_import_delta"),
+            InvocationType="Event",
+            Payload=json.dumps({"start_patient": next_patient, "patient_batch": batch_size, "run_id": event.get("run_id")}).encode(),
+        )
     body = {
         "status": "ok",
         "summary": asdict(payload),
