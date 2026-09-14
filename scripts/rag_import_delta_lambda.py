@@ -156,13 +156,24 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
 
     client = InstinctApiSyncClient(base_url, client_id, client_secret)
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as conn:
-        run_id = str(event.get("run_id") or f"rd-{int(time.time())}")
+        run_id = str(event.get("run_id") or "").strip()
         with conn.cursor() as cur:
             cur.execute("""CREATE TABLE IF NOT EXISTS public.rag_import_run (
                 run_id text PRIMARY KEY, started_at timestamptz NOT NULL, next_patient integer NOT NULL DEFAULT 0,
                 patients_scanned integer NOT NULL DEFAULT 0, documents_found integer NOT NULL DEFAULT 0,
                 documents_ingested integer NOT NULL DEFAULT 0, documents_failed integer NOT NULL DEFAULT 0,
                 status text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())""")
+            if not run_id:
+                cur.execute("""SELECT run_id, next_patient FROM public.rag_import_run
+                    WHERE status='RUNNING' ORDER BY updated_at DESC LIMIT 1""")
+                recovered = cur.fetchone()
+                if recovered:
+                    run_id = str(recovered["run_id"])
+                    patient_start = max(patient_start, int(recovered["next_patient"] or 0))
+                    print(json.dumps({"event": "RUN_RECOVERED", "run_id": run_id,
+                                      "next_patient": patient_start}, sort_keys=True), flush=True)
+            if not run_id:
+                run_id = f"rd-{int(time.time())}"
             cur.execute("""INSERT INTO public.rag_import_run (run_id, started_at, next_patient, status)
                 VALUES (%s, now(), %s, 'RUNNING') ON CONFLICT (run_id) DO UPDATE SET status='RUNNING', updated_at=now()""", (run_id, patient_start))
         conn.commit()
