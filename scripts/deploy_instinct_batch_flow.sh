@@ -58,6 +58,7 @@ for arc, src in [
     ("scripts/instinct_cache_sync_pipeline.py", root / "scripts/instinct_cache_sync_pipeline.py"),
     ("scripts/instinct_identity_sync.py", root / "scripts/instinct_identity_sync.py"),
     ("scripts/instinct_pdf_chunker.py", root / "scripts/instinct_pdf_chunker.py"),
+    ("scripts/http_session.py", root / "scripts/http_session.py"),
 ]:
     dest = build_dir / arc
     dest.parent.mkdir(parents=True, exist_ok=True)

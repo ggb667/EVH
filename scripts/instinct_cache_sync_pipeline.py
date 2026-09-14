@@ -321,7 +321,8 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             metadata = row.get("metadata") if isinstance(row, dict) else {}
             chart_hash = metadata.get("chart_hash") if isinstance(metadata, dict) else None
             existing_by_doc_id[str(row["document_pdf_id"])] = (str(row.get("status") or ""), str(chart_hash) if chart_hash else None)
-    emit(log, "db_query_complete", query="existing_source_documents", rows=len(existing_by_doc_id), seconds=round(time.perf_counter() - existing_query_started, 4))
+    existing_query_seconds = time.perf_counter() - existing_query_started
+    emit(log, "db_query_complete", query="existing_source_documents", rows=len(existing_by_doc_id), seconds=round(existing_query_seconds, 4))
 
     upsert_sql = """
         INSERT INTO public.rag_source_document (
@@ -347,6 +348,8 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     fetch_elapsed_seconds: list[float] = []
     skipped_count = 0
     upsert_candidate_count = 0
+    patient_api_seconds = 0.0
+    candidate_processing_seconds = 0.0
     document_limit = document_limit if document_limit and document_limit > 0 else None
     for idx, patient_id in enumerate(patient_ids, start=1):
         if candidate_scan_limit is not None and idx > candidate_scan_limit:
@@ -354,12 +357,15 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             break
         patient_fetch_start = time.perf_counter()
         emit(log, "documents_patient_fetch_start", patient_id=patient_id, index=idx, total=len(patient_ids))
+        api_started = time.perf_counter()
         data = fetch_medical_history_visits(patient_id, timeout=30)
+        patient_api_seconds += time.perf_counter() - api_started
         patient = data.get("patient") if isinstance(data, dict) else {}
         charts = data.get("charts") if isinstance(data, dict) else []
         client_id = normalize_text((patient or {}).get("account", {}).get("id")) if isinstance(patient, dict) else ""
         if not client_id:
             raise RuntimeError(f"Instinct patient {patient_id} has no real client/account id; refusing document upsert")
+        candidate_started = time.perf_counter()
         for chart in charts if isinstance(charts, list) else []:
             if not isinstance(chart, dict):
                 continue
@@ -382,8 +388,12 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                     "source_name": normalize_text(chart.get("filename") or chart.get("name") or chart.get("label")) or None,
                     "source_uri": None,
                     "document_label": normalize_text(chart.get("label")) or None,
-                    "status": "complete",
-                    "ingestion_complete": True,
+                    # This stage has only discovered chart metadata.  It has
+                    # not downloaded, extracted/OCR'd, chunked, embedded, or
+                    # persisted document content; never represent discovery
+                    # as completed ingestion.
+                    "status": "pending",
+                    "ingestion_complete": False,
                     "metadata": json.dumps({"instinct_type": chart.get("__typename"), "chart": chart, "chart_hash": chart_hash}, default=str),
                     "synced_at": now_utc(),
                     "content_hash": chart_hash,
@@ -397,9 +407,9 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             )
             if stop_after_new:
                 emit(log, "documents_first_new_item_found", document_pdf_id=doc_id, patient_id=patient_id)
-                source = PatientPdfSource(patient_id=str(patient_id), patient_name=str(chart.get("label") or chart.get("filename") or doc_id), pdf_id=doc_id, pdf_url=None)
                 try:
                     from scripts.instinct_pdf_chunker import ChunkingConfig, PatientPdfSource, chunk_patient_pdf_timed, load_into_postgres
+                    source = PatientPdfSource(patient_id=str(patient_id), patient_name=str(chart.get("label") or chart.get("filename") or doc_id), pdf_id=doc_id, pdf_url=None)
                     token = os.environ.get("TOKEN", "").strip()
                     mutation = "mutation createChartFileUrl($id: ID!, $inline: Boolean) { createChartFileUrl(id: $id, inline: $inline) }"
                     url_response = requests.post("https://evh.api.instinctvet.com/graphql", json={"query": mutation, "variables": {"id": doc_id, "inline": True}}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=30)
@@ -411,6 +421,7 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 except Exception as exc:
                     emit(log, "first_new_item_processing_failed", document_pdf_id=doc_id, error=str(exc))
                 break
+        candidate_processing_seconds += time.perf_counter() - candidate_started
         if stop_after_new and rows:
             break
         if document_limit is not None and len(rows) >= document_limit:
@@ -443,7 +454,21 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
 
     upsert_started = time.perf_counter()
     inserted = _upsert_many(conn, upsert_sql, rows)
-    emit(log, "db_upsert_complete", rows=len(rows), seconds=round(time.perf_counter() - upsert_started, 4))
+    upsert_seconds = time.perf_counter() - upsert_started
+    total_seconds = time.perf_counter() - started
+    emit(log, "db_upsert_complete", rows=len(rows), seconds=round(upsert_seconds, 4))
+    emit(
+        log,
+        "documents_timing_summary",
+        total_seconds=round(total_seconds, 4),
+        patient_list_and_auth_seconds=round(max(0.0, existing_query_started - started), 4),
+        existing_documents_query_seconds=round(existing_query_seconds, 4),
+        patient_api_seconds=round(patient_api_seconds, 4),
+        candidate_processing_seconds=round(candidate_processing_seconds, 4),
+        database_upsert_seconds=round(upsert_seconds, 4),
+        patients_scanned=idx if patient_ids else 0,
+        document_candidates=len(rows),
+    )
     emit(
         log,
         "documents_upsert_done",
@@ -455,4 +480,4 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         pending_upserts=upsert_candidate_count,
         patients_per_hour=round((len(patient_ids) / max(1e-6, sum(fetch_elapsed_seconds))) * 3600.0, 1) if fetch_elapsed_seconds else 0.0,
     )
-    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(time.perf_counter() - started, 3))
+    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(total_seconds, 3))
