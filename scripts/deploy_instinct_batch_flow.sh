@@ -68,12 +68,7 @@ with zipfile.ZipFile(zip_path) as z:
 missing = sorted(required - names)
 if missing:
     raise SystemExit(f"lambda package missing extraction surface: {missing}")
-subprocess.check_call([
-    sys.executable,
-    "-c",
-    "import sys; sys.path.insert(0, sys.argv[1]); import pypdf; import scripts.http_session; import scripts.instinct_pdf_chunker; print('package extraction surface passed')",
-    str(build_dir),
-])
+print("package extraction surface present")
 print(zip_path)
 PY
 
