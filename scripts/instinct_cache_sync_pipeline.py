@@ -69,6 +69,9 @@ class SyncSummary:
     updated: int
     seconds: float
     patients_scanned: int = 0
+    documents_discovered: int = 0
+    documents_ingested: int = 0
+    documents_failed: int = 0
 
 
 def _upsert_many(conn, sql: str, rows: Iterable[dict[str, Any]]) -> int:
@@ -312,6 +315,8 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     fetch_elapsed_seconds: list[float] = []
     skipped_count = 0
     upsert_candidate_count = 0
+    documents_ingested = 0
+    documents_failed = 0
     patient_api_seconds = 0.0
     candidate_processing_seconds = 0.0
     document_limit = document_limit if document_limit and document_limit > 0 else None
@@ -407,7 +412,10 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 ingestion_succeeded = True
                 emit(log, "new_document_processed", document_pdf_id=doc_id, page_count=page_count, chunk_count=len(documents), embed_seconds=round(embed_seconds, 3), postgres_seconds=round(postgres_seconds, 3), **{k: round(float(v), 3) for k, v in timing.items() if isinstance(v, (int, float))})
             except Exception as exc:
+                documents_failed += 1
                 emit(log, "document_ingestion_failed", document_pdf_id=doc_id, error=str(exc))
+            else:
+                documents_ingested += 1
             if stop_after_first_ingestion and ingestion_succeeded:
                 emit(log, "stop_after_first_ingestion", document_pdf_id=doc_id, message="new document found, and processed")
                 break
@@ -468,4 +476,5 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         pending_upserts=upsert_candidate_count,
         patients_per_hour=round((len(patient_ids) / max(1e-6, sum(fetch_elapsed_seconds))) * 3600.0, 1) if fetch_elapsed_seconds else 0.0,
     )
-    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(total_seconds, 3), patients_scanned=idx if patient_ids else 0)
+    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(total_seconds, 3), patients_scanned=idx if patient_ids else 0,
+                       documents_discovered=len(rows), documents_ingested=documents_ingested, documents_failed=documents_failed)

@@ -216,6 +216,21 @@ class DetectedTerm:
 
 def fetch_instinct_pdf(source: PatientPdfSource) -> FetchedPdf:
     pdf_bytes = read_pdf_bytes(source)
+    # URL-backed Lambda sources must be materialized before the isolated
+    # text/OCR workers run; passing a source with pdf_path=None causes the
+    # extractor stage to fail before any mechanism can be attempted.
+    if source.pdf_path is None:
+        suffix = _source_suffix(source) or ".pdf"
+        downloaded = tempfile.NamedTemporaryFile(prefix="evh-ingest-", suffix=suffix, delete=False)
+        downloaded.write(pdf_bytes)
+        downloaded.close()
+        source = PatientPdfSource(
+            patient_id=source.patient_id,
+            patient_name=source.patient_name,
+            pdf_id=source.pdf_id,
+            pdf_path=Path(downloaded.name),
+            pdf_url=source.pdf_url,
+        )
     return FetchedPdf(
         source_name=source.patient_name,
         source_uri=source.pdf_url or (str(source.pdf_path) if source.pdf_path is not None else None),

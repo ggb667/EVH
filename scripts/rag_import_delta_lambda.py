@@ -28,6 +28,9 @@ class LambdaRunSummary:
     seconds: float
     next_patient: int
     complete: bool
+    documents_discovered: int
+    documents_ingested: int
+    documents_failed: int
 
 
 def _build_db_url() -> str:
@@ -219,6 +222,9 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         seconds=round(clients_summary.seconds + patients_summary.seconds + documents_summary.seconds, 3),
         next_patient=next_patient,
         complete=complete,
+        documents_discovered=documents_summary.documents_discovered,
+        documents_ingested=documents_summary.documents_ingested,
+        documents_failed=documents_summary.documents_failed,
     )
     print(json.dumps({
         "event": "COMPLETE" if complete else "CONTINUE",
@@ -226,7 +232,9 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         "stop_reason": "exhausted" if complete else "continuation_scheduled",
         "patient_limit": patient_limit,
         "document_limit": document_limit,
-        "documents_fetched": documents_summary.fetched,
+        "documents_discovered": documents_summary.documents_discovered,
+        "documents_ingested": documents_summary.documents_ingested,
+        "documents_failed": documents_summary.documents_failed,
         "seconds": payload.seconds,
     }, sort_keys=True), flush=True)
     if not complete:
