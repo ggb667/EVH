@@ -84,6 +84,7 @@ EXTRACTOR_USAGE_COUNTS: dict[str, int] = {"pdftotext": 0, "pypdf": 0, "pymupdf":
 SQL_VERBOSE_LOGGING = os.environ.get("EVH_VERBOSE_SQL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 _POSTGRES_CONNECTIONS: dict[str, psycopg.Connection] = {}
+_OPENAI_API_KEY_CACHE: str | None = None
 
 
 def _get_postgres_connection(database_url: str) -> psycopg.Connection:
@@ -2120,14 +2121,57 @@ def chunk_patient_manifest(
     return documents, page_count
 
 
+def _extract_openai_api_key_from_secret_payload(payload: str) -> str:
+    payload = (payload or "").strip()
+    if not payload:
+        return ""
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+    if isinstance(parsed, str):
+        return parsed.strip()
+    if isinstance(parsed, Mapping):
+        for key in ("OPENAI_API_KEY", "openai_api_key", "api_key", "value"):
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
 def _openai_api_key() -> str:
+    global _OPENAI_API_KEY_CACHE
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY is required for real embedding generation. "
-            "Set it before running the PDF ingest pipeline."
-        )
-    return api_key
+    if api_key:
+        return api_key
+    if _OPENAI_API_KEY_CACHE:
+        return _OPENAI_API_KEY_CACHE
+
+    secret_arn = os.environ.get("OPENAI_API_KEY_SECRET_ARN", "").strip()
+    if secret_arn:
+        try:
+            import base64
+            import boto3
+
+            response = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)
+        except Exception as exc:  # pragma: no cover - exercised in Lambda/AWS integration
+            raise RuntimeError("OPENAI_API_KEY_SECRET_ARN is configured but could not be read") from exc
+        if "SecretString" in response:
+            api_key = _extract_openai_api_key_from_secret_payload(str(response.get("SecretString") or ""))
+        else:
+            secret_binary = response.get("SecretBinary") or b""
+            if isinstance(secret_binary, str):
+                secret_binary = secret_binary.encode("utf-8")
+            api_key = _extract_openai_api_key_from_secret_payload(base64.b64decode(secret_binary).decode("utf-8", errors="replace"))
+        if api_key:
+            _OPENAI_API_KEY_CACHE = api_key
+            return api_key
+        raise RuntimeError("OPENAI_API_KEY_SECRET_ARN did not contain an OpenAI API key")
+
+    raise RuntimeError(
+        "OPENAI_API_KEY or OPENAI_API_KEY_SECRET_ARN is required for real embedding generation. "
+        "Set one before running the PDF ingest pipeline."
+    )
 
 
 def _verbose_pdf_insight_enabled() -> bool:

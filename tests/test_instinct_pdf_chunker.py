@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 from io import BytesIO
 from pathlib import Path
 
@@ -18,6 +20,8 @@ from scripts.instinct_pdf_chunker import (
     load_patient_manifest,
     load_term_index,
     print_chunk_metadata,
+    _extract_openai_api_key_from_secret_payload,
+    _openai_api_key,
 )
 
 
@@ -262,3 +266,26 @@ def test_load_term_index_prefers_database(monkeypatch):
     terms = load_term_index()
 
     assert {term.canonical_name for term in terms} >= {"Carprofen", "Dental cleaning"}
+
+
+def test_openai_api_key_secret_payload_accepts_plain_or_json():
+    assert _extract_openai_api_key_from_secret_payload("sk-test") == "sk-test"
+    assert _extract_openai_api_key_from_secret_payload(json.dumps({"OPENAI_API_KEY": "sk-json"})) == "sk-json"
+    assert _extract_openai_api_key_from_secret_payload(json.dumps({"api_key": "sk-api"})) == "sk-api"
+
+
+def test_openai_api_key_can_resolve_secret_arn_without_logging_value(monkeypatch):
+    import scripts.instinct_pdf_chunker as chunker
+
+    class FakeSecretsClient:
+        def get_secret_value(self, *, SecretId):
+            assert SecretId == "arn:test:openai"
+            return {"SecretString": json.dumps({"OPENAI_API_KEY": "sk-from-secret"})}
+
+    fake_boto3 = types.SimpleNamespace(client=lambda service: FakeSecretsClient())
+    monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY_SECRET_ARN", "arn:test:openai")
+    monkeypatch.setattr(chunker, "_OPENAI_API_KEY_CACHE", None)
+
+    assert _openai_api_key() == "sk-from-secret"
