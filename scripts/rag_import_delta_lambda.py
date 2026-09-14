@@ -150,8 +150,13 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
     process_all = bool(event.get("process_all"))
     patient_limit = None if process_all else _parse_patient_limit(event)
     document_limit = None if process_all else _parse_document_limit(event)
-    patient_start = max(0, int(event.get("start_patient", event.get("next_patient", 0)) or 0))
+    patient_start = max(0, int(event.get("start_patient", event.get("next_patient", event.get("patient_start", 0))) or 0))
+    has_cursor = any(key in event for key in ("start_patient", "next_patient", "patient_start"))
     batch_size = max(1, int(event.get("patient_batch", patient_limit or 500) or 500))
+    if patient_limit is not None:
+        remaining_patients = max(patient_limit - patient_start, 0)
+        if remaining_patients:
+            batch_size = min(batch_size, remaining_patients)
     max_seconds = min(float(event.get("max_seconds", 720) or 720), 840.0)
 
     client = InstinctApiSyncClient(base_url, client_id, client_secret)
@@ -163,7 +168,7 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
                 patients_scanned integer NOT NULL DEFAULT 0, documents_found integer NOT NULL DEFAULT 0,
                 documents_ingested integer NOT NULL DEFAULT 0, documents_failed integer NOT NULL DEFAULT 0,
                 status text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())""")
-            if not run_id:
+            if not run_id and not has_cursor:
                 cur.execute("""SELECT run_id, next_patient FROM public.rag_import_run
                     WHERE status='RUNNING' ORDER BY updated_at DESC LIMIT 1""")
                 recovered = cur.fetchone()
@@ -191,7 +196,8 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
 
     processed_patients = documents_summary.patients_scanned
     next_patient = patient_start + int(processed_patients)
-    complete = int(processed_patients) < batch_size
+    limit_reached = patient_limit is not None and next_patient >= patient_limit
+    complete = int(processed_patients) < batch_size or limit_reached
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
         with state_conn.cursor() as cur:
             cur.execute("""UPDATE public.rag_import_run SET next_patient=%s, patients_scanned=patients_scanned+%s,
@@ -228,7 +234,15 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         boto3.client("lambda").invoke(
             FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "evh_instinct_rag_import_delta"),
             InvocationType="Event",
-            Payload=json.dumps({"start_patient": next_patient, "patient_batch": batch_size, "run_id": event.get("run_id")}).encode(),
+            Payload=json.dumps({
+                "start_patient": next_patient,
+                "patient_batch": batch_size,
+                "run_id": run_id,
+                **({"process_all": True} if process_all else {}),
+                **({"patient_limit": patient_limit} if patient_limit is not None else {}),
+                **({"document_limit": document_limit} if document_limit is not None else {}),
+                "max_seconds": max_seconds,
+            }).encode(),
         )
     body = {
         "status": "ok",

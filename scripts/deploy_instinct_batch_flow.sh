@@ -109,10 +109,11 @@ subprocess.check_call([
 PY
 
 echo "[smoke] direct invocation"
+SMOKE_RUN_ID="deploy-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"patient_limit":1,"document_limit":1}' \
+  --payload "{\"run_id\":\"$SMOKE_RUN_ID\",\"patient_limit\":1,\"document_limit\":1}" \
   /tmp/evh_import_delta_direct_smoke.json \
   >/tmp/evh_import_delta_direct_smoke.meta.json
 
