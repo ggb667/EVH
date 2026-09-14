@@ -292,6 +292,16 @@ def read_pdf_bytes(source: PatientPdfSource) -> bytes:
 
         response = get_session().get(source.pdf_url, timeout=120)
         response.raise_for_status()
+        print(json.dumps({
+            "status": "download_validation",
+            "pdf_id": source.pdf_id,
+            "http_status": response.status_code,
+            "content_type": response.headers.get("content-type", ""),
+            "content_length_header": response.headers.get("content-length", ""),
+            "bytes": len(response.content),
+            "magic_hex": response.content[:16].hex(),
+            "magic_ascii": response.content[:16].decode("ascii", errors="replace"),
+        }, sort_keys=True), flush=True)
         return response.content
     if source.pdf_path is None:
         raise ValueError("patient PDF source must include pdf_path or pdf_url")
@@ -446,7 +456,9 @@ def _run_child_process(kind: str, pdf_input: str, *, timeout_s: int) -> dict[str
         if status == "ok":
             return data
         if status == "no_text":
+            _child_status_line("extract_no_text", detail=f"page_count={data.get('page_count', 0)}")
             raise NoTextLayerError(int(data.get("page_count") or 0))
+        _child_status_line("extract_error", detail=f"{data.get('error_type', 'RuntimeError')}: {data.get('error', 'child process failed')}")
         raise RuntimeError(f"{data.get('error_type', 'RuntimeError')}: {data.get('error', 'child process failed')}")
     if proc.exitcode is not None and proc.exitcode < 0:
         raise RuntimeError(f"{kind} child terminated by signal {-proc.exitcode}")
