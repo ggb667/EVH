@@ -15,7 +15,9 @@ echo "[preflight] py_compile"
 python -m py_compile \
   scripts/rag_import_delta_lambda.py \
   scripts/instinct_cache_sync_pipeline.py \
-  scripts/instinct_identity_sync.py
+  scripts/instinct_identity_sync.py \
+  scripts/instinct_pdf_chunker.py \
+  scripts/http_session.py
 
 echo "[preflight] import smoke"
 python - <<'PY'
@@ -39,7 +41,7 @@ subprocess.check_call([
     "--platform", "manylinux2014_x86_64", "--implementation", "cp", "--python-version", "313",
     "--abi", "cp313", "--target", str(build_dir), "psycopg==3.2.13", "psycopg-binary==3.2.13",
     "requests==2.32.3", "boto3==1.35.99", "botocore==1.35.99",
-    "langchain-core", "langchain-text-splitters", "pypdf",
+    "langchain-core", "langchain-text-splitters", "pypdf==6.18.1",
 ])
 for arc, src in [
     ("scripts/__init__.py", root / "scripts/__init__.py"),
@@ -56,6 +58,22 @@ with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
     for path in sorted(build_dir.rglob("*")):
         if path.is_file():
             z.write(path, arcname=str(path.relative_to(build_dir)))
+required = {
+    "scripts/instinct_pdf_chunker.py",
+    "scripts/http_session.py",
+    "pypdf/__init__.py",
+}
+with zipfile.ZipFile(zip_path) as z:
+    names = set(z.namelist())
+missing = sorted(required - names)
+if missing:
+    raise SystemExit(f"lambda package missing extraction surface: {missing}")
+subprocess.check_call([
+    sys.executable,
+    "-c",
+    "import sys; sys.path.insert(0, sys.argv[1]); import pypdf; import scripts.http_session; import scripts.instinct_pdf_chunker; print('package extraction surface passed')",
+    str(build_dir),
+])
 print(zip_path)
 PY
 

@@ -412,8 +412,8 @@ def _extract_with_pymupdf(pdf_path: Path) -> tuple[list[str], int]:
     doc = pymupdf.open(str(pdf_path))
     pages = [(page.get_text() or "").strip() for page in doc]
     if pages and not any(page.strip() for page in pages):
-        raise NoTextLayerError(0)
-    return pages, 0
+        raise NoTextLayerError(len(pages))
+    return pages, len(pages)
 
 
 def _looks_like_pdf(pdf_bytes: bytes) -> bool:
@@ -422,6 +422,15 @@ def _looks_like_pdf(pdf_bytes: bytes) -> bool:
 
 def _looks_like_ole_doc(pdf_bytes: bytes) -> bool:
     return pdf_bytes.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+
+
+def _use_in_process_pdf_extractors() -> bool:
+    value = os.environ.get("EVH_PDF_EXTRACT_IN_PROCESS", "").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
 
 
 def _run_child_process(kind: str, pdf_input: str, *, timeout_s: int) -> dict[str, Any]:
@@ -560,7 +569,11 @@ def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
     last_error: Exception | None = None
     for extractor_name, extractor in (
         ("pdftotext", lambda: safe_extract_pdf_text_pages(pdf_path, timeout_s=_size_scaled_timeout(pdf_path, base_seconds=30, seconds_per_mb=15, maximum_seconds=600))),
-        ("pypdf", lambda: extract_pdf_text_pages(pdf_path, timeout_s=_size_scaled_timeout(pdf_path, base_seconds=60, seconds_per_mb=20, maximum_seconds=900))),
+        # Keep the pure-Python pypdf attempt in-process. Lambda's forked child
+        # process can terminate before returning a queue result; pypdf itself
+        # is bounded by the surrounding document/time budget and is the
+        # reliable text-layer fallback when pdftotext is unavailable.
+        ("pypdf", lambda: _extract_pdf_text_pages_impl(str(pdf_path))),
         ("pymupdf", lambda: _extract_with_pymupdf(pdf_path)),
     ):
         start = perf_counter()
@@ -632,9 +645,9 @@ def safe_extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 45) -> tuple
             pages = [page.strip() for page in text.split("\f")]
             text_chars = sum(len(page) for page in pages)
             if any(page.strip() for page in pages):
-                pdftotext_result = (pages, 0, text_chars)
+                pdftotext_result = (pages, len(pages), text_chars)
             else:
-                raise NoTextLayerError(0)
+                pdftotext_result = None
         else:
             stderr_tail = (fallback_proc.stderr or b"").decode("utf-8", errors="replace")[-1000:]
             if stderr_tail:
@@ -648,12 +661,12 @@ def safe_extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 45) -> tuple
             return pdftotext_pages, pdftotext_page_count
         raise
     if pdftotext_result is None:
-        return pypdf_pages, 0
+        return pypdf_pages, pypdf_page_count
     pdftotext_pages, pdftotext_page_count, pdftotext_chars = pdftotext_result
     pypdf_chars = sum(len(page) for page in pypdf_pages)
     if pypdf_chars > pdftotext_chars:
-        return pypdf_pages, 0
-    return pdftotext_pages, 0
+        return pypdf_pages, pypdf_page_count
+    return pdftotext_pages, pdftotext_page_count
 
 
 def _pdftotext_extract_worker(pdf_path: str, timeout_s: int, queue) -> None:
@@ -833,14 +846,29 @@ def _extract_pdf_text_pages_impl(pdf_path: str) -> tuple[list[str], int]:
             text = page.extract_text()
         pages.append((text or "").strip())
 
-    if pages and not any(page_text.strip() for page_text in pages):
-        raise NoTextLayerError(0)
-    return pages, 0
+    page_count = len(pages)
+    if page_count and not any(page_text.strip() for page_text in pages):
+        raise NoTextLayerError(page_count)
+    return pages, page_count
 
 
 def extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 120) -> tuple[list[str], int]:
+    if _use_in_process_pdf_extractors():
+        print(
+            json.dumps(
+                {
+                    "status": "extractor_surface",
+                    "extractor": "pypdf",
+                    "mode": "in_process",
+                    "path": str(pdf_path),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return _extract_pdf_text_pages_impl(str(pdf_path))
     result = _run_child_process("extract", str(pdf_path), timeout_s=timeout_s)
-    return result["pages"], 0
+    return result["pages"], int(result.get("page_count") or len(result.get("pages") or []))
 
 
 def ocr_pdf_text_pages(pdf_path: Path, *, timeout_s: int | None = None) -> tuple[list[str], int, str]:
