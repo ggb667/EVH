@@ -31,7 +31,7 @@ def test_request_parsing_and_cursor_round_trip():
     assert _offset_to_cursor(15)
 
 
-def test_search_sql_mentions_ocr_page_table_and_limits():
+def test_search_sql_uses_active_page_tables_and_limits():
     request = _request_from_event(
         {
             "rawPath": DEFAULT_ROUTE_PATH,
@@ -40,7 +40,7 @@ def test_search_sql_mentions_ocr_page_table_and_limits():
         }
     )
     sql, args = _build_search_sql(request)
-    assert "rag_pdf_ocr_page" in sql
+    assert "rag_pdf_ocr_page" not in sql
     assert "source_reference_id" in sql
     assert args[-2:] == [10, 0]
 
@@ -99,4 +99,4 @@ def test_response_payload_includes_source_truth_policy():
         ],
     )
     assert payload["items"][0]["source_page_url"] == "/api/rag/documents/chart-42/pages/1"
-    assert "rag_pdf_ocr_page" in payload["source_truth"]["text_layer_policy"]
+    assert "active document/chunk pipeline" in payload["source_truth"]["text_layer_policy"]

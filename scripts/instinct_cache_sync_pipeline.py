@@ -70,48 +70,6 @@ class SyncSummary:
     seconds: float
 
 
-def ensure_schema(conn) -> None:
-    _ensure_identity_schema(conn)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS public.rag_source_document (
-                document_pdf_id bigint PRIMARY KEY,
-                client_id text NOT NULL DEFAULT '',
-                patient_id bigint,
-                source_name text,
-                source_uri text,
-                document_label text,
-                status text NOT NULL DEFAULT 'complete',
-                ingestion_complete boolean NOT NULL DEFAULT true,
-                metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-                synced_at timestamptz NOT NULL DEFAULT now()
-            )
-            """
-        )
-        cur.execute(
-            """
-            ALTER TABLE public.rag_source_document
-                ADD COLUMN IF NOT EXISTS client_id text NOT NULL DEFAULT '',
-                ADD COLUMN IF NOT EXISTS patient_id bigint,
-                ADD COLUMN IF NOT EXISTS source_name text,
-                ADD COLUMN IF NOT EXISTS source_uri text,
-                ADD COLUMN IF NOT EXISTS document_label text,
-                ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-                ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'complete',
-                ADD COLUMN IF NOT EXISTS ingestion_complete boolean NOT NULL DEFAULT true,
-                ADD COLUMN IF NOT EXISTS synced_at timestamptz NOT NULL DEFAULT now()
-            """
-        )
-        cur.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS rag_source_document_document_pdf_id_uq
-                ON public.rag_source_document (document_pdf_id)
-            """
-        )
-    conn.commit()
-
-
 def _upsert_many(conn, sql: str, rows: Iterable[dict[str, Any]]) -> int:
     rows = list(rows)
     if not rows:
@@ -221,7 +179,7 @@ def sync_documents(
     patient_limit: int | None = None,
     document_limit: int | None = None,
     candidate_scan_limit: int | None = None,
-    stop_after_new: bool = False,
+    stop_after_first_ingestion: bool = False,
 ) -> SyncSummary:
     import requests
 
@@ -405,25 +363,46 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                     "table_records": json.dumps([]),
                 }
             )
-            if stop_after_new:
-                emit(log, "documents_first_new_item_found", document_pdf_id=doc_id, patient_id=patient_id)
-                try:
-                    from scripts.instinct_pdf_chunker import ChunkingConfig, PatientPdfSource, chunk_patient_pdf_timed, load_into_postgres
-                    source = PatientPdfSource(patient_id=str(patient_id), patient_name=str(chart.get("label") or chart.get("filename") or doc_id), pdf_id=doc_id, pdf_url=None)
-                    token = os.environ.get("TOKEN", "").strip()
-                    mutation = "mutation createChartFileUrl($id: ID!, $inline: Boolean) { createChartFileUrl(id: $id, inline: $inline) }"
-                    url_response = requests.post("https://evh.api.instinctvet.com/graphql", json={"query": mutation, "variables": {"id": doc_id, "inline": True}}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=30)
-                    url_response.raise_for_status()
-                    source = PatientPdfSource(patient_id=str(patient_id), patient_name=str(chart.get("label") or chart.get("filename") or doc_id), pdf_id=doc_id, pdf_url=str((url_response.json().get("data") or {}).get("createChartFileUrl") or ""))
-                    documents, page_count, timing = chunk_patient_pdf_timed(source, ChunkingConfig(), defer_no_text_page_threshold=8)
-                    embed_seconds, postgres_seconds = load_into_postgres(database_url=_db_url(), table_name="public.pms_page_chunk", source_name=str(chart.get("filename") or chart.get("label") or doc_id), source_uri=source.pdf_url, documents=documents, vector_dimensions=1536)
-                    emit(log, "first_new_item_processing_complete", document_pdf_id=doc_id, page_count=page_count, chunk_count=len(documents), embed_seconds=round(embed_seconds, 3), postgres_seconds=round(postgres_seconds, 3), **{k: round(float(v), 3) for k, v in timing.items() if isinstance(v, (int, float))})
-                except Exception as exc:
-                    emit(log, "first_new_item_processing_failed", document_pdf_id=doc_id, error=str(exc))
+            emit(log, "new_document_found", document_pdf_id=doc_id, patient_id=patient_id)
+            ingestion_succeeded = False
+            try:
+                from scripts.instinct_pdf_chunker import ChunkingConfig, PatientPdfSource, chunk_patient_pdf_timed, load_into_postgres
+                token = os.environ.get("TOKEN", "").strip()
+                mutation = "mutation createChartFileUrl($id: ID!, $inline: Boolean) { createChartFileUrl(id: $id, inline: $inline) }"
+                url_response = requests.post(
+                    "https://evh.api.instinctvet.com/graphql",
+                    json={"query": mutation, "variables": {"id": doc_id, "inline": True}},
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    timeout=30,
+                )
+                url_response.raise_for_status()
+                source_uri = str((url_response.json().get("data") or {}).get("createChartFileUrl") or "")
+                source = PatientPdfSource(
+                    patient_id=str(patient_id),
+                    patient_name=str(chart.get("label") or chart.get("filename") or doc_id),
+                    pdf_id=doc_id,
+                    pdf_url=source_uri,
+                )
+                documents, page_count, timing = chunk_patient_pdf_timed(source, ChunkingConfig(), defer_no_text_page_threshold=8)
+                if not documents:
+                    raise RuntimeError("ingestion produced no text chunks")
+                embed_seconds, postgres_seconds = load_into_postgres(
+                    database_url=_db_url(), table_name="public.pms_page_chunk",
+                    source_name=str(chart.get("filename") or chart.get("label") or doc_id),
+                    source_uri=source_uri, documents=documents, vector_dimensions=1536,
+                )
+                for row in rows:
+                    if str(row["document_pdf_id"]) == doc_id:
+                        row.update({"source_uri": source_uri, "status": "complete", "ingestion_complete": True, "page_count": page_count, "chunk_count": len(documents), "processed_at": now_utc()})
+                        break
+                ingestion_succeeded = True
+                emit(log, "new_document_processed", document_pdf_id=doc_id, page_count=page_count, chunk_count=len(documents), embed_seconds=round(embed_seconds, 3), postgres_seconds=round(postgres_seconds, 3), **{k: round(float(v), 3) for k, v in timing.items() if isinstance(v, (int, float))})
+            except Exception as exc:
+                emit(log, "document_ingestion_failed", document_pdf_id=doc_id, error=str(exc))
+            if stop_after_first_ingestion and ingestion_succeeded:
+                emit(log, "stop_after_first_ingestion", document_pdf_id=doc_id, message="new document found, and processed")
                 break
         candidate_processing_seconds += time.perf_counter() - candidate_started
-        if stop_after_new and rows:
-            break
         if document_limit is not None and len(rows) >= document_limit:
             emit(log, "documents_document_limit_reached", document_limit=document_limit, completed=idx, total=len(patient_ids))
             break

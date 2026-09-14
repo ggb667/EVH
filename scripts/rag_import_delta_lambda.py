@@ -9,8 +9,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from scripts.instinct_batch_flow import BatchMessage, handle_sqs_records, orchestrate_initial_run, parse_message
-from scripts.instinct_cache_sync_pipeline import ensure_schema, sync_clients, sync_documents, sync_patients
+from scripts.instinct_cache_sync_pipeline import sync_clients, sync_documents, sync_patients
 from scripts.instinct_identity_sync import InstinctApiSyncClient
 
 
@@ -143,91 +142,21 @@ def _instrument_client(client, log):
 
 
 def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict[str, Any]:
-    if "Records" in event:
-        def _process_message(msg: BatchMessage) -> dict[str, Any]:
-            base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip()
-            client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
-            client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
-            client = InstinctApiSyncClient(base_url, client_id, client_secret)
-            connect_started = time.perf_counter()
-            with psycopg.connect(_build_db_url(), row_factory=dict_row) as conn:
-                print(json.dumps({"event": "db_connection_complete", "seconds": round(time.perf_counter() - connect_started, 4)}, sort_keys=True), flush=True)
-                # Keep the remote schema compatible with the importer before any stage writes.
-                ensure_schema(conn)
-                log = _instrumented_log(conn, msg.stage)
-                client = _instrument_client(client, log)
-                if msg.stage == "clients":
-                    summary = sync_clients(client, conn, log=log)
-                elif msg.stage == "patients":
-                    summary = sync_patients(client, conn, log=log)
-                elif msg.stage == "documents":
-                    summary = sync_documents(
-                        client,
-                        conn,
-                        log=log,
-                        patient_limit=msg.patient_limit,
-                        document_limit=msg.document_limit,
-                        candidate_scan_limit=msg.candidate_scan_limit,
-                        stop_after_new=msg.stop_after_new,
-                    )
-                else:
-                    raise RuntimeError(f"unknown batch stage: {msg.stage!r}")
-                target_total = _table_total(conn, msg.stage)
-            elapsed = max(float(summary.seconds), 0.001)
-            rate = float(summary.fetched) / elapsed if summary.fetched else 0.0
-            remaining = max(target_total - int(summary.fetched), 0)
-            eta = (remaining / rate) if rate > 0 else None
-            result = {
-                "stage": msg.stage,
-                "fetched": summary.fetched,
-                "inserted": summary.inserted,
-                "updated": summary.updated,
-                "seconds": summary.seconds,
-                "target_total_table_rows": target_total,
-                "progress_rows": summary.fetched,
-                "progress_percent": round((summary.fetched / target_total) * 100, 3) if target_total else None,
-                "rate_rows_per_second": round(rate, 4),
-                "estimated_remaining_seconds": round(eta, 2) if eta is not None else None,
-            }
-            print(json.dumps({"event": "batch_stage_complete", "run_id": msg.run_id, "result": result}, sort_keys=True), flush=True)
-            return result
-
-        response = handle_sqs_records(event, process_message=_process_message)
-        print(json.dumps({"event": "sqs_batch_complete", "response": response}, sort_keys=True), flush=True)
-        return response
-
-    if event.get("action") == "enqueue" or event.get("mode") == "enqueue":
-        all_new = bool(event.get("all_new") or event.get("allNew"))
-        patient_limit = None if all_new else _parse_patient_limit(event)
-        document_limit = None if all_new else _parse_document_limit(event)
-        run_id = event.get("run_id")
-        message_ids = orchestrate_initial_run(
-            patient_limit=patient_limit,
-            document_limit=document_limit,
-            run_id=str(run_id).strip() if run_id else None,
-            candidate_scan_limit=int(event.get("candidate_scan_limit")) if event.get("candidate_scan_limit") else None,
-            stop_after_new=bool(event.get("stop_after_new")),
-        )
-        return {
-            "statusCode": 200,
-            "headers": {"content-type": "application/json; charset=utf-8"},
-            "body": json.dumps({"status": "ok", "queued": len(message_ids), "message_ids": message_ids}, indent=2, sort_keys=True),
-        }
-
     base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip()
     client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
     client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
-    patient_limit = _parse_patient_limit(event)
-    document_limit = _parse_document_limit(event)
+    process_all = bool(event.get("process_all"))
+    patient_limit = None if process_all else _parse_patient_limit(event)
+    document_limit = None if process_all else _parse_document_limit(event)
 
     client = InstinctApiSyncClient(base_url, client_id, client_secret)
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as conn:
-        clients_summary = sync_clients(client, conn, log=lambda _line: None)
-        patients_summary = sync_patients(client, conn, log=lambda _line: None)
+        clients_summary = sync_clients(client, conn, log=print)
+        patients_summary = sync_patients(client, conn, log=print)
         documents_summary = sync_documents(
             client,
             conn,
-            log=lambda _line: None,
+            log=print,
             patient_limit=patient_limit,
             document_limit=document_limit,
         )
@@ -245,6 +174,15 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         updated=documents_summary.updated,
         seconds=round(clients_summary.seconds + patients_summary.seconds + documents_summary.seconds, 3),
     )
+    print(json.dumps({
+        "event": "COMPLETE",
+        "message": "linear ingestion completed normally",
+        "stop_reason": "limits_or_exhausted",
+        "patient_limit": patient_limit,
+        "document_limit": document_limit,
+        "documents_fetched": documents_summary.fetched,
+        "seconds": payload.seconds,
+    }, sort_keys=True), flush=True)
     body = {
         "status": "ok",
         "summary": asdict(payload),

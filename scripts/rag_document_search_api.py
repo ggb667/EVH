@@ -167,7 +167,7 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
         "page_number": page_number,
         "page_label": row.get("page_label"),
         "match_text": row.get("match_text") or row.get("extracted_text") or row.get("page_text") or "",
-        "match_source": row.get("match_source") or ("rag_pdf_ocr_page" if hit_type == "ocr_page" else "pms_document_page"),
+        "match_source": row.get("match_source") or "pms_document_page",
         "hit_type": hit_type,
         "source_page_url": _source_page_url(pdf_id, page_number) if pdf_id else "",
         "source_uri": row.get("source_uri"),
@@ -235,9 +235,6 @@ def _build_search_sql(request: SearchRequest) -> tuple[str, list[Any]]:
                 sd.created_at
             FROM pms_source_document sd
             JOIN pms_document_page dp ON dp.document_id = sd.id
-            LEFT JOIN rag_pdf_ocr_page op
-              ON op.pdf_id = sd.source_reference_id
-             AND op.page_number = dp.page_number
             WHERE {' AND '.join(predicates)}
         )
         SELECT * FROM search_hits
@@ -287,7 +284,7 @@ def _response_payload(request: SearchRequest, rows: list[dict[str, Any]]) -> dic
         },
         "source_truth": {
             "page_url_policy": "source_page_url is stable backend-generated proxy for exact document/page identity",
-            "text_layer_policy": "text-layer hits can jump precisely; OCR hits remain page-level via rag_pdf_ocr_page",
+            "text_layer_policy": "text and OCR outputs are persisted through the active document/chunk pipeline",
         },
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }

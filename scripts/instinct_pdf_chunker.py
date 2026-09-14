@@ -62,9 +62,6 @@ except Exception:  # pragma: no cover - pypdf version-specific import surface
 
 DEFAULT_TABLE_NAME = "pms_page_chunk"
 DEFAULT_SOURCE_DOCUMENT_TABLE_NAME = "rag_source_document"
-DEFAULT_OCR_PAGE_TABLE_NAME = "rag_pdf_ocr_page"
-DEFAULT_DEFERRED_OCR_TABLE_NAME = "rag_deferred_ocr_document"
-DEFAULT_INGEST_STATE_TABLE_NAME = "rag_ingestion_run"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSIONS = 1536
 DEFAULT_SCHEMA_VERSION = 2
@@ -370,6 +367,11 @@ def _better_extraction(current: tuple[list[str], str, float], candidate: tuple[l
     return current
 
 
+def _size_scaled_timeout(pdf_path: Path, *, base_seconds: int, seconds_per_mb: int, maximum_seconds: int) -> int:
+    size_mb = max(0.01, pdf_path.stat().st_size / (1024 * 1024))
+    return min(maximum_seconds, max(base_seconds, int(base_seconds + size_mb * seconds_per_mb)))
+
+
 def _extract_with_pymupdf(pdf_path: Path) -> tuple[list[str], int]:
     if pymupdf is None:
         raise RuntimeError("PyMuPDF is not installed")
@@ -399,8 +401,8 @@ def _run_child_process(kind: str, pdf_input: str, *, timeout_s: int) -> dict[str
                 queue.put(("ok", {"pages": pages, "page_count": page_count}))
                 return
             if kind == "ocr":
-                pages, page_count = _ocr_pdf_text_pages_impl(pdf_input)
-                queue.put(("ok", {"pages": pages, "page_count": page_count}))
+                pages, page_count, tool = _ocr_pdf_text_pages_impl(pdf_input)
+                queue.put(("ok", {"pages": pages, "page_count": page_count, "tool": tool}))
                 return
             raise RuntimeError(f"unknown child kind: {kind}")
         except NoTextLayerError as exc:
@@ -465,6 +467,7 @@ def _extract_word_text_pages(source: PatientPdfSource, *, pdf_bytes: bytes | Non
                 [
                     parser_path,
                     "--headless",
+                    f"-env:UserInstallation=file://{temp_path / 'lo-profile'}",
                     "--convert-to",
                     "txt:Text",
                     "--outdir",
@@ -520,8 +523,8 @@ def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
     candidates: list[tuple[list[str], str, float]] = []
     last_error: Exception | None = None
     for extractor_name, extractor in (
-        ("pdftotext", lambda: safe_extract_pdf_text_pages(pdf_path, timeout_s=45)),
-        ("pypdf", lambda: extract_pdf_text_pages(pdf_path)),
+        ("pdftotext", lambda: safe_extract_pdf_text_pages(pdf_path, timeout_s=_size_scaled_timeout(pdf_path, base_seconds=30, seconds_per_mb=15, maximum_seconds=600))),
+        ("pypdf", lambda: extract_pdf_text_pages(pdf_path, timeout_s=_size_scaled_timeout(pdf_path, base_seconds=60, seconds_per_mb=20, maximum_seconds=900))),
         ("pymupdf", lambda: _extract_with_pymupdf(pdf_path)),
     ):
         start = perf_counter()
@@ -736,8 +739,10 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
             raise NoTextLayerError(page_count=0)
 
         last_error: Exception | None = None
+        candidates: list[tuple[list[str], str, float]] = []
         for renderer_index, raster_cmd in enumerate(renderers, start=1):
             renderer_name = Path(raster_cmd[0]).name
+            renderer_started = perf_counter()
             try:
                 page_files = _run_renderer(raster_cmd, temp_path=temp_path, renderer_timeout_s=timeout_s)
                 pages: list[str] = []
@@ -755,8 +760,10 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
                 if pages:
                     _record_extractor_usage(renderer_name)
                     _record_extractor_usage("tesseract")
-                    _emit_extractor_usage_summary()
-                    return pages, len(pages), renderer_name
+                    candidates.append((pages, renderer_name, perf_counter() - renderer_started))
+                    for image_path in temp_path.glob("*.png"):
+                        image_path.unlink(missing_ok=True)
+                    continue
                 raise NoTextLayerError(page_count=0)
             except Exception as exc:
                 last_error = exc
@@ -764,6 +771,12 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
                     image_path.unlink(missing_ok=True)
                 continue
 
+        if candidates:
+            winner = candidates[0]
+            for candidate in candidates[1:]:
+                winner = _better_extraction(winner, candidate)
+            _emit_extractor_usage_summary()
+            return winner[0], len(winner[0]), winner[1]
         if last_error is not None:
             raise last_error
         raise NoTextLayerError(page_count=0)
@@ -789,14 +802,15 @@ def _extract_pdf_text_pages_impl(pdf_path: str) -> tuple[list[str], int]:
     return pages, 0
 
 
-def extract_pdf_text_pages(pdf_path: Path) -> tuple[list[str], int]:
-    result = _run_child_process("extract", str(pdf_path), timeout_s=120)
+def extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 120) -> tuple[list[str], int]:
+    result = _run_child_process("extract", str(pdf_path), timeout_s=timeout_s)
     return result["pages"], 0
 
 
-def ocr_pdf_text_pages(pdf_path: Path) -> tuple[list[str], int, str]:
+def ocr_pdf_text_pages(pdf_path: Path, *, timeout_s: int | None = None) -> tuple[list[str], int, str]:
     try:
-        result = _run_child_process("ocr", str(pdf_path), timeout_s=600)
+        timeout_s = timeout_s or _size_scaled_timeout(pdf_path, base_seconds=120, seconds_per_mb=60, maximum_seconds=1800)
+        result = _run_child_process("ocr", str(pdf_path), timeout_s=timeout_s)
         _child_status_line("ocr", ocr_path="child_process")
         return result["pages"], int(result["page_count"]), str(result.get("tool") or "ocr")
     except Exception as exc:
@@ -1695,6 +1709,8 @@ def chunk_patient_pdf_timed(
         documents = chunk_pdf_pages(source, pages, config, term_index=term_index, page_workers=page_workers)
         chunking_seconds = perf_counter() - chunking_start
         summary_seconds = chunking_seconds if documents else 0.0
+        winner_text_chars = sum(len(page) for page in pages)
+        print(json.dumps({"status": "pdf_output_winner", "pdf_id": source.pdf_id, "winner_method": cached_parser, "winner_text_chars": winner_text_chars, "page_count": page_count, "fallback_history": []}, sort_keys=True), flush=True)
         print(
             json.dumps(
                 {
@@ -1719,6 +1735,8 @@ def chunk_patient_pdf_timed(
             "summary_seconds": summary_seconds,
             "cached_text_seconds": 0.0,
             "text_method": cached_parser,
+            "winner_method": cached_parser,
+            "winner_text_chars": float(winner_text_chars),
         }
 
     print(
@@ -1780,6 +1798,8 @@ def chunk_patient_pdf_timed(
             documents = chunk_pdf_pages(source, pages, config, term_index=term_index, page_workers=page_workers)
             chunking_seconds = perf_counter() - chunking_start
             summary_seconds = chunking_seconds if documents else 0.0
+            winner_text_chars = sum(len(page) for page in pages)
+            print(json.dumps({"status": "pdf_output_winner", "pdf_id": source.pdf_id, "winner_method": parser_name, "winner_text_chars": winner_text_chars, "page_count": page_count, "fallback_history": []}, sort_keys=True), flush=True)
             print(
                 json.dumps(
                     {
@@ -1805,6 +1825,8 @@ def chunk_patient_pdf_timed(
                 "summary_seconds": summary_seconds,
                 "cached_text_seconds": 0.0,
                 "text_method": parser_name,
+                "winner_method": parser_name,
+                "winner_text_chars": float(winner_text_chars),
             }
         print(
             json.dumps(
@@ -1986,13 +2008,34 @@ def chunk_patient_pdf_timed(
     if "text_method" not in timing:
         timing["text_method"] = "unknown"
 
+    winner_text_chars = sum(len(page) for page in pages)
+    timing["winner_text_chars"] = float(winner_text_chars)
+    timing["winner_method"] = timing.get("ocr_method") or timing.get("text_method") or "unknown"
+    print(
+        json.dumps(
+            {
+                "status": "pdf_output_winner",
+                "pdf_id": source.pdf_id,
+                "winner_method": timing["winner_method"],
+                "winner_text_chars": winner_text_chars,
+                "page_count": page_count,
+                "fallback_history": [
+                    value for key, value in (("text_method", timing.get("text_method")), ("ocr_method", timing.get("ocr_method")))
+                    if value and value != timing["winner_method"]
+                ],
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
     return documents, page_count, {
         "download_seconds": download_seconds,
         "extraction_seconds": extraction_seconds,
         "chunking_seconds": chunking_seconds,
         "summary_seconds": summary_seconds,
         "cached_text_seconds": 0.0,
-        **{k: v for k, v in timing.items() if k in {"text_method", "ocr_method", "ocr_used"}},
+        **{k: v for k, v in timing.items() if k in {"text_method", "ocr_method", "ocr_used", "winner_method", "winner_text_chars"}},
     }
 
 

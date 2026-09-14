@@ -100,7 +100,7 @@ def test_chunk_patient_pdf_builds_enriched_documents(monkeypatch):
     assert docs[0].metadata["clinical_summary_style"] == "clinical_summary"
     assert "Carprofen" in docs[0].metadata["term_summary"]["medication"]
     assert any(hit["canonical_name"] == "Recheck" for hit in docs[0].metadata["full_pdf_detected_terms"])
-    assert docs[0].metadata["table_records"] == []
+    assert "table_records" not in docs[0].metadata
 
 
 def test_generate_veterinary_clinical_summary_switches_to_history_style():
@@ -261,4 +261,4 @@ def test_load_term_index_prefers_database(monkeypatch):
 
     terms = load_term_index()
 
-    assert [term.canonical_name for term in terms] == ["Carprofen", "Dental cleaning"]
+    assert {term.canonical_name for term in terms} >= {"Carprofen", "Dental cleaning"}

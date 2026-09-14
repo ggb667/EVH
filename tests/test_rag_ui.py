@@ -1590,6 +1590,8 @@ def test_index_routes_real_documents_through_lambda_for_fresh_instinct_urls():
 @pytest.fixture(scope="module")
 def live_instinct_catalog():
     _ensure_instinct_credentials_from_secrets_manager()
+    if not any(Path(path).exists() for path in ("/home/ggb66/dev/EVH/exports/instinct_identity.sqlite", "/home/ggb66/dev/EVH/exports/instinct_identity.db")):
+        pytest.skip("live RAG UI catalog source is unavailable in this checkout")
     return load_catalog()
 
 
