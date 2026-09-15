@@ -221,6 +221,8 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         document_max_seconds = requested_max_seconds if remaining_seconds is None else min(requested_max_seconds, remaining_seconds)
 
         def checkpoint(progress: dict[str, Any]) -> None:
+            checkpoint_status = "COMPLETE" if str(progress.get("status") or "").upper() == "COMPLETE" else "FAILED"
+            checkpoint_progress = {**progress, "status": checkpoint_status}
             with conn.cursor() as progress_cur:
                 progress_cur.execute(
                     """UPDATE public.rag_import_run
@@ -230,12 +232,12 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                     WHERE run_id = %s""",
                     (
                         int(progress.get("next_patient") or patient_start),
-                        str(progress.get("status") or "FAILED"),
+                        checkpoint_status,
                         run_id,
                     ),
                 )
             conn.commit()
-            print(json.dumps({"event": "RUN_CHECKPOINT", "run_id": run_id, **progress}, sort_keys=True, default=str), flush=True)
+            print(json.dumps({"event": "RUN_CHECKPOINT", "run_id": run_id, **checkpoint_progress}, sort_keys=True, default=str), flush=True)
 
         documents_summary = sync_documents(
             client,
