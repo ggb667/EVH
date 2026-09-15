@@ -176,7 +176,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                 status text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())""")
             if not run_id and not has_cursor:
                 cur.execute("""SELECT run_id, next_patient FROM public.rag_import_run
-                    WHERE status='RUNNING' ORDER BY updated_at DESC LIMIT 1""")
+                    WHERE status='FAILED' ORDER BY updated_at DESC LIMIT 1""")
                 recovered = cur.fetchone()
                 if recovered:
                     run_id = str(recovered["run_id"])
@@ -186,7 +186,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             if not run_id:
                 run_id = f"rd-{int(time.time())}"
             cur.execute("""INSERT INTO public.rag_import_run (run_id, started_at, next_patient, status)
-                VALUES (%s, now(), %s, 'RUNNING') ON CONFLICT (run_id) DO UPDATE SET status='RUNNING', updated_at=now()""", (run_id, patient_start))
+                VALUES (%s, now(), %s, 'FAILED') ON CONFLICT (run_id) DO UPDATE SET status='FAILED', updated_at=now()""", (run_id, patient_start))
         conn.commit()
         clients_summary = sync_clients(client, conn, log=print)
         patients_summary = sync_patients(client, conn, log=print)
@@ -210,7 +210,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             cur.execute("""UPDATE public.rag_import_run SET next_patient=%s, patients_scanned=patients_scanned+%s,
                 documents_found=documents_found+%s, documents_ingested=documents_ingested+%s,
                 status=%s, updated_at=now() WHERE run_id=%s""", (next_patient, processed_patients,
-                documents_summary.fetched, documents_summary.inserted, 'COMPLETE' if complete else 'RUNNING', run_id))
+                documents_summary.fetched, documents_summary.inserted, 'COMPLETE' if complete else 'FAILED', run_id))
         state_conn.commit()
     payload = LambdaRunSummary(
         step="1.1-1.3",
@@ -289,8 +289,8 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
     token = str(event.get("continuation_token") or "").strip()
     if not token:
         token = f"{time.time_ns()}-{os.urandom(12).hex()}"
-        event = dict(event)
-        event["_continuation_token"] = token
+    event = dict(event)
+    event["_continuation_token"] = token
     try:
         lock_conn = psycopg.connect(_build_db_url(), connect_timeout=15)
         with lock_conn.cursor() as cur:
