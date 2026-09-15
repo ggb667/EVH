@@ -200,7 +200,8 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
     processed_patients = documents_summary.patients_scanned
     next_patient = patient_start + int(processed_patients)
     limit_reached = patient_limit is not None and next_patient >= patient_limit
-    complete = int(processed_patients) < batch_size or limit_reached
+    # Zero-progress pages are terminal, not continuation candidates.
+    complete = int(processed_patients) == 0 or int(processed_patients) < batch_size or limit_reached
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
         with state_conn.cursor() as cur:
             cur.execute("""UPDATE public.rag_import_run SET next_patient=%s, patients_scanned=patients_scanned+%s,
@@ -237,7 +238,15 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         "documents_failed": documents_summary.documents_failed,
         "seconds": payload.seconds,
     }, sort_keys=True), flush=True)
-    if not complete:
+    # Never self-invoke without forward progress.  A cursor at/after the
+    # available patient set can otherwise create an unbounded Lambda
+    # recursion (especially for process_all runs whose final page is empty).
+    should_continue = (
+        not complete
+        and int(processed_patients) > 0
+        and next_patient > patient_start
+    )
+    if should_continue:
         import boto3
         boto3.client("lambda").invoke(
             FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "evh_instinct_rag_import_delta"),
