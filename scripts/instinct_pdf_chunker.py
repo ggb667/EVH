@@ -3373,12 +3373,15 @@ def load_into_postgres(
                     metadata
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
-                ON CONFLICT (content_hash) DO UPDATE SET
-                    document_pdf_id = EXCLUDED.document_pdf_id,
+                -- document_pdf_id is the durable source identity. The content
+                -- hash can change when chart content is revised, so conflict
+                -- on document_pdf_id and update the content fields.
+                ON CONFLICT (document_pdf_id) DO UPDATE SET
                     client_id = EXCLUDED.client_id,
                     patient_id = EXCLUDED.patient_id,
                     source_name = EXCLUDED.source_name,
                     source_uri = EXCLUDED.source_uri,
+                    content_hash = EXCLUDED.content_hash,
                     content_length = EXCLUDED.content_length,
                     page_count = EXCLUDED.page_count,
                     chunk_count = EXCLUDED.chunk_count,
