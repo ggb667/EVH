@@ -3330,9 +3330,10 @@ def load_into_postgres(
         conn.execute("SET SESSION statement_timeout = 0")
         if documents:
             source_document = documents[0]
-            conn.execute(
-                f"ALTER TABLE {source_document_table_name} ADD COLUMN IF NOT EXISTS table_records JSONB NOT NULL DEFAULT '[]'::jsonb"
-            )
+            # Schema changes do not belong on the document hot path. Running
+            # ALTER TABLE here takes a heavyweight lock and can stall concurrent
+            # ingestion at source_document_upsert. Provision table_records before
+            # ingestion instead of altering the source-document table per document.
             clean_source_name = _strip_nuls(source_name)
             clean_source_uri = _strip_nuls(source_uri)
             clean_summary = _strip_nuls(source_summary)
