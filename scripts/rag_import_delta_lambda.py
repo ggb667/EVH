@@ -146,7 +146,7 @@ def _instrument_client(client, log):
     return client
 
 
-def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict[str, Any]:
+def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = None) -> dict[str, Any]:
     base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip()
     client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
     client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
@@ -262,6 +262,7 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
                 **({"patient_limit": patient_limit} if patient_limit is not None else {}),
                 **({"document_limit": document_limit} if document_limit is not None else {}),
                 "max_seconds": max_seconds,
+                "continuation_token": event.get("_continuation_token", ""),
             }).encode(),
         )
     body = {
@@ -274,3 +275,41 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         "headers": {"content-type": "application/json; charset=utf-8"},
         "body": json.dumps(body, ensure_ascii=False, indent=2, sort_keys=True),
     }
+
+
+def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict[str, Any]:
+    """Run at most one importer invocation, while preserving self-handoff.
+
+    The advisory lock is held for the complete invocation.  A successor
+    launched by the current invocation waits until this handler returns and
+    releases the lock; an unrelated/manual overlap receives a deterministic
+    refusal instead of doing duplicate work.
+    """
+    lock_conn = None
+    token = str(event.get("continuation_token") or "").strip()
+    if not token:
+        token = f"{time.time_ns()}-{os.urandom(12).hex()}"
+        event = dict(event)
+        event["_continuation_token"] = token
+    try:
+        lock_conn = psycopg.connect(_build_db_url(), connect_timeout=15)
+        with lock_conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS public.rag_import_lease (lease_key text PRIMARY KEY, token text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())")
+            cur.execute("""INSERT INTO public.rag_import_lease(lease_key,token) VALUES ('import',%s)
+                ON CONFLICT (lease_key) DO UPDATE SET token=EXCLUDED.token,updated_at=now()
+                WHERE public.rag_import_lease.token=%s OR public.rag_import_lease.updated_at < now()-interval '20 minutes'
+                RETURNING token""", (token, token))
+            acquired = cur.fetchone() is not None
+            lock_conn.commit()
+        if not acquired:
+            print(json.dumps({"event": "RUN_ALREADY_RUNNING", "status": "refused"}, sort_keys=True), flush=True)
+            return {"statusCode": 409, "body": json.dumps({"error": "RUN_ALREADY_RUNNING"})}
+        return _lambda_handler_unlocked(event, context)
+    finally:
+        if lock_conn is not None:
+            try:
+                with lock_conn.cursor() as cur:
+                    cur.execute("DELETE FROM public.rag_import_lease WHERE lease_key='import' AND token=%s", (token,))
+                lock_conn.commit()
+            finally:
+                lock_conn.close()
