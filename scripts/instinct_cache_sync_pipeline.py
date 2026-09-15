@@ -72,6 +72,7 @@ class SyncSummary:
     documents_discovered: int = 0
     documents_ingested: int = 0
     documents_failed: int = 0
+    stop_reason: str = "exhausted"
 
 
 def _upsert_many(conn, sql: str, rows: Iterable[dict[str, Any]]) -> int:
@@ -186,6 +187,7 @@ def sync_documents(
     stop_after_first_ingestion: bool = False,
     patient_start: int = 0,
     max_seconds: float | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> SyncSummary:
     import requests
 
@@ -320,11 +322,15 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     patient_api_seconds = 0.0
     candidate_processing_seconds = 0.0
     document_limit = document_limit if document_limit and document_limit > 0 else None
+    stop_reason = "exhausted"
+    last_completed_index = 0
     for idx, patient_id in enumerate(patient_ids, start=1):
         if max_seconds is not None and time.perf_counter() - started >= max_seconds:
+            stop_reason = "time_budget"
             emit(log, "documents_time_budget_reached", next_patient=patient_start + idx - 1)
             break
         if candidate_scan_limit is not None and idx > candidate_scan_limit:
+            stop_reason = "candidate_scan_limit"
             emit(log, "documents_candidate_scan_limit_reached", candidate_scan_limit=candidate_scan_limit, completed=idx - 1)
             break
         patient_fetch_start = time.perf_counter()
@@ -422,6 +428,18 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 break
         candidate_processing_seconds += time.perf_counter() - candidate_started
         if document_limit is not None and len(rows) >= document_limit:
+            stop_reason = "document_limit"
+            last_completed_index = idx
+            if progress_callback is not None:
+                progress_callback({
+                    "next_patient": patient_start + idx,
+                    "patients_scanned": idx,
+                    "documents_found": len(rows),
+                    "documents_ingested": documents_ingested,
+                    "documents_failed": documents_failed,
+                    "status": "RUNNING",
+                    "stop_reason": stop_reason,
+                })
             emit(log, "documents_document_limit_reached", document_limit=document_limit, completed=idx, total=len(patient_ids))
             break
         elapsed = time.perf_counter() - patient_fetch_start
@@ -448,6 +466,17 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             completed=idx,
             total=len(patient_ids),
         )
+        last_completed_index = idx
+        if progress_callback is not None:
+            progress_callback({
+                "next_patient": patient_start + idx,
+                "patients_scanned": idx,
+                "documents_found": len(rows),
+                "documents_ingested": documents_ingested,
+                "documents_failed": documents_failed,
+                "status": "RUNNING",
+                "stop_reason": stop_reason,
+            })
 
     upsert_started = time.perf_counter()
     inserted = _upsert_many(conn, upsert_sql, rows)
@@ -463,7 +492,7 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         patient_api_seconds=round(patient_api_seconds, 4),
         candidate_processing_seconds=round(candidate_processing_seconds, 4),
         database_upsert_seconds=round(upsert_seconds, 4),
-        patients_scanned=idx if patient_ids else 0,
+        patients_scanned=last_completed_index if patient_ids else 0,
         document_candidates=len(rows),
     )
     emit(
@@ -477,5 +506,14 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         pending_upserts=upsert_candidate_count,
         patients_per_hour=round((len(patient_ids) / max(1e-6, sum(fetch_elapsed_seconds))) * 3600.0, 1) if fetch_elapsed_seconds else 0.0,
     )
-    return SyncSummary(fetched=len(rows), inserted=inserted, updated=0, seconds=round(total_seconds, 3), patients_scanned=idx if patient_ids else 0,
-                       documents_discovered=len(rows), documents_ingested=documents_ingested, documents_failed=documents_failed)
+    return SyncSummary(
+        fetched=len(rows),
+        inserted=inserted,
+        updated=0,
+        seconds=round(total_seconds, 3),
+        patients_scanned=last_completed_index if patient_ids else 0,
+        documents_discovered=len(rows),
+        documents_ingested=documents_ingested,
+        documents_failed=documents_failed,
+        stop_reason=stop_reason,
+    )

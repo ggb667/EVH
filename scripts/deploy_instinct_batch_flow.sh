@@ -125,6 +125,7 @@ echo "[smoke] direct invocation"
 SMOKE_RUN_ID="deploy-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
+  --cli-read-timeout "${SMOKE_CLI_READ_TIMEOUT:-180}" \
   --cli-binary-format raw-in-base64-out \
   --payload "{\"run_id\":\"$SMOKE_RUN_ID\",\"patient_limit\":1,\"document_limit\":1}" \
   /tmp/evh_import_delta_direct_smoke.json \

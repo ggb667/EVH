@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 import time
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from pprint import pformat
@@ -84,6 +84,7 @@ EXTRACTOR_USAGE_COUNTS: dict[str, int] = {"pdftotext": 0, "pypdf": 0, "pymupdf":
 SQL_VERBOSE_LOGGING = os.environ.get("EVH_VERBOSE_SQL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 _POSTGRES_CONNECTIONS: dict[str, psycopg.Connection] = {}
+_OPENAI_API_KEY_CACHE: str | None = None
 
 
 def _get_postgres_connection(database_url: str) -> psycopg.Connection:
@@ -188,25 +189,6 @@ class BenchmarkStats:
 
 
 @dataclass(frozen=True)
-class ExtractionAttempt:
-    method: str
-    phase: str
-    status: str
-    elapsed_seconds: float
-    timeout_seconds: float | None = None
-    exit_code: int | None = None
-    page_count: int = 0
-    text_chars: int = 0
-    stdout_tail: str = ""
-    stderr_tail: str = ""
-    error_type: str | None = None
-    error: str | None = None
-
-    def as_log(self) -> dict[str, Any]:
-        return {"event": "extraction_attempt", **asdict(self)}
-
-
-@dataclass(frozen=True)
 class FetchedPdf:
     source_name: str
     source_uri: str | None
@@ -283,6 +265,7 @@ def load_patient_manifest(path: Path) -> list[PatientPdfSource]:
 
         patient_id = str(item.get("patient_id") or item.get("id") or "").strip()
         patient_name = str(item.get("patient_name") or item.get("name") or "").strip()
+        client_id = str(item.get("client_id") or item.get("clientId") or "").strip() or None
         pdf_value = item.get("pdf_path") or item.get("pdf")
         pdf_url = item.get("pdf_url") or item.get("source_url") or item.get("attachment_url")
 
@@ -301,6 +284,7 @@ def load_patient_manifest(path: Path) -> list[PatientPdfSource]:
                 patient_name=patient_name,
                 pdf_path=pdf_path,
                 pdf_url=pdf_url if isinstance(pdf_url, str) and pdf_url.strip() else None,
+                client_id=client_id,
             )
         )
 
@@ -439,20 +423,6 @@ def _extract_with_pymupdf(pdf_path: Path) -> tuple[list[str], int]:
 
 def _looks_like_pdf(pdf_bytes: bytes) -> bool:
     return pdf_bytes.startswith(b"%PDF")
-
-
-def _extract_with_pypdf_subprocess(pdf_path: Path, *, timeout_s: int) -> tuple[list[str], int]:
-    """Run pypdf outside the Lambda process with a hard kill timeout."""
-    code = ("import json,sys; from pypdf import PdfReader; "
-            "r=PdfReader(sys.argv[1]); "
-            "print(json.dumps({'pages':[(((p.extract_text(extraction_mode='layout') or p.extract_text() or '')).strip()) for p in r.pages]}))")
-    proc = subprocess.run([sys.executable, "-c", code, str(pdf_path)], capture_output=True, text=True, timeout=timeout_s, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(f"pypdf subprocess exit {proc.returncode}: {(proc.stderr or proc.stdout)[-2000:]}")
-    pages = [str(page).strip() for page in json.loads(proc.stdout).get("pages", [])]
-    if pages and not any(pages):
-        raise NoTextLayerError(len(pages))
-    return pages, len(pages)
 
 
 def _looks_like_ole_doc(pdf_bytes: bytes) -> bool:
@@ -608,24 +578,21 @@ def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
         # process can terminate before returning a queue result; pypdf itself
         # is bounded by the surrounding document/time budget and is the
         # reliable text-layer fallback when pdftotext is unavailable.
-        ("pypdf", lambda: _extract_with_pypdf_subprocess(pdf_path, timeout_s=_size_scaled_timeout(pdf_path, base_seconds=60, seconds_per_mb=20, maximum_seconds=900))),
+        ("pypdf", lambda: _extract_pdf_text_pages_impl(str(pdf_path))),
         ("pymupdf", lambda: _extract_with_pymupdf(pdf_path)),
     ):
         start = perf_counter()
         try:
             pages, _page_count = extractor()
             seconds = perf_counter() - start
-            print(json.dumps(ExtractionAttempt(method=extractor_name, phase="text", status="success" if any(p.strip() for p in pages) else "no_text", elapsed_seconds=round(seconds, 4), page_count=len(pages), text_chars=sum(map(len, pages))).as_log(), sort_keys=True), flush=True)
             if any(page.strip() for page in pages):
                 candidates.append((pages, extractor_name, seconds))
             else:
                 last_error = NoTextLayerError(page_count=0)
             _record_extractor_usage(extractor_name)
         except NoTextLayerError as exc:
-            print(json.dumps(ExtractionAttempt(method=extractor_name, phase="text", status="no_text", elapsed_seconds=round(perf_counter() - start, 4), page_count=exc.page_count, error_type=type(exc).__name__, error=str(exc)).as_log(), sort_keys=True), flush=True)
             last_error = exc
         except Exception as exc:
-            print(json.dumps(ExtractionAttempt(method=extractor_name, phase="text", status="error", elapsed_seconds=round(perf_counter() - start, 4), error_type=type(exc).__name__, error=str(exc)[-2000:]).as_log(), sort_keys=True), flush=True)
             last_error = exc
     if candidates:
         best = candidates[0]
@@ -2159,19 +2126,57 @@ def chunk_patient_manifest(
     return documents, page_count
 
 
+def _extract_openai_api_key_from_secret_payload(payload: str) -> str:
+    payload = (payload or "").strip()
+    if not payload:
+        return ""
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+    if isinstance(parsed, str):
+        return parsed.strip()
+    if isinstance(parsed, Mapping):
+        for key in ("OPENAI_API_KEY", "openai_api_key", "api_key", "value"):
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
 def _openai_api_key() -> str:
+    global _OPENAI_API_KEY_CACHE
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if api_key:
         return api_key
+    if _OPENAI_API_KEY_CACHE:
+        return _OPENAI_API_KEY_CACHE
+
     secret_arn = os.environ.get("OPENAI_API_KEY_SECRET_ARN", "").strip()
-    if not secret_arn:
-        raise RuntimeError("OPENAI_API_KEY or OPENAI_API_KEY_SECRET_ARN is required for embeddings generation.")
-    import boto3
-    response = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)
-    secret = str(response.get("SecretString") or "").strip()
-    if not secret:
-        raise RuntimeError("Secrets Manager returned an empty OpenAI API key.")
-    return secret
+    if secret_arn:
+        try:
+            import base64
+            import boto3
+
+            response = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)
+        except Exception as exc:  # pragma: no cover - exercised in Lambda/AWS integration
+            raise RuntimeError("OPENAI_API_KEY_SECRET_ARN is configured but could not be read") from exc
+        if "SecretString" in response:
+            api_key = _extract_openai_api_key_from_secret_payload(str(response.get("SecretString") or ""))
+        else:
+            secret_binary = response.get("SecretBinary") or b""
+            if isinstance(secret_binary, str):
+                secret_binary = secret_binary.encode("utf-8")
+            api_key = _extract_openai_api_key_from_secret_payload(base64.b64decode(secret_binary).decode("utf-8", errors="replace"))
+        if api_key:
+            _OPENAI_API_KEY_CACHE = api_key
+            return api_key
+        raise RuntimeError("OPENAI_API_KEY_SECRET_ARN did not contain an OpenAI API key")
+
+    raise RuntimeError(
+        "OPENAI_API_KEY or OPENAI_API_KEY_SECRET_ARN is required for real embedding generation. "
+        "Set one before running the PDF ingest pipeline."
+    )
 
 
 def _verbose_pdf_insight_enabled() -> bool:
@@ -3269,8 +3274,8 @@ def load_into_postgres(
                 "source_uri": source_uri,
                 "document_pdf_id": chunk_document_pdf_id,
                 "client_instinct_uuid": document.metadata.get("client_id"),
-                "instinct_client_id": document.metadata.get("client_id"),
                 "patient_id": document.metadata.get("patient_id"),
+                "instinct_client_id": document.metadata.get("client_id"),
                 "document_type": "pdf",
                 "original_filename": original_filename,
                 "page_number": document.metadata["page_number"],
@@ -3334,16 +3339,17 @@ def load_into_postgres(
         conn.execute("SET SESSION statement_timeout = 0")
         if documents:
             source_document = documents[0]
-            # Schema changes do not belong on the document hot path.  Running
-            # ALTER TABLE here takes a heavyweight lock and can stall every
-            # concurrent ingestion at source_document_upsert.  table_records
-            # is provisioned by deployment/schema setup before ingestion.
+            # Schema changes do not belong on the document hot path. Running
+            # ALTER TABLE here takes a heavyweight lock and can stall concurrent
+            # ingestion at source_document_upsert. Provision table_records before
+            # ingestion instead of altering the source-document table per document.
             clean_source_name = _strip_nuls(source_name)
             clean_source_uri = _strip_nuls(source_uri)
             clean_summary = _strip_nuls(source_summary)
             clean_source_metadata = _strip_nuls(
                 {
                     "patient_id": source_document.metadata.get("patient_id"),
+                    "client_id": source_document.metadata.get("client_id"),
                     "patient_name": source_document.metadata.get("patient_name"),
                     "pdf_id": source_document.metadata.get("pdf_id"),
                     "document_pdf_id": source_document.metadata.get("pdf_id"),
@@ -3371,14 +3377,12 @@ def load_into_postgres(
                     metadata
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
-                -- document_pdf_id is the durable source identity.  The
-                -- content hash can change when a chart is revised, so using
-                -- content_hash as the conflict target leaves the immutable
-                -- document identity unique constraint unhandled.
+                -- document_pdf_id is the durable source identity. The content
+                -- hash can change when chart content is revised, so conflict
+                -- on document_pdf_id and update the content fields.
                 ON CONFLICT (document_pdf_id) DO UPDATE SET
                     client_id = EXCLUDED.client_id,
                     patient_id = EXCLUDED.patient_id,
-                    document_pdf_id = EXCLUDED.document_pdf_id,
                     source_name = EXCLUDED.source_name,
                     source_uri = EXCLUDED.source_uri,
                     content_hash = EXCLUDED.content_hash,
@@ -3426,9 +3430,9 @@ def load_into_postgres(
                 (
                     _strip_nuls(row.get("document_pdf_id")),
                     _strip_nuls(row.get("client_instinct_uuid")),
-                    _strip_nuls(row.get("instinct_client_id")),
                     _strip_nuls(row.get("patient_id")),
-                    _strip_nuls(row.get("document_type")),
+                    _strip_nuls(row.get("instinct_client_id")),
+                    _strip_nuls(row.get("document_type") or "pdf"),
                     _strip_nuls(row["source_name"]),
                     _strip_nuls(row.get("source_uri")),
                     _strip_nuls(row.get("original_filename")),
@@ -3470,8 +3474,8 @@ def load_into_postgres(
                         INSERT INTO {table_name} (
                             document_pdf_id,
                             client_instinct_uuid,
-                            instinct_client_id,
                             patient_id,
+                            instinct_client_id,
                             document_type,
                             source_name,
                             source_uri,
@@ -3487,8 +3491,8 @@ def load_into_postgres(
                         ON CONFLICT (chunk_hash) DO UPDATE SET
                             document_pdf_id = EXCLUDED.document_pdf_id,
                             client_instinct_uuid = EXCLUDED.client_instinct_uuid,
-                            instinct_client_id = EXCLUDED.instinct_client_id,
                             patient_id = EXCLUDED.patient_id,
+                            instinct_client_id = EXCLUDED.instinct_client_id,
                             document_type = EXCLUDED.document_type,
                             source_uri = EXCLUDED.source_uri,
                             original_filename = EXCLUDED.original_filename,
