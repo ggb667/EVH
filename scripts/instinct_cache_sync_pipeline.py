@@ -394,6 +394,7 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 source = PatientPdfSource(
                     patient_id=str(patient_id),
                     patient_name=str(chart.get("label") or chart.get("filename") or doc_id),
+                    client_id=str(client_id),
                     pdf_id=doc_id,
                     pdf_url=source_uri,
                 )

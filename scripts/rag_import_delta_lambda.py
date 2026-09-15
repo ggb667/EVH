@@ -160,7 +160,10 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         remaining_patients = max(patient_limit - patient_start, 0)
         if remaining_patients:
             batch_size = min(batch_size, remaining_patients)
-    max_seconds = min(float(event.get("max_seconds", 720) or 720), 840.0)
+    # Leave a generous handoff margin for checkpoint/DB commit and async
+    # continuation.  A document extraction or embedding can consume time
+    # after the patient-loop guard, so do not run right up to Lambda's limit.
+    max_seconds = min(float(event.get("max_seconds", 600) or 600), 600.0)
 
     client = InstinctApiSyncClient(base_url, client_id, client_secret)
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as conn:
