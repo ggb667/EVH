@@ -3273,6 +3273,8 @@ def load_into_postgres(
                 "source_name": source_name,
                 "source_uri": source_uri,
                 "document_pdf_id": chunk_document_pdf_id,
+                "client_instinct_uuid": document.metadata.get("client_id"),
+                "patient_instinct_uuid": document.metadata.get("patient_id"),
                 "original_filename": original_filename,
                 "page_number": document.metadata["page_number"],
                 "chunk_index": document.metadata["chunk_index"],
@@ -3425,6 +3427,8 @@ def load_into_postgres(
             chunk_rows = [
                 (
                     _strip_nuls(row.get("document_pdf_id")),
+                    _strip_nuls(row.get("client_instinct_uuid")),
+                    _strip_nuls(row.get("patient_instinct_uuid")),
                     _strip_nuls(row["source_name"]),
                     _strip_nuls(row.get("source_uri")),
                     _strip_nuls(row.get("original_filename")),
@@ -3465,6 +3469,8 @@ def load_into_postgres(
                     f"""
                         INSERT INTO {table_name} (
                             document_pdf_id,
+                            client_instinct_uuid,
+                            patient_instinct_uuid,
                             source_name,
                             source_uri,
                             original_filename,
@@ -3475,9 +3481,11 @@ def load_into_postgres(
                             embedding,
                             metadata
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (chunk_hash) DO UPDATE SET
                             document_pdf_id = EXCLUDED.document_pdf_id,
+                            client_instinct_uuid = EXCLUDED.client_instinct_uuid,
+                            patient_instinct_uuid = EXCLUDED.patient_instinct_uuid,
                             source_uri = EXCLUDED.source_uri,
                             original_filename = EXCLUDED.original_filename,
                             page_number = EXCLUDED.page_number,
