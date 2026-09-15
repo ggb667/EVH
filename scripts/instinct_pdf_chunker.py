@@ -157,6 +157,7 @@ class PatientPdfSource:
     pdf_id: str | None = None
     pdf_path: Path | None = None
     pdf_url: str | None = None
+    client_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -235,6 +236,7 @@ def _materialize_source_bytes(source: PatientPdfSource, pdf_bytes: bytes) -> Pat
         pdf_id=source.pdf_id,
         pdf_path=Path(downloaded.name),
         pdf_url=source.pdf_url,
+        client_id=source.client_id,
     )
 
 
@@ -263,6 +265,7 @@ def load_patient_manifest(path: Path) -> list[PatientPdfSource]:
 
         patient_id = str(item.get("patient_id") or item.get("id") or "").strip()
         patient_name = str(item.get("patient_name") or item.get("name") or "").strip()
+        client_id = str(item.get("client_id") or item.get("clientId") or "").strip() or None
         pdf_value = item.get("pdf_path") or item.get("pdf")
         pdf_url = item.get("pdf_url") or item.get("source_url") or item.get("attachment_url")
 
@@ -281,6 +284,7 @@ def load_patient_manifest(path: Path) -> list[PatientPdfSource]:
                 patient_name=patient_name,
                 pdf_path=pdf_path,
                 pdf_url=pdf_url if isinstance(pdf_url, str) and pdf_url.strip() else None,
+                client_id=client_id,
             )
         )
 
@@ -1571,6 +1575,7 @@ def chunk_pdf_pages(
                     page_content=chunk_text,
                     metadata={
                         "patient_id": source.patient_id,
+                        "client_id": source.client_id,
                         "patient_name": source.patient_name,
                         "pdf_id": source.pdf_id,
                         "document_pdf_id": source.pdf_id,
@@ -3340,6 +3345,7 @@ def load_into_postgres(
             clean_source_metadata = _strip_nuls(
                 {
                     "patient_id": source_document.metadata.get("patient_id"),
+                    "client_id": source_document.metadata.get("client_id"),
                     "patient_name": source_document.metadata.get("patient_name"),
                     "pdf_id": source_document.metadata.get("pdf_id"),
                     "document_pdf_id": source_document.metadata.get("pdf_id"),
@@ -3353,6 +3359,8 @@ def load_into_postgres(
                 f"""
                 INSERT INTO {source_document_table_name} (
                     document_pdf_id,
+                    client_id,
+                    patient_id,
                     source_name,
                     source_uri,
                     content_hash,
@@ -3364,9 +3372,11 @@ def load_into_postgres(
                     status,
                     metadata
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'complete', %s)
                 ON CONFLICT (content_hash) DO UPDATE SET
                     document_pdf_id = EXCLUDED.document_pdf_id,
+                    client_id = EXCLUDED.client_id,
+                    patient_id = EXCLUDED.patient_id,
                     source_name = EXCLUDED.source_name,
                     source_uri = EXCLUDED.source_uri,
                     content_length = EXCLUDED.content_length,
@@ -3380,6 +3390,8 @@ def load_into_postgres(
                 """,
                 (
                     source_document.metadata.get("document_pdf_id") or source_document.metadata.get("pdf_id"),
+                    source_document.metadata.get("client_id"),
+                    source_document.metadata.get("patient_id"),
                     clean_source_name,
                     clean_source_uri,
                     hashlib.sha256((source_uri or source_name).encode("utf-8")).hexdigest(),

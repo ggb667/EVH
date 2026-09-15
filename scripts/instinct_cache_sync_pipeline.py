@@ -396,6 +396,7 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                     patient_name=str(chart.get("label") or chart.get("filename") or doc_id),
                     pdf_id=doc_id,
                     pdf_url=source_uri,
+                    client_id=str(client_id),
                 )
                 documents, page_count, timing = chunk_patient_pdf_timed(source, ChunkingConfig(), defer_no_text_page_threshold=8)
                 if not documents:
