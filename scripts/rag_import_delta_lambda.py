@@ -383,9 +383,32 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
                 (token, token),
             )
             acquired = cur.fetchone() is not None
+            competing_lease = None
+            if not acquired:
+                cur.execute("SELECT token, updated_at FROM public.rag_import_lease WHERE lease_key='import'")
+                competing_lease = cur.fetchone()
             lock_conn.commit()
         if not acquired:
-            print(json.dumps({"event": "RUN_ALREADY_RUNNING", "status": "refused"}, sort_keys=True), flush=True)
+            request_id = getattr(context, "aws_request_id", None) if context is not None else None
+            owner_token, owner_updated_at = competing_lease or (None, None)
+            # Keep the refusal diagnosable in CloudWatch even though no run row
+            # is created for an overlap. Tokens identify the competing lease
+            # only; they contain no credentials or document data.
+            print(
+                json.dumps(
+                    {
+                        "event": "RUN_ALREADY_RUNNING",
+                        "status": "refused",
+                        "requested_run_id": event.get("run_id"),
+                        "request_id": request_id,
+                        "requested_token": token,
+                        "owner_token": owner_token,
+                        "owner_updated_at": owner_updated_at.isoformat() if owner_updated_at else None,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             return {"statusCode": 409, "body": json.dumps({"error": "RUN_ALREADY_RUNNING"})}
         return _lambda_handler_unlocked(event, context)
     finally:
