@@ -70,6 +70,8 @@ for arc, src in [
     ("scripts/rag_import_delta_lambda.py", package_root / "scripts/rag_import_delta_lambda.py"),
     ("scripts/instinct_cache_sync_pipeline.py", package_root / "scripts/instinct_cache_sync_pipeline.py"),
     ("scripts/instinct_identity_sync.py", package_root / "scripts/instinct_identity_sync.py"),
+    ("scripts/instinct_pdf_chunker.py", package_root / "scripts/instinct_pdf_chunker.py"),
+    ("scripts/http_session.py", package_root / "scripts/http_session.py"),
 ]:
     dest = staging / arc
     dest.parent.mkdir(parents=True, exist_ok=True)
