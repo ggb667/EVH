@@ -420,7 +420,16 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 emit(log, "new_document_processed", document_pdf_id=doc_id, page_count=page_count, chunk_count=len(documents), embed_seconds=round(embed_seconds, 3), postgres_seconds=round(postgres_seconds, 3), **{k: round(float(v), 3) for k, v in timing.items() if isinstance(v, (int, float))})
             except Exception as exc:
                 documents_failed += 1
-                emit(log, "document_ingestion_failed", document_pdf_id=doc_id, error=str(exc))
+                emit(
+                    log,
+                    "document_ingestion_failed",
+                    document_pdf_id=doc_id,
+                    patient_id=str(patient_id),
+                    filename=str(chart.get("filename") or ""),
+                    content_type=str(chart.get("contentType") or ""),
+                    chart_hash=chart_hash,
+                    error=str(exc),
+                )
             else:
                 documents_ingested += 1
             if stop_after_first_ingestion and ingestion_succeeded:
