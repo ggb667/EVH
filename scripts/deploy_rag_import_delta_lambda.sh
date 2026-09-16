@@ -81,6 +81,19 @@ with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
     for path in sorted(staging.rglob("*")):
         if path.is_file():
             z.write(path, arcname=str(path.relative_to(staging)))
+required = {
+    "scripts/__init__.py",
+    "scripts/rag_import_delta_lambda.py",
+    "scripts/instinct_cache_sync_pipeline.py",
+    "scripts/instinct_identity_sync.py",
+    "scripts/instinct_pdf_chunker.py",
+    "scripts/http_session.py",
+}
+with zipfile.ZipFile(zip_path) as z:
+    missing = sorted(required - set(z.namelist()))
+if missing:
+    raise SystemExit(f"package validation failed; missing required modules: {', '.join(missing)}")
+print(f"package validation passed: {len(required)} required modules present")
 print(zip_path)
 PY
 
