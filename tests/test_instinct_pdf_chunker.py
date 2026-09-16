@@ -22,6 +22,8 @@ from scripts.instinct_pdf_chunker import (
     print_chunk_metadata,
     _extract_openai_api_key_from_secret_payload,
     _openai_api_key,
+    _read_pdf_text_from_path,
+    ocr_pdf_text_pages,
 )
 
 
@@ -61,6 +63,41 @@ def test_extract_pdf_text_pages_raises_when_text_layer_missing():
             extract_pdf_text_pages(b"%PDF-1.4 fake")
     finally:
         monkeypatch.undo()
+
+
+def test_text_route_exhaustion_waits_for_all_methods_and_preserves_page_count(tmp_path, monkeypatch, capsys):
+    pdf_path = tmp_path / "empty.pdf"
+    pdf_path.write_bytes(b"not-used")
+    calls = []
+
+    def fail(name):
+        def run(*args, **kwargs):
+            calls.append(name)
+            raise NoTextLayerError(3)
+        return run
+
+    monkeypatch.setattr("scripts.instinct_pdf_chunker.safe_extract_pdf_text_pages", fail("pdftotext"))
+    monkeypatch.setattr("scripts.instinct_pdf_chunker._extract_pdf_text_pages_impl", fail("pypdf"))
+    monkeypatch.setattr("scripts.instinct_pdf_chunker._extract_with_pymupdf", fail("pymupdf"))
+    with pytest.raises(NoTextLayerError) as raised:
+        _read_pdf_text_from_path(pdf_path)
+
+    assert calls == ["pdftotext", "pypdf", "pymupdf"]
+    assert raised.value.page_count == 3
+    assert '"status": "extraction_route_exhausted"' in capsys.readouterr().out
+
+
+def test_ocr_timeout_is_reported_and_propagated(tmp_path, monkeypatch, capsys):
+    pdf_path = tmp_path / "image.pdf"
+    pdf_path.write_bytes(b"pdf")
+
+    def timeout(*args, **kwargs):
+        raise TimeoutError("ocr child timed out")
+
+    monkeypatch.setattr("scripts.instinct_pdf_chunker._run_child_process", timeout)
+    with pytest.raises(TimeoutError, match="ocr child timed out"):
+        ocr_pdf_text_pages(pdf_path, timeout_s=1)
+    assert '"stage": "ocr"' in capsys.readouterr().out
 
 
 def test_detect_terms_in_text_uses_aliases():

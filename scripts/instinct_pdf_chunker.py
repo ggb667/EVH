@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 import time
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path
 from pprint import pformat
@@ -186,6 +186,25 @@ class BenchmarkStats:
     first_search_seconds: float
     vector_dimensions: int
     table_name: str
+
+
+@dataclass(frozen=True)
+class ExtractionAttempt:
+    method: str
+    phase: str
+    status: str
+    elapsed_seconds: float
+    timeout_seconds: float | None = None
+    exit_code: int | None = None
+    page_count: int = 0
+    text_chars: int = 0
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+    error_type: str | None = None
+    error: str | None = None
+
+    def as_log(self) -> dict[str, Any]:
+        return {"event": "extraction_attempt", **asdict(self)}
 
 
 @dataclass(frozen=True)
@@ -572,6 +591,8 @@ def read_pdf_text_from_source(source: PatientPdfSource) -> tuple[list[str], int]
 def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
     candidates: list[tuple[list[str], str, float]] = []
     last_error: Exception | None = None
+    max_page_count = 0
+    attempts = 0
     for extractor_name, extractor in (
         ("pdftotext", lambda: safe_extract_pdf_text_pages(pdf_path, timeout_s=_size_scaled_timeout(pdf_path, base_seconds=30, seconds_per_mb=15, maximum_seconds=600))),
         # Keep the pure-Python pypdf attempt in-process. Lambda's forked child
@@ -581,18 +602,67 @@ def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
         ("pypdf", lambda: _extract_pdf_text_pages_impl(str(pdf_path))),
         ("pymupdf", lambda: _extract_with_pymupdf(pdf_path)),
     ):
+        attempts += 1
         start = perf_counter()
         try:
             pages, _page_count = extractor()
+            page_count = int(_page_count or len(pages))
+            max_page_count = max(max_page_count, page_count)
             seconds = perf_counter() - start
-            if any(page.strip() for page in pages):
+            text_chars = sum(len(page) for page in pages)
+            has_text = any(page.strip() for page in pages)
+            print(
+                json.dumps(
+                    ExtractionAttempt(
+                        method=extractor_name,
+                        phase="text",
+                        status="success" if has_text else "no_text",
+                        elapsed_seconds=round(seconds, 4),
+                        page_count=page_count,
+                        text_chars=text_chars,
+                    ).as_log(),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            if has_text:
                 candidates.append((pages, extractor_name, seconds))
             else:
-                last_error = NoTextLayerError(page_count=0)
+                last_error = NoTextLayerError(page_count=page_count)
             _record_extractor_usage(extractor_name)
         except NoTextLayerError as exc:
+            max_page_count = max(max_page_count, exc.page_count)
+            print(
+                json.dumps(
+                    ExtractionAttempt(
+                        method=extractor_name,
+                        phase="text",
+                        status="no_text",
+                        elapsed_seconds=round(perf_counter() - start, 4),
+                        page_count=exc.page_count,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    ).as_log(),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             last_error = exc
         except Exception as exc:
+            print(
+                json.dumps(
+                    ExtractionAttempt(
+                        method=extractor_name,
+                        phase="text",
+                        status="error",
+                        elapsed_seconds=round(perf_counter() - start, 4),
+                        error_type=type(exc).__name__,
+                        error=str(exc)[-2000:],
+                    ).as_log(),
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             last_error = exc
     if candidates:
         best = candidates[0]
@@ -602,10 +672,11 @@ def _read_pdf_text_from_path(pdf_path: Path) -> tuple[list[str], int, str]:
         return best[0], len(best[0]), best[1]
     if last_error is not None:
         _emit_extractor_usage_summary()
-        raise NoTextLayerError(0) if not isinstance(last_error, NoTextLayerError) else last_error
+        print(json.dumps({"status": "extraction_route_exhausted", "route": "pdf_text_layer", "attempts": attempts, "page_count": max_page_count}, sort_keys=True), flush=True)
+        raise NoTextLayerError(max_page_count)
     _emit_extractor_usage_summary()
-    raise NoTextLayerError(0)
-
+    print(json.dumps({"status": "extraction_route_exhausted", "route": "pdf_text_layer", "attempts": attempts, "page_count": max_page_count}, sort_keys=True), flush=True)
+    raise NoTextLayerError(max_page_count)
 
 def _extract_pdf_text_pages_worker(pdf_path: str, queue) -> None:
     try:
@@ -811,7 +882,9 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
                     )
                     pages.append((proc.stdout.decode("utf-8", errors="replace") or "").strip())
 
-                if pages:
+                text_chars = sum(len(page) for page in pages)
+                print(json.dumps(ExtractionAttempt(method=renderer_name, phase="ocr", status="success" if text_chars else "no_text", elapsed_seconds=round(perf_counter() - renderer_started, 4), page_count=len(page_files), text_chars=text_chars).as_log(), sort_keys=True), flush=True)
+                if pages and text_chars:
                     _record_extractor_usage(renderer_name)
                     _record_extractor_usage("tesseract")
                     candidates.append((pages, renderer_name, perf_counter() - renderer_started))
@@ -831,6 +904,7 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
                 winner = _better_extraction(winner, candidate)
             _emit_extractor_usage_summary()
             return winner[0], len(winner[0]), winner[1]
+        print(json.dumps({"status": "extraction_route_exhausted", "route": "ocr", "attempts": len(renderers)}, sort_keys=True), flush=True)
         if last_error is not None:
             raise last_error
         raise NoTextLayerError(page_count=0)
@@ -1943,6 +2017,23 @@ def chunk_patient_pdf_timed(
             ),
             flush=True,
         )
+    except NoTextLayerError:
+        page_count = 0
+        try:
+            page_count = PdfReader(BytesIO(pdf_bytes)).getNumPages()  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
+            except Exception:
+                page_count = 0
+        if progress_state is not None:
+            progress_state["current_ocr_stage"] = "a"
+        print(json.dumps({"status": "pdf_phase_begin", "phase": "ocr_pdf_text_pages", "pdf_id": source.pdf_id, "filename": source.pdf_path.name if source.pdf_path is not None else None}, sort_keys=True), flush=True)
+        pages, page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path)
+        if progress_state is not None:
+            progress_state["current_ocr_stage"] = "b"
+        timing["ocr_used"] = True
+        timing["ocr_method"] = ocr_method
     except (PdfReadError, RuntimeError, ValueError, OSError) as exc:
         if _looks_like_non_pdf_or_corrupt_pdf(exc):
             raise DeferredOCRDocument(
@@ -1960,34 +2051,6 @@ def chunk_patient_pdf_timed(
                 },
             ) from exc
         raise
-    except NoTextLayerError:
-        page_count = 0
-        try:
-            page_count = PdfReader(BytesIO(pdf_bytes)).getNumPages()  # type: ignore[attr-defined]
-        except Exception:
-            try:
-                page_count = len(PdfReader(BytesIO(pdf_bytes)).pages)
-            except Exception:
-                page_count = 0
-        if progress_state is not None:
-            progress_state["current_ocr_stage"] = "a"
-        print(
-            json.dumps(
-                {
-                    "status": "pdf_phase_begin",
-                    "phase": "ocr_pdf_text_pages",
-                    "pdf_id": source.pdf_id,
-                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
-                },
-                sort_keys=True,
-            ),
-            flush=True,
-        )
-        pages, page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path)
-        if progress_state is not None:
-            progress_state["current_ocr_stage"] = "b"
-        timing["ocr_used"] = True
-        timing["ocr_method"] = ocr_method
     extraction_seconds = perf_counter() - extraction_start
     print(
         json.dumps(
