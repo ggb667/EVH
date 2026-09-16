@@ -63,6 +63,9 @@ subprocess.check_call([
     "requests==2.32.3",
     "boto3==1.35.99",
     "botocore==1.35.99",
+    "langchain-core==0.3.63",
+    "langchain-text-splitters==0.3.8",
+    "pypdf==5.4.0",
 ])
 
 for arc, src in [
