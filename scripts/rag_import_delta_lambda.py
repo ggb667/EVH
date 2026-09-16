@@ -253,7 +253,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         next_patient = patient_start + int(processed_patients)
         limit_reached = patient_limit is not None and next_patient >= patient_limit
         time_budget_reached = documents_summary.stop_reason == "time_budget"
-        complete = int(processed_patients) == 0 or (int(processed_patients) < batch_size and not time_budget_reached) or limit_reached
+        complete = (int(processed_patients) == 0 or (int(processed_patients) < batch_size and not time_budget_reached) or limit_reached) and documents_summary.documents_failed == 0
         with conn.cursor() as cur:
             cur.execute("""UPDATE public.rag_import_run
                 SET next_patient=GREATEST(next_patient, %s),
@@ -274,7 +274,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     # Zero-progress pages are terminal, not continuation candidates. Time-budget
     # stops with forward progress are continuation candidates, not completion.
     time_budget_reached = documents_summary.stop_reason == "time_budget"
-    complete = int(processed_patients) == 0 or (int(processed_patients) < batch_size and not time_budget_reached) or limit_reached
+    complete = (int(processed_patients) == 0 or (int(processed_patients) < batch_size and not time_budget_reached) or limit_reached) and documents_summary.documents_failed == 0
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
         with state_conn.cursor() as cur:
             cur.execute("""UPDATE public.rag_import_run
@@ -327,6 +327,10 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         not complete
         and int(processed_patients) > 0
         and next_patient > patient_start
+        # A failed document route is not recoverable by blindly advancing the
+        # cursor; stop and surface the failed run for diagnosis instead of
+        # recursively propagating half-baked failures across the full set.
+        and documents_summary.documents_failed == 0
     )
     if should_continue:
         import boto3
