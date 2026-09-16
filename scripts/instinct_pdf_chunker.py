@@ -2412,7 +2412,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     id BIGSERIAL PRIMARY KEY,
     source_name TEXT NOT NULL,
     source_uri TEXT,
-    content_hash TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
     content_length INTEGER NOT NULL,
     page_count INTEGER NOT NULL,
     chunk_count INTEGER NOT NULL,
@@ -2590,7 +2590,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
     id BIGSERIAL PRIMARY KEY,
     source_name TEXT NOT NULL,
     source_uri TEXT,
-    content_hash TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
     content_length INTEGER NOT NULL,
     page_count INTEGER NOT NULL,
     chunk_count INTEGER NOT NULL,
@@ -2822,7 +2822,7 @@ VALUES (
     'complete',
     {sql_quote(json.dumps(metadata, sort_keys=True))}
 )
-ON CONFLICT (content_hash) DO UPDATE SET
+ON CONFLICT (document_pdf_id) DO UPDATE SET
     source_name = EXCLUDED.source_name,
     source_uri = EXCLUDED.source_uri,
     content_length = EXCLUDED.content_length,
@@ -2870,7 +2870,7 @@ VALUES (
     'complete',
     {sql_quote(json.dumps(metadata, sort_keys=True))}
 )
-ON CONFLICT (content_hash) DO UPDATE SET
+ON CONFLICT (document_pdf_id) DO UPDATE SET
     source_name = EXCLUDED.source_name,
     source_uri = EXCLUDED.source_uri,
     content_length = EXCLUDED.content_length,
