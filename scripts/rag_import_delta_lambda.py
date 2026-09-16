@@ -31,6 +31,14 @@ class LambdaRunSummary:
     documents_discovered: int
     documents_ingested: int
     documents_failed: int
+    segment_patients_scanned: int
+    segment_documents_discovered: int
+    segment_documents_ingested: int
+    segment_documents_failed: int
+    cumulative_patients_scanned: int
+    cumulative_documents_discovered: int
+    cumulative_documents_ingested: int
+    cumulative_documents_failed: int
 
 
 def _build_db_url() -> str:
@@ -249,25 +257,6 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             max_seconds=document_max_seconds,
             progress_callback=checkpoint,
         )
-        processed_patients = documents_summary.patients_scanned
-        next_patient = patient_start + int(processed_patients)
-        limit_reached = patient_limit is not None and next_patient >= patient_limit
-        time_budget_reached = documents_summary.stop_reason == "time_budget"
-        complete = int(processed_patients) == 0 or (int(processed_patients) < batch_size and not time_budget_reached) or limit_reached
-        with conn.cursor() as cur:
-            cur.execute("""UPDATE public.rag_import_run
-                SET next_patient=GREATEST(next_patient, %s),
-                    patients_scanned=GREATEST(patients_scanned, %s),
-                    documents_found=GREATEST(documents_found, %s),
-                    documents_ingested=GREATEST(documents_ingested, %s),
-                    documents_failed=GREATEST(documents_failed, %s),
-                    status=%s,
-                    updated_at=now()
-                WHERE run_id=%s""", (next_patient, next_patient,
-                documents_summary.fetched, documents_summary.inserted, documents_summary.documents_failed,
-                'COMPLETE' if complete else 'FAILED', run_id))
-        conn.commit()
-
     processed_patients = documents_summary.patients_scanned
     next_patient = patient_start + int(processed_patients)
     limit_reached = patient_limit is not None and next_patient >= patient_limit
@@ -280,15 +269,27 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             cur.execute("""UPDATE public.rag_import_run
                 SET next_patient=GREATEST(next_patient, %s),
                     patients_scanned=GREATEST(patients_scanned, %s),
-                    documents_found=GREATEST(documents_found, %s),
-                    documents_ingested=GREATEST(documents_ingested, %s),
-                    documents_failed=GREATEST(documents_failed, %s),
+                    documents_found=documents_found + %s,
+                    documents_ingested=documents_ingested + %s,
+                    documents_failed=documents_failed + %s,
                     status=%s,
                     updated_at=now()
-                WHERE run_id=%s""", (next_patient, next_patient,
-                documents_summary.fetched, documents_summary.inserted, documents_summary.documents_failed,
-                'COMPLETE' if complete else 'FAILED', run_id))
+                WHERE run_id=%s
+                RETURNING patients_scanned, documents_found, documents_ingested, documents_failed""", (
+                next_patient,
+                next_patient,
+                documents_summary.documents_discovered,
+                documents_summary.documents_ingested,
+                documents_summary.documents_failed,
+                'COMPLETE' if complete else 'FAILED',
+                run_id,
+            ))
+            cumulative = cur.fetchone() or {}
         state_conn.commit()
+    cumulative_patients_scanned = int(cumulative.get("patients_scanned") or 0)
+    cumulative_documents_discovered = int(cumulative.get("documents_found") or 0)
+    cumulative_documents_ingested = int(cumulative.get("documents_ingested") or 0)
+    cumulative_documents_failed = int(cumulative.get("documents_failed") or 0)
     payload = LambdaRunSummary(
         step="1.1-1.3",
         patient_limit=patient_limit,
@@ -306,6 +307,14 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         documents_discovered=documents_summary.documents_discovered,
         documents_ingested=documents_summary.documents_ingested,
         documents_failed=documents_summary.documents_failed,
+        segment_patients_scanned=processed_patients,
+        segment_documents_discovered=documents_summary.documents_discovered,
+        segment_documents_ingested=documents_summary.documents_ingested,
+        segment_documents_failed=documents_summary.documents_failed,
+        cumulative_patients_scanned=cumulative_patients_scanned,
+        cumulative_documents_discovered=cumulative_documents_discovered,
+        cumulative_documents_ingested=cumulative_documents_ingested,
+        cumulative_documents_failed=cumulative_documents_failed,
     )
     print(json.dumps({
         "event": "COMPLETE" if complete else "CONTINUE",
@@ -316,6 +325,14 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         "documents_discovered": documents_summary.documents_discovered,
         "documents_ingested": documents_summary.documents_ingested,
         "documents_failed": documents_summary.documents_failed,
+        "segment_patients_scanned": processed_patients,
+        "segment_documents_discovered": documents_summary.documents_discovered,
+        "segment_documents_ingested": documents_summary.documents_ingested,
+        "segment_documents_failed": documents_summary.documents_failed,
+        "cumulative_patients_scanned": cumulative_patients_scanned,
+        "cumulative_documents_discovered": cumulative_documents_discovered,
+        "cumulative_documents_ingested": cumulative_documents_ingested,
+        "cumulative_documents_failed": cumulative_documents_failed,
         "seconds": payload.seconds,
         "next_patient": next_patient,
         "stop_reason": documents_summary.stop_reason,

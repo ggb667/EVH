@@ -407,6 +407,27 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 documents, page_count, timing = chunk_patient_pdf_timed(source, ChunkingConfig(), defer_no_text_page_threshold=8)
                 if not documents:
                     raise RuntimeError("ingestion produced no text chunks")
+                # pms_page_chunk is protected by a document identity FK.
+                # load_into_postgres uses a separate connection, so make the
+                # identity visible before chunk persistence while staying on
+                # the normal importer path for this candidate.
+                with conn.cursor() as identity_cur:
+                    identity_cur.execute(
+                        """INSERT INTO public.rag_document_identity
+                           (document_pdf_id, client_id, patient_id, originalfilename)
+                           VALUES (%s, %s, %s, %s)
+                           ON CONFLICT (document_pdf_id) DO UPDATE SET
+                             client_id = EXCLUDED.client_id,
+                             patient_id = EXCLUDED.patient_id,
+                             originalfilename = EXCLUDED.originalfilename""",
+                        (
+                            doc_id,
+                            client_id,
+                            patient_id,
+                            str(chart.get("filename") or chart.get("label") or doc_id),
+                        ),
+                    )
+                conn.commit()
                 embed_seconds, postgres_seconds = load_into_postgres(
                     database_url=_db_url(), table_name="public.pms_page_chunk",
                     source_name=str(chart.get("filename") or chart.get("label") or doc_id),
