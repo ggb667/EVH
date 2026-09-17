@@ -140,28 +140,23 @@ if [[ "${PACKAGE_ONLY:-0}" == "1" ]]; then
   exit 0
 fi
 
-echo "[deploy] update lambda code"
-aws lambda update-function-code \
-  --function-name "$FUNCTION_NAME" \
-  --zip-file "fileb://$ZIP_PATH" \
-  --publish \
-  --query '{FunctionName:FunctionName,Version:Version,LastModified:LastModified}' \
-  --output json
-
-aws lambda wait function-updated \
-  --function-name "$FUNCTION_NAME"
+if [[ "${DEPLOY_LAMBDA:-0}" != "1" ]]; then
+  echo "[package] validation complete; set DEPLOY_LAMBDA=1 for an explicit AWS deploy"
+  exit 0
+fi
 
 echo "[deploy] stamp lambda version env"
 APP_VERSION="$(git rev-parse --short HEAD)"
 CURRENT_ENV_JSON="$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Environment.Variables' --output json)"
-python3 - "$APP_VERSION" "$CURRENT_ENV_JSON" <<'PY'
+python3 - "$FUNCTION_NAME" "$APP_VERSION" "$CURRENT_ENV_JSON" <<'PY'
 import json
 import os
 import subprocess
 import sys
 
-version = sys.argv[1]
-current = json.loads(sys.argv[2] or "{}")
+function_name = sys.argv[1]
+version = sys.argv[2]
+current = json.loads(sys.argv[3] or "{}")
 current["RAG_IMPORT_DELTA_VERSION"] = version
 current["STEP13_DOCUMENT_LIMIT"] = os.environ.get("STEP13_DOCUMENT_LIMIT", "1000").strip() or "1000"
 
@@ -192,12 +187,31 @@ for name in ("INSTINCT_CLIENT_SECRET_ARN", "OPENAI_API_KEY_SECRET_ARN"):
 payload = json.dumps({"Variables": current})
 subprocess.check_call([
     "aws", "lambda", "update-function-configuration",
-    "--function-name", "evh_instinct_rag_import_delta",
+    "--function-name", function_name,
     "--environment", payload,
     "--query", "{FunctionName:FunctionName,LastModified:LastModified,LastUpdateStatus:LastUpdateStatus,RevisionId:RevisionId}",
     "--output", "json",
 ])
 PY
+
+aws lambda wait function-updated \
+  --function-name "$FUNCTION_NAME"
+
+echo "[deploy] publish code with stamped environment"
+aws lambda update-function-code \
+  --function-name "$FUNCTION_NAME" \
+  --zip-file "fileb://$ZIP_PATH" \
+  --publish \
+  --query '{FunctionName:FunctionName,Version:Version,LastModified:LastModified}' \
+  --output json
+
+aws lambda wait function-updated \
+  --function-name "$FUNCTION_NAME"
+
+if [[ "${RUN_NORMAL_SMOKE:-0}" != "1" ]]; then
+  echo "[deploy] normal smoke disabled; set RUN_NORMAL_SMOKE=1 only when explicitly authorized"
+  exit 0
+fi
 
 echo "[smoke] lambda invoke"
 SMOKE_RUN_ID="deploy-smoke-$(date -u +%Y%m%dT%H%M%SZ)-$$"
