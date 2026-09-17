@@ -68,7 +68,7 @@ subprocess.check_call([
     "langchain-core==0.3.63",
     "langchain-text-splitters==0.3.8",
     "pypdf==5.4.0",
-    "PyMuPDF==1.26.7",
+    "PyMuPDF==1.26.0",
 ])
 
 for arc, src in [
