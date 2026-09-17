@@ -13,11 +13,13 @@ import pymupdf
 
 from scripts.instinct_pdf_chunker import (
     PatientPdfSource,
+    UNEXPECTED_FORMATS,
     _extract_word_text_pages,
     _extract_pdf_text_pages_impl,
     _extract_with_pymupdf,
     _ocr_pdf_text_pages_impl,
     _pdftotext_extract_worker,
+    _record_unexpected_document_format,
 )
 
 
@@ -46,6 +48,8 @@ def run(event: dict) -> dict:
         shutil.copy2(packaged_fixture, fixture)
         image_pdf = root / "image-only.pdf"
         docx = root / "fixture.docx"
+        html = root / "fixture.html"
+        html.write_text("<html><body>Unexpected HTML harness fixture.</body></html>", encoding="utf-8")
         with zipfile.ZipFile(docx, "w") as archive:
             archive.writestr("word/document.xml", "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body><w:p><w:r><w:t>Real DOCX harness fixture.</w:t></w:r></w:p></w:body></w:document>")
         src = pymupdf.open(str(fixture)); out = pymupdf.open()
@@ -55,6 +59,19 @@ def run(event: dict) -> dict:
             target.insert_image(target.rect, stream=pix.tobytes("png"))
         out.save(str(image_pdf)); out.close(); src.close()
         doc_source = PatientPdfSource(pdf_id=0, patient_id=0, patient_name="harness", pdf_path=docx)
+        html_source = PatientPdfSource(pdf_id=0, patient_id=0, patient_name="harness", pdf_path=html)
+
+        started = time.perf_counter()
+        try:
+            before = UNEXPECTED_FORMATS.get(".html", 0)
+            suffix = _record_unexpected_document_format(html_source)
+            after = UNEXPECTED_FORMATS.get(".html", 0)
+            if suffix != ".html" or after != before + 1:
+                raise RuntimeError(f"HTML classification was not recorded: suffix={suffix!r}, before={before}, after={after}")
+            results.append({"path": "HTML_unexpected_format", "status": "success", "suffix": suffix, "seconds": round(time.perf_counter()-started, 3)})
+        except Exception as exc:
+            results.append({"path": "HTML_unexpected_format", "status": "failure", "error_type": type(exc).__name__, "error": str(exc), "seconds": round(time.perf_counter()-started, 3)})
+
         cases = [
             ("DOC", lambda: _extract_word_text_pages(doc_source)),
             ("PDF_TEXT_pdftotext", lambda: _extract_with_pdftotext(fixture, timeout_s=120)),

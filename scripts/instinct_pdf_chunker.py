@@ -349,6 +349,26 @@ def _source_suffix(source: PatientPdfSource) -> str:
     return ""
 
 
+def _record_unexpected_document_format(source: PatientPdfSource) -> str:
+    """Record non-PDF/Word source formats through the production telemetry path."""
+    suffix = _source_suffix(source)
+    if suffix and suffix not in {".pdf", ".doc", ".docx"}:
+        UNEXPECTED_FORMATS[suffix] = UNEXPECTED_FORMATS.get(suffix, 0) + 1
+        print(
+            json.dumps(
+                {
+                    "status": "UNEXPECTED_DOCUMENT_FORMAT",
+                    "suffix": suffix,
+                    "pdf_id": source.pdf_id,
+                    "filename": source.pdf_path.name if source.pdf_path is not None else None,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    return suffix
+
+
 def _detect_word_parser() -> tuple[str | None, str | None]:
     for name in ("antiword", "catdoc", "libreoffice", "soffice"):
         path = shutil.which(name)
@@ -1814,11 +1834,7 @@ def chunk_patient_pdf_timed(
         ),
         flush=True,
     )
-    suffix = _source_suffix(source)
-    known_suffixes = {".pdf", ".doc", ".docx"}
-    if suffix and suffix not in known_suffixes:
-        UNEXPECTED_FORMATS[suffix] = UNEXPECTED_FORMATS.get(suffix, 0) + 1
-        print(json.dumps({"status": "UNEXPECTED_DOCUMENT_FORMAT", "suffix": suffix, "pdf_id": source.pdf_id, "filename": source.pdf_path.name if source.pdf_path is not None else None}, sort_keys=True), flush=True)
+    suffix = _record_unexpected_document_format(source)
     print(
         json.dumps(
             {
