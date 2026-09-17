@@ -11,7 +11,9 @@ echo "[preflight] py_compile"
 python -m py_compile \
   scripts/rag_import_delta_lambda.py \
   scripts/instinct_cache_sync_pipeline.py \
-  scripts/instinct_identity_sync.py
+  scripts/instinct_identity_sync.py \
+  scripts/instinct_pdf_chunker.py \
+  scripts/rd_validation_harness.py
 
 echo "[preflight] import smoke"
 python - <<'PY'
@@ -76,6 +78,8 @@ for arc, src in [
     ("scripts/instinct_identity_sync.py", package_root / "scripts/instinct_identity_sync.py"),
     ("scripts/instinct_pdf_chunker.py", package_root / "scripts/instinct_pdf_chunker.py"),
     ("scripts/http_session.py", package_root / "scripts/http_session.py"),
+    ("scripts/rd_validation_harness.py", package_root / "scripts/rd_validation_harness.py"),
+    ("rd-first.pdf", package_root / "rd-first.pdf"),
 ]:
     dest = staging / arc
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +97,8 @@ required = {
     "scripts/instinct_pdf_chunker.py",
     "scripts/http_session.py",
     "pymupdf/__init__.py",
+    "scripts/rd_validation_harness.py",
+    "rd-first.pdf",
 }
 with zipfile.ZipFile(zip_path) as z:
     names = set(z.namelist())
@@ -194,10 +200,11 @@ subprocess.check_call([
 PY
 
 echo "[smoke] lambda invoke"
+SMOKE_RUN_ID="deploy-smoke-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"patient_limit":1,"document_limit":1}' \
+  --payload "{\"run_id\":\"$SMOKE_RUN_ID\",\"start_patient\":0,\"patient_start\":0,\"patient_batch\":1,\"patient_limit\":1,\"document_limit\":1,\"max_seconds\":120}" \
   /tmp/evh_rag_import_delta_smoke.json \
   >/tmp/evh_rag_import_delta_smoke.meta.json
 

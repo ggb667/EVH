@@ -29,6 +29,8 @@ import subprocess
 import tempfile
 import time
 import sys
+import zipfile
+from xml.etree import ElementTree
 from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path
@@ -81,6 +83,7 @@ DOC_FAMILIES = (
 )
 DEFAULT_TEXT_CACHE_DIR = Path(os.environ.get("EVH_INSTINCT_TEXT_CACHE_DIR", "/tmp/evh_instinct_text_cache"))
 EXTRACTOR_USAGE_COUNTS: dict[str, int] = {"pdftotext": 0, "pypdf": 0, "pymupdf": 0, "pdftoppm": 0, "pdftocairo": 0, "gs": 0, "tesseract": 0}
+UNEXPECTED_FORMATS: dict[str, int] = {}
 SQL_VERBOSE_LOGGING = os.environ.get("EVH_VERBOSE_SQL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 _POSTGRES_CONNECTIONS: dict[str, psycopg.Connection] = {}
@@ -110,7 +113,13 @@ def _close_postgres_connections() -> None:
         _discard_postgres_connection(database_url, conn)
 
 
+def _emit_unexpected_format_summary() -> None:
+    if UNEXPECTED_FORMATS:
+        print(json.dumps({"status": "UNEXPECTED_DOCUMENT_FORMATS", "formats": UNEXPECTED_FORMATS}, sort_keys=True), flush=True)
+
+
 atexit.register(_close_postgres_connections)
+atexit.register(_emit_unexpected_format_summary)
 
 
 class NoTextLayerError(RuntimeError):
@@ -523,7 +532,13 @@ def _extract_word_text_pages(source: PatientPdfSource, *, pdf_bytes: bytes | Non
         path = temp_path / "source.doc"
         path.write_bytes(pdf_bytes or b"")
     parser_name, parser_path = _detect_word_parser()
-    if parser_name == "antiword" and parser_path:
+    if path.suffix.lower() == ".docx":
+        with zipfile.ZipFile(path) as archive:
+            xml = archive.read("word/document.xml")
+        root = ElementTree.fromstring(xml)
+        text = "\n".join(node.text or "" for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "t")
+        parser_name = "docx_ooxml_stdlib"
+    elif parser_name == "antiword" and parser_path:
         proc = subprocess.run([parser_path, str(path)], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         text = proc.stdout.decode("utf-8", errors="replace")
     elif parser_name == "catdoc" and parser_path:
@@ -776,7 +791,7 @@ def _pdftotext_extract_worker(pdf_path: str, timeout_s: int, queue) -> None:
     queue.put(("ok", {"pages": pages, "page_count": page_count, "text_chars": text_chars, "tool": "pdftotext"}))
 
 
-def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[list[str], int, str]:
+def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_renderer: str | None = None) -> tuple[list[str], int, str]:
     tesseract_command = shutil.which("tesseract")
     if not tesseract_command:
         raise NoTextLayerError(page_count=0)
@@ -862,6 +877,10 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
             )
         if not renderers:
             raise NoTextLayerError(page_count=0)
+        if only_renderer:
+            renderers = [cmd for cmd in renderers if Path(cmd[0]).name == only_renderer]
+            if not renderers:
+                raise RuntimeError(f"requested OCR renderer unavailable: {only_renderer}")
 
         last_error: Exception | None = None
         candidates: list[tuple[list[str], str, float]] = []
@@ -894,6 +913,7 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240) -> tuple[li
                 raise NoTextLayerError(page_count=0)
             except Exception as exc:
                 last_error = exc
+                print(json.dumps(ExtractionAttempt(method=renderer_name, phase="ocr", status="error", elapsed_seconds=round(perf_counter() - renderer_started, 4), error_type=type(exc).__name__, error=str(exc)[-2000:]).as_log(), sort_keys=True), flush=True)
                 for image_path in temp_path.glob("*.png"):
                     image_path.unlink(missing_ok=True)
                 continue
@@ -1795,6 +1815,10 @@ def chunk_patient_pdf_timed(
         flush=True,
     )
     suffix = _source_suffix(source)
+    known_suffixes = {".pdf", ".doc", ".docx"}
+    if suffix and suffix not in known_suffixes:
+        UNEXPECTED_FORMATS[suffix] = UNEXPECTED_FORMATS.get(suffix, 0) + 1
+        print(json.dumps({"status": "UNEXPECTED_DOCUMENT_FORMAT", "suffix": suffix, "pdf_id": source.pdf_id, "filename": source.pdf_path.name if source.pdf_path is not None else None}, sort_keys=True), flush=True)
     print(
         json.dumps(
             {
