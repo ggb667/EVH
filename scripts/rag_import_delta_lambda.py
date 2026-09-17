@@ -39,6 +39,9 @@ class LambdaRunSummary:
     cumulative_documents_discovered: int
     cumulative_documents_ingested: int
     cumulative_documents_failed: int
+    work_unit_elapsed_seconds: float
+    work_units_completed: int
+    work_unit_mean_seconds: float
 
 
 def _build_db_url() -> str:
@@ -155,6 +158,9 @@ def _instrument_client(client, log):
 
 
 def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = None) -> dict[str, Any]:
+    work_unit_started = time.perf_counter()
+    prior_work_units = max(0, int(event.get("work_units_completed", 0) or 0))
+    prior_work_unit_mean = float(event.get("work_unit_mean_seconds", 0.0) or 0.0)
     base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip()
     client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
     client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
@@ -290,6 +296,9 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     cumulative_documents_discovered = int(cumulative.get("documents_found") or 0)
     cumulative_documents_ingested = int(cumulative.get("documents_ingested") or 0)
     cumulative_documents_failed = int(cumulative.get("documents_failed") or 0)
+    work_unit_elapsed_seconds = time.perf_counter() - work_unit_started
+    work_units_completed = prior_work_units + 1
+    work_unit_mean_seconds = ((prior_work_unit_mean * prior_work_units) + work_unit_elapsed_seconds) / work_units_completed
     payload = LambdaRunSummary(
         step="1.1-1.3",
         patient_limit=patient_limit,
@@ -315,6 +324,9 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         cumulative_documents_discovered=cumulative_documents_discovered,
         cumulative_documents_ingested=cumulative_documents_ingested,
         cumulative_documents_failed=cumulative_documents_failed,
+        work_unit_elapsed_seconds=round(work_unit_elapsed_seconds, 3),
+        work_units_completed=work_units_completed,
+        work_unit_mean_seconds=round(work_unit_mean_seconds, 3),
     )
     print(json.dumps({
         "event": "COMPLETE" if complete else "CONTINUE",
@@ -333,6 +345,9 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         "cumulative_documents_discovered": cumulative_documents_discovered,
         "cumulative_documents_ingested": cumulative_documents_ingested,
         "cumulative_documents_failed": cumulative_documents_failed,
+        "work_unit_elapsed_seconds": round(work_unit_elapsed_seconds, 3),
+        "work_units_completed": work_units_completed,
+        "work_unit_mean_seconds": round(work_unit_mean_seconds, 3),
         "seconds": payload.seconds,
         "next_patient": next_patient,
         "stop_reason": documents_summary.stop_reason,
@@ -359,6 +374,8 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                 **({"document_limit": document_limit} if document_limit is not None else {}),
                 "max_seconds": requested_max_seconds,
                 "continuation_token": event.get("_continuation_token", ""),
+                "work_units_completed": work_units_completed,
+                "work_unit_mean_seconds": work_unit_mean_seconds,
             }).encode(),
         )
     body = {
