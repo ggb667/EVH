@@ -50,6 +50,8 @@ subprocess.check_call([
     "--only-binary=:all:",
     "--platform",
     "manylinux2014_x86_64",
+    "--platform",
+    "manylinux_2_28_x86_64",
     "--implementation",
     "cp",
     "--python-version",
@@ -61,11 +63,10 @@ subprocess.check_call([
     "psycopg==3.2.13",
     "psycopg-binary==3.2.13",
     "requests==2.32.3",
-    "boto3==1.35.99",
-    "botocore==1.35.99",
     "langchain-core==0.3.63",
     "langchain-text-splitters==0.3.8",
     "pypdf==5.4.0",
+    "PyMuPDF==1.26.7",
 ])
 
 for arc, src in [
@@ -91,14 +92,47 @@ required = {
     "scripts/instinct_identity_sync.py",
     "scripts/instinct_pdf_chunker.py",
     "scripts/http_session.py",
+    "pymupdf/__init__.py",
 }
 with zipfile.ZipFile(zip_path) as z:
-    missing = sorted(required - set(z.namelist()))
+    names = set(z.namelist())
+    missing = sorted(required - names)
 if missing:
     raise SystemExit(f"package validation failed; missing required modules: {', '.join(missing)}")
 print(f"package validation passed: {len(required)} required modules present")
+
+with zipfile.ZipFile(zip_path) as z:
+    with tempfile.TemporaryDirectory(prefix="evh-rag-import-delta-import-") as import_root:
+        z.extractall(import_root)
+        code = """
+import pathlib
+import sys
+root_path = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root_path))
+import pymupdf
+pymupdf_path = pathlib.Path(pymupdf.__file__).resolve()
+if root_path not in pymupdf_path.parents:
+    raise SystemExit('pymupdf imported outside extracted ZIP: %s' % pymupdf_path)
+print('package validation passed: real PyMuPDF import')
+if sys.version_info[:2] == (3, 13):
+    import scripts.instinct_pdf_chunker as chunker
+    if chunker.pymupdf is None:
+        raise SystemExit('instinct_pdf_chunker did not bind real pymupdf')
+    print('package validation passed: instinct_pdf_chunker bound real PyMuPDF')
+else:
+    print(
+        'package validation deferred: instinct_pdf_chunker import requires Python 3.13 '
+        'because the package contains cp313 binary wheels; deployed Lambda branch harness must verify binding'
+    )
+"""
+        subprocess.check_call([sys.executable, "-I", "-c", code, import_root])
 print(zip_path)
 PY
+
+if [[ "${PACKAGE_ONLY:-0}" == "1" ]]; then
+  echo "[package] PACKAGE_ONLY=1; skipping deploy and smoke"
+  exit 0
+fi
 
 echo "[deploy] update lambda code"
 aws lambda update-function-code \
