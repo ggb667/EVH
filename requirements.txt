@@ -1,5 +1,7 @@
-langchain-core==0.3.63
+langchain-core==0.3.66
 langchain-openai==0.3.25
+langchain-text-splitters==0.3.8
+pypdf==5.4.0
 psycopg[binary]==3.2.9
 pg8000==1.31.2
 boto3==1.35.99
