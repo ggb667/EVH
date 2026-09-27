@@ -6,6 +6,9 @@ ZIP_PATH="${ZIP_PATH:-$ROOT_DIR/deploy/evh_instinct_rag_import_delta.zip}"
 FUNCTION_NAME="${FUNCTION_NAME:-evh_instinct_rag_import_delta}"
 DEPLOY_S3_BUCKET="${DEPLOY_S3_BUCKET:-evh-instinct-pdf-rag-shell}"
 DIRECT_UPLOAD_MAX_BYTES="${DIRECT_UPLOAD_MAX_BYTES:-52428800}"
+OCR_RUNTIME_S3_URI="${OCR_RUNTIME_S3_URI:-s3://evh-instinct-pdf-rag-shell/lambda-runtime/ocr/evh-ocr-runtime-al2023-x86_64-20260927.zip}"
+OCR_RUNTIME_SHA256="${OCR_RUNTIME_SHA256:-20649ba107215c34d5b26a67ee48ce950cb394a33f32010c922f4f41b9659fd5}"
+OCR_RUNTIME_ARCHIVE="${OCR_RUNTIME_ARCHIVE:-${TMPDIR:-/tmp}/evh-ocr-runtime-${OCR_RUNTIME_SHA256}.zip}"
 
 cd "$ROOT_DIR"
 
@@ -28,10 +31,20 @@ import scripts.instinct_cache_sync_pipeline
 print("import smoke passed")
 PY
 
+echo "[package] acquire pinned Amazon Linux 2023 OCR runtime"
+if [[ ! -f "$OCR_RUNTIME_ARCHIVE" ]] || [[ "$(sha256sum "$OCR_RUNTIME_ARCHIVE" | awk '{print $1}')" != "$OCR_RUNTIME_SHA256" ]]; then
+  rm -f "$OCR_RUNTIME_ARCHIVE"
+  aws s3 cp "$OCR_RUNTIME_S3_URI" "$OCR_RUNTIME_ARCHIVE" --only-show-errors
+fi
+printf '%s  %s\n' "$OCR_RUNTIME_SHA256" "$OCR_RUNTIME_ARCHIVE" | sha256sum --check --status || {
+  echo "OCR runtime SHA-256 validation failed: $OCR_RUNTIME_ARCHIVE" >&2
+  exit 1
+}
+
+export OCR_RUNTIME_ARCHIVE OCR_RUNTIME_SHA256
 echo "[package] build lambda zip"
 ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -88,33 +101,48 @@ for arc, src in [
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
 
-# OCR is a production dependency, not an optional host utility.  Package the
-# Lambda-compatible command paths when the build image provides them and fail
-# closed otherwise; never deploy a ZIP that can only handle text-layer PDFs.
+# OCR is a production dependency. Extract a content-addressed runtime built
+# inside the official Lambda Python 3.13 (Amazon Linux 2023) root filesystem;
+# host-distribution binaries are never admitted into the deployment package.
+ocr_archive = Path(os.environ["OCR_RUNTIME_ARCHIVE"])
+with zipfile.ZipFile(ocr_archive) as runtime_zip:
+    for member in runtime_zip.infolist():
+        member_path = Path(member.filename)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise SystemExit(f"unsafe OCR runtime archive member: {member.filename}")
+    runtime_zip.extractall(staging)
 for tool in ("tesseract", "pdftoppm", "pdftocairo", "gs", "pdftotext"):
-    tool_path = shutil.which(tool)
-    if not tool_path:
-        raise SystemExit(f"package validation failed: missing OCR executable {tool}")
-    dest = staging / "bin" / tool
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(tool_path, dest)
-    dest.chmod(0o755)
-    # Carry the ELF dependencies into the same Lambda payload so the runtime
-    # does not depend on the build host's loader/library set.
-    ldd = subprocess.check_output(["ldd", tool_path], text=True, stderr=subprocess.STDOUT)
-    for line in ldd.splitlines():
-        match = re.search(r"=>\s*(/[^ ]+)|^\s*(/lib[^ ]+)", line)
-        dep = next((value for value in match.groups() if value), None) if match else None
-        # Never bundle the host glibc/loader into Lambda.  Its Amazon Linux
-        # runtime supplies the compatible libc; shipping a newer host libc
-        # causes GLIBC_PRIVATE symbol failures before tools can start.
-        forbidden = {"libc.so.6", "ld-linux-x86-64.so.2", "libpthread.so.0", "libm.so.6", "libdl.so.2", "librt.so.1"}
-        if dep and Path(dep).name not in forbidden and os.path.isfile(dep):
-            lib_dest = staging / "lib" / Path(dep).name
-            lib_dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(dep, lib_dest)
-if Path("/usr/share/tesseract-ocr/5/tessdata").is_dir():
-    shutil.copytree("/usr/share/tesseract-ocr/5/tessdata", staging / "share/tessdata", dirs_exist_ok=True)
+    tool_path = staging / "bin" / tool
+    if not tool_path.is_file():
+        raise SystemExit(f"package validation failed: OCR runtime missing bin/{tool}")
+    tool_path.chmod(0o755)
+for forbidden in ("libc.so.6", "ld-linux-x86-64.so.2", "libpthread.so.0", "libm.so.6", "libdl.so.2", "librt.so.1"):
+    if (staging / "lib" / forbidden).exists():
+        raise SystemExit(f"package validation failed: OCR runtime bundles glibc core {forbidden}")
+# The managed AL2023 runtime provides its 2.34 baseline plus the AWS 2.35
+# backport symbol set. Reject newer/RELR requirements before deployment.
+max_glibc = (2, 35)
+for elf_path in [*(staging / "bin").iterdir(), *(staging / "lib").iterdir()]:
+    if not elf_path.is_file():
+        continue
+    info = subprocess.run(
+        ["readelf", "--version-info", str(elf_path)],
+        text=True,
+        capture_output=True,
+        check=False,
+    ).stdout
+    if "GLIBC_ABI_DT_RELR" in info:
+        raise SystemExit(
+            f"package validation failed: {elf_path.name} requires unsupported GLIBC_ABI_DT_RELR"
+        )
+    required_versions = [
+        tuple(map(int, match.split(".")))
+        for match in __import__("re").findall(r"GLIBC_(\d+\.\d+)", info)
+    ]
+    if required_versions and max(required_versions) > max_glibc:
+        raise SystemExit(
+            f"package validation failed: {elf_path.name} requires GLIBC_{'.'.join(map(str, max(required_versions)))}"
+        )
 
 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
     for path in sorted(staging.rglob("*")):
@@ -135,13 +163,24 @@ required = {
     "bin/pdftocairo",
     "bin/gs",
     "bin/pdftotext",
+    "share/tessdata/eng.traineddata",
+    "OCR_RUNTIME_MANIFEST.txt",
 }
 with zipfile.ZipFile(zip_path) as z:
     names = set(z.namelist())
     missing = sorted(required - names)
 if missing:
     raise SystemExit(f"package validation failed; missing required modules: {', '.join(missing)}")
-print(f"package validation passed: {len(required)} required modules present")
+uncompressed_bytes = sum(item.file_size for item in z.infolist())
+max_uncompressed_bytes = 262_144_000
+if uncompressed_bytes > max_uncompressed_bytes:
+    raise SystemExit(
+        f"package validation failed: {uncompressed_bytes} uncompressed bytes exceeds Lambda limit {max_uncompressed_bytes}"
+    )
+print(
+    f"package validation passed: {len(required)} required modules present; "
+    f"{uncompressed_bytes} uncompressed bytes"
+)
 
 with zipfile.ZipFile(zip_path) as z:
     with tempfile.TemporaryDirectory(prefix="evh-rag-import-delta-import-") as import_root:

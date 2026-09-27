@@ -41,6 +41,11 @@ if Path("/var/task/bin").is_dir():
     os.environ["PATH"] = "/var/task/bin:" + os.environ.get("PATH", "")
     os.environ["LD_LIBRARY_PATH"] = "/var/task/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["TESSDATA_PREFIX"] = "/var/task/share/tessdata"
+    os.environ["FONTCONFIG_PATH"] = "/var/task/etc/fonts"
+    os.environ["POPPLER_DATADIR"] = "/var/task/share/poppler"
+    os.environ["GS_LIB"] = ":".join(
+        ("/var/task/share/ghostscript/Resource/Init", "/var/task/share/ghostscript/lib")
+    )
 
 def _runtime_tool(name: str) -> str | None:
     """Resolve packaged Lambda tools even when PATH is restricted."""
