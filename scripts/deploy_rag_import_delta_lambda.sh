@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ZIP_PATH="${ZIP_PATH:-$ROOT_DIR/deploy/evh_instinct_rag_import_delta.zip}"
 FUNCTION_NAME="${FUNCTION_NAME:-evh_instinct_rag_import_delta}"
+DEPLOY_S3_BUCKET="${DEPLOY_S3_BUCKET:-evh-instinct-pdf-rag-shell}"
+DIRECT_UPLOAD_MAX_BYTES="${DIRECT_UPLOAD_MAX_BYTES:-52428800}"
 
 cd "$ROOT_DIR"
 
@@ -179,8 +181,34 @@ if [[ "${DEPLOY_LAMBDA:-0}" != "1" ]]; then
   exit 0
 fi
 
-echo "[deploy] stamp lambda version env"
 APP_VERSION="$(git rev-parse --short HEAD)"
+APP_REVISION="$(git rev-parse HEAD)"
+
+echo "[deploy] update code before stamping provenance"
+ZIP_BYTES="$(stat -c '%s' "$ZIP_PATH")"
+if (( ZIP_BYTES > DIRECT_UPLOAD_MAX_BYTES )); then
+  DEPLOY_S3_KEY="${DEPLOY_S3_KEY:-lambda-deploy/$FUNCTION_NAME/$APP_REVISION.zip}"
+  echo "[deploy] package is ${ZIP_BYTES} bytes; uploading through s3://$DEPLOY_S3_BUCKET/$DEPLOY_S3_KEY"
+  aws s3 cp "$ZIP_PATH" "s3://$DEPLOY_S3_BUCKET/$DEPLOY_S3_KEY"
+  aws lambda update-function-code \
+    --function-name "$FUNCTION_NAME" \
+    --s3-bucket "$DEPLOY_S3_BUCKET" \
+    --s3-key "$DEPLOY_S3_KEY" \
+    --query '{FunctionName:FunctionName,Version:Version,LastModified:LastModified}' \
+    --output json
+else
+  echo "[deploy] package is ${ZIP_BYTES} bytes; using direct upload"
+  aws lambda update-function-code \
+    --function-name "$FUNCTION_NAME" \
+    --zip-file "fileb://$ZIP_PATH" \
+    --query '{FunctionName:FunctionName,Version:Version,LastModified:LastModified}' \
+    --output json
+fi
+
+aws lambda wait function-updated \
+  --function-name "$FUNCTION_NAME"
+
+echo "[deploy] code update successful; stamp lambda version env"
 CURRENT_ENV_JSON="$(aws lambda get-function-configuration --function-name "$FUNCTION_NAME" --query 'Environment.Variables' --output json)"
 python3 - "$FUNCTION_NAME" "$APP_VERSION" "$CURRENT_ENV_JSON" <<'PY'
 import json
@@ -231,16 +259,11 @@ PY
 aws lambda wait function-updated \
   --function-name "$FUNCTION_NAME"
 
-echo "[deploy] publish code with stamped environment"
-aws lambda update-function-code \
+echo "[deploy] publish code and stamped environment"
+aws lambda publish-version \
   --function-name "$FUNCTION_NAME" \
-  --zip-file "fileb://$ZIP_PATH" \
-  --publish \
   --query '{FunctionName:FunctionName,Version:Version,LastModified:LastModified}' \
   --output json
-
-aws lambda wait function-updated \
-  --function-name "$FUNCTION_NAME"
 
 if [[ "${RUN_NORMAL_SMOKE:-0}" != "1" ]]; then
   echo "[deploy] normal smoke disabled; set RUN_NORMAL_SMOKE=1 only when explicitly authorized"
