@@ -294,6 +294,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             patient_start=patient_start,
             max_seconds=document_max_seconds,
             progress_callback=checkpoint,
+            run_id=run_id,
         )
     processed_patients = documents_summary.patients_scanned
     next_patient = patient_start + int(processed_patients)

@@ -1,4 +1,7 @@
 import json
+import os
+import signal
+import subprocess
 import sys
 import types
 from io import BytesIO
@@ -24,6 +27,7 @@ from scripts.instinct_pdf_chunker import (
     _openai_api_key,
     _read_pdf_text_from_path,
     ocr_pdf_text_pages,
+    _run_bounded_command,
 )
 
 
@@ -98,6 +102,41 @@ def test_ocr_timeout_is_reported_and_propagated(tmp_path, monkeypatch, capsys):
     with pytest.raises(TimeoutError, match="ocr child timed out"):
         ocr_pdf_text_pages(pdf_path, timeout_s=1)
     assert '"stage": "ocr"' in capsys.readouterr().out
+
+
+def test_ocr_deadline_is_absolute_and_size_scaled(monkeypatch):
+    monkeypatch.setenv("EVH_OCR_DEADLINE_MONOTONIC", "100.0")
+    monkeypatch.setattr("scripts.instinct_pdf_chunker.time.monotonic", lambda: 97.5)
+    from scripts.instinct_pdf_chunker import _remaining_ocr_seconds
+
+    assert _remaining_ocr_seconds(20) == 2.5
+
+    monkeypatch.setattr("scripts.instinct_pdf_chunker.time.monotonic", lambda: 100.1)
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        _remaining_ocr_seconds(20)
+
+
+def test_bounded_command_terminates_stubborn_process_group(tmp_path):
+    pid_file = tmp_path / "pids"
+    child_code = "import os,signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(os.environ['PID_FILE'],'a').write(str(os.getpid())+'\\n'); time.sleep(30)"
+    parent_code = (
+        "import os,signal,subprocess,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "open(os.environ['PID_FILE'],'a').write(str(os.getpid())+'\\n'); "
+        f"subprocess.Popen([sys.executable,'-c',{child_code!r}], env=os.environ.copy()); "
+        "time.sleep(30)"
+    )
+    command = [sys.executable, "-c", parent_code]
+    env = os.environ.copy()
+    env["PID_FILE"] = str(pid_file)
+    with pytest.raises(TimeoutError):
+        _run_bounded_command(command, timeout_s=0.3, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+
+    pids = [int(value) for value in pid_file.read_text().splitlines()]
+    assert len(pids) == 2
+    for pid in pids:
+        stat_path = Path(f"/proc/{pid}/stat")
+        assert not stat_path.exists() or stat_path.read_text().split()[2] == "Z"
 
 
 def test_detect_terms_in_text_uses_aliases():

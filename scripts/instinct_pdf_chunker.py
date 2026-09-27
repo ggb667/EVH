@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import subprocess
+import signal
 import tempfile
 import time
 import sys
@@ -481,6 +482,78 @@ def _size_scaled_timeout(pdf_path: Path, *, base_seconds: int, seconds_per_mb: i
     return min(maximum_seconds, max(base_seconds, int(base_seconds + size_mb * seconds_per_mb)))
 
 
+def _ocr_deadline() -> float | None:
+    raw = os.environ.get("EVH_OCR_DEADLINE_MONOTONIC", "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def _remaining_ocr_seconds(fallback: float) -> float:
+    deadline = _ocr_deadline()
+    if deadline is None:
+        return fallback
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("OCR PDF size-scaled deadline exceeded")
+    return min(fallback, remaining)
+
+
+def _process_group_exists(process_group_id: int) -> bool:
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _terminate_process_group(proc: subprocess.Popen[Any], *, grace_s: float = 2.0) -> None:
+    process_group_id = proc.pid
+    try:
+        os.killpg(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + max(0.0, grace_s)
+    while _process_group_exists(process_group_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if _process_group_exists(process_group_id):
+        try:
+            os.killpg(process_group_id, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=max(1.0, grace_s))
+    except subprocess.TimeoutExpired:  # pragma: no cover - defensive fallback
+        proc.kill()
+        proc.wait(timeout=1)
+
+
+def _run_bounded_command(
+    command: list[str],
+    *,
+    timeout_s: float,
+    check: bool = False,
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[bytes]:
+    proc = subprocess.Popen(command, start_new_session=True, **kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=_remaining_ocr_seconds(timeout_s))
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
+        proc.communicate()
+        raise TimeoutError(f"command timed out after {timeout_s} seconds")
+    completed = subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+    if check and completed.returncode:
+        raise subprocess.CalledProcessError(
+            completed.returncode,
+            command,
+            output=stdout,
+            stderr=stderr,
+        )
+    return completed
+
+
 def _extract_with_pymupdf(pdf_path: Path) -> tuple[list[str], int]:
     if pymupdf is None:
         raise RuntimeError("PyMuPDF is not installed")
@@ -513,17 +586,22 @@ def _run_child_process(kind: str, pdf_input: str, *, timeout_s: int) -> dict[str
     # Queue/SemLock. Lambda has no /dev/shm, while Popen preserves crash and
     # timeout isolation for native PDF/OCR tools without shared memory.
     worker = Path(__file__).with_name("ocr_worker.py")
+    deadline = time.monotonic() + timeout_s
+    child_env = os.environ.copy()
+    child_env["EVH_OCR_DEADLINE_MONOTONIC"] = str(deadline)
     proc = subprocess.Popen(
         [sys.executable, str(worker), kind, pdf_input],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=os.environ.copy(),
+        env=child_env,
+        start_new_session=True,
     )
     try:
-        stdout, stderr = proc.communicate(timeout=timeout_s)
+        stdout, stderr = proc.communicate(timeout=max(0.1, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _child_status_line(f"{kind}_timeout", detail=f"{kind} child exceeded {timeout_s}s deadline")
+        _terminate_process_group(proc)
         proc.communicate()
         raise TimeoutError(f"{kind} child process timed out after {timeout_s} seconds")
     if proc.returncode != 0:
@@ -840,15 +918,16 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_render
         renderer_name = Path(raster_cmd[0]).name
         print(f"ocr_render_start | renderer={renderer_name}", flush=True)
         try:
-            completed = subprocess.run(
+            completed = _run_bounded_command(
                 raster_cmd,
-                check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                timeout=renderer_timeout_s,
+                timeout_s=renderer_timeout_s,
             )
         except subprocess.TimeoutExpired:
             raise TimeoutError(f"{renderer_name} timed out after {renderer_timeout_s} seconds")
+        except TimeoutError:
+            raise
         except Exception as exc:  # pragma: no cover - child process wrapper
             raise RuntimeError(f"{renderer_name} launcher failed: {exc}") from exc
 
@@ -927,12 +1006,12 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_render
                 pages: list[str] = []
                 page_timeout_s = max(15, min(timeout_s, 5 + (timeout_s // max(len(page_files), 1))))
                 for image_path in page_files:
-                    proc = subprocess.run(
+                    proc = _run_bounded_command(
                         [tesseract_command, str(image_path), "stdout", "--psm", "6"],
                         check=True,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL,
-                        timeout=page_timeout_s,
+                        timeout_s=page_timeout_s,
                     )
                     pages.append((proc.stdout.decode("utf-8", errors="replace") or "").strip())
 
@@ -966,7 +1045,10 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_render
 
 
 def safe_ocr_pdf_text_pages(pdf_bytes: bytes, *, timeout_s: int = 240) -> tuple[list[str], int]:
-    pages, page_count, _method = ocr_pdf_text_pages(pdf_bytes)
+    with tempfile.NamedTemporaryFile(prefix="instinct-safe-ocr-", suffix=".pdf") as temp_pdf:
+        temp_pdf.write(pdf_bytes)
+        temp_pdf.flush()
+        pages, page_count, _method = ocr_pdf_text_pages(Path(temp_pdf.name), timeout_s=timeout_s)
     return pages, page_count
 
 
@@ -986,7 +1068,13 @@ def _extract_pdf_text_pages_impl(pdf_path: str) -> tuple[list[str], int]:
     return pages, page_count
 
 
-def extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 120) -> tuple[list[str], int]:
+def extract_pdf_text_pages(pdf_path: Path | bytes, *, timeout_s: int = 120) -> tuple[list[str], int]:
+    if isinstance(pdf_path, bytes):
+        reader = PdfReader(BytesIO(pdf_path))
+        pages = [(page.extract_text(extraction_mode="layout") or page.extract_text() or "").strip() for page in reader.pages]
+        if pages and not any(pages):
+            raise NoTextLayerError(len(pages))
+        return pages, len(pages)
     if _use_in_process_pdf_extractors():
         print(
             json.dumps(

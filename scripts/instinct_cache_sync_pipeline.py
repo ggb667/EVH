@@ -190,6 +190,7 @@ def sync_documents(
     client_start: int = 0,
     max_seconds: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    run_id: str | None = None,
 ) -> SyncSummary:
     import requests
 
@@ -462,6 +463,11 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                     filename=str(chart.get("filename") or ""),
                     content_type=str(chart.get("contentType") or ""),
                     chart_hash=chart_hash,
+                    terminal=True,
+                    run_id=run_id or "unscoped",
+                    stage="ocr" if isinstance(exc, TimeoutError) else "document_ingestion",
+                    failure_type="timeout" if isinstance(exc, TimeoutError) else type(exc).__name__,
+                    continuation="next_document",
                     error=str(exc),
                 )
             else:
