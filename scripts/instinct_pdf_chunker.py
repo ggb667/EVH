@@ -34,6 +34,13 @@ from xml.etree import ElementTree
 from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path
+
+# Lambda packages place native document tools under /var/task/bin and their
+# shared objects under /var/task/lib.  Make the packaged runtime explicit.
+if Path("/var/task/bin").is_dir():
+    os.environ["PATH"] = "/var/task/bin:" + os.environ.get("PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = "/var/task/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["TESSDATA_PREFIX"] = "/var/task/share/tessdata"
 from pprint import pformat
 from multiprocessing import get_context
 from time import perf_counter

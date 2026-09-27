@@ -29,6 +29,7 @@ PY
 echo "[package] build lambda zip"
 ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -88,13 +89,25 @@ for arc, src in [
 # OCR is a production dependency, not an optional host utility.  Package the
 # Lambda-compatible command paths when the build image provides them and fail
 # closed otherwise; never deploy a ZIP that can only handle text-layer PDFs.
-for tool in ("tesseract", "pdftoppm", "pdftocairo", "gs"):
+for tool in ("tesseract", "pdftoppm", "pdftocairo", "gs", "pdftotext"):
     tool_path = shutil.which(tool)
     if not tool_path:
         raise SystemExit(f"package validation failed: missing OCR executable {tool}")
     dest = staging / "bin" / tool
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(tool_path, dest)
+    # Carry the ELF dependencies into the same Lambda payload so the runtime
+    # does not depend on the build host's loader/library set.
+    ldd = subprocess.check_output(["ldd", tool_path], text=True, stderr=subprocess.STDOUT)
+    for line in ldd.splitlines():
+        match = re.search(r"=>\s*(/[^ ]+)|^\s*(/lib[^ ]+)", line)
+        dep = next((value for value in match.groups() if value), None) if match else None
+        if dep and os.path.isfile(dep):
+            lib_dest = staging / "lib" / Path(dep).name
+            lib_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dep, lib_dest)
+if Path("/usr/share/tesseract-ocr/5/tessdata").is_dir():
+    shutil.copytree("/usr/share/tesseract-ocr/5/tessdata", staging / "share/tessdata", dirs_exist_ok=True)
 
 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
     for path in sorted(staging.rglob("*")):
@@ -114,6 +127,7 @@ required = {
     "bin/pdftoppm",
     "bin/pdftocairo",
     "bin/gs",
+    "bin/pdftotext",
 }
 with zipfile.ZipFile(zip_path) as z:
     names = set(z.namelist())
