@@ -69,6 +69,27 @@ def _parse_patient_limit(event: dict[str, Any]) -> int | None:
     return 1000
 
 
+def _parse_target_mode(event: dict[str, Any]) -> tuple[str, int | None, int]:
+    """Validate the mutually exclusive patient/client/full-run contract."""
+    process_all = bool(event.get("process_all"))
+    patient_value = event.get("patient_limit")
+    client_value = event.get("client_limit")
+    selected = [name for name, value in (("patient", patient_value), ("client", client_value))
+                if value not in (None, "", 0, "0")]
+    if process_all and selected:
+        raise ValueError("process_all cannot be combined with patient_limit or client_limit")
+    if len(selected) > 1:
+        raise ValueError("patient_limit and client_limit are mutually exclusive")
+    if process_all:
+        return "full", None, 500
+    if not selected:
+        return "patient", _parse_patient_limit(event), max(1, int(event.get("patient_batch", 500) or 500))
+    mode = selected[0]
+    limit = max(1, int(event["client_limit"] if mode == "client" else event["patient_limit"]))
+    batch_key = "client_batch" if mode == "client" else "patient_batch"
+    return mode, limit, max(1, int(event.get(batch_key, 500) or 500))
+
+
 def _parse_document_limit(event: dict[str, Any]) -> int | None:
     for key in ("document_limit", "documentLimit", "docs", "doc_limit"):
         value = event.get(key)
@@ -164,12 +185,15 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip()
     client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
     client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
-    process_all = bool(event.get("process_all"))
-    patient_limit = None if process_all else _parse_patient_limit(event)
+    mode, target_limit, batch_size = _parse_target_mode(event)
+    process_all = mode == "full"
+    patient_limit = target_limit if mode == "patient" else None
+    client_limit = target_limit if mode == "client" else None
     document_limit = None if process_all else _parse_document_limit(event)
     patient_start = max(0, int(event.get("start_patient", event.get("next_patient", event.get("patient_start", 0))) or 0))
+    client_start = max(0, int(event.get("start_client", event.get("next_client", 0)) or 0))
     has_cursor = any(key in event for key in ("start_patient", "next_patient", "patient_start"))
-    batch_size = max(1, int(event.get("patient_batch", patient_limit or 500) or 500))
+    batch_size = max(1, batch_size)
     if patient_limit is not None:
         remaining_patients = max(patient_limit - patient_start, 0)
         if remaining_patients:
@@ -185,9 +209,12 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         with conn.cursor() as cur:
             cur.execute("""CREATE TABLE IF NOT EXISTS public.rag_import_run (
                 run_id text PRIMARY KEY, started_at timestamptz NOT NULL, next_patient integer NOT NULL DEFAULT 0,
+                next_client integer NOT NULL DEFAULT 0, clients_scanned integer NOT NULL DEFAULT 0,
                 patients_scanned integer NOT NULL DEFAULT 0, documents_found integer NOT NULL DEFAULT 0,
                 documents_ingested integer NOT NULL DEFAULT 0, documents_failed integer NOT NULL DEFAULT 0,
                 status text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())""")
+            cur.execute("ALTER TABLE public.rag_import_run ADD COLUMN IF NOT EXISTS next_client integer NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE public.rag_import_run ADD COLUMN IF NOT EXISTS clients_scanned integer NOT NULL DEFAULT 0")
             recover_requested = bool(event.get("recover") or event.get("resume"))
             if not run_id and recover_requested and not has_cursor:
                 cur.execute("""SELECT run_id, next_patient FROM public.rag_import_run
@@ -213,7 +240,10 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             if run_id and not has_cursor:
                 cur.execute("SELECT next_patient, status FROM public.rag_import_run WHERE run_id=%s", (run_id,))
                 existing_run = cur.fetchone()
-                if existing_run and str(existing_run.get("status") or "") == "FAILED":
+                # The advisory lock above proves no active attempt owns this
+                # run. Resume the persisted cursor for stale RUNNING rows as
+                # well as FAILED rows; keep one simple state row per run.
+                if existing_run and str(existing_run.get("status") or "") in {"FAILED", "RUNNING"}:
                     recovered_start = max(patient_start, int(existing_run.get("next_patient") or 0))
                     if recovered_start > patient_start:
                         patient_start = recovered_start
@@ -221,8 +251,8 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                             remaining_patients = max(patient_limit - patient_start, 0)
                             batch_size = min(max(1, batch_size), remaining_patients) if remaining_patients else 1
                         print(json.dumps({"event": "RUN_CURSOR_RESUMED", "run_id": run_id, "next_patient": patient_start}, sort_keys=True), flush=True)
-            cur.execute("""INSERT INTO public.rag_import_run (run_id, started_at, next_patient, status)
-                VALUES (%s, now(), %s, 'FAILED') ON CONFLICT (run_id) DO UPDATE SET status='FAILED', updated_at=now()""", (run_id, patient_start))
+            cur.execute("""INSERT INTO public.rag_import_run (run_id, started_at, next_patient, next_client, status)
+                VALUES (%s, now(), %s, %s, 'RUNNING') ON CONFLICT (run_id) DO UPDATE SET status='RUNNING', updated_at=now()""", (run_id, patient_start, int(event.get("start_client", event.get("next_client", 0)) or 0)))
         conn.commit()
         clients_summary = sync_clients(client, conn, log=print)
         patients_summary = sync_patients(client, conn, log=print)
@@ -235,7 +265,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         document_max_seconds = requested_max_seconds if remaining_seconds is None else min(requested_max_seconds, remaining_seconds)
 
         def checkpoint(progress: dict[str, Any]) -> None:
-            checkpoint_status = "COMPLETE" if str(progress.get("status") or "").upper() == "COMPLETE" else "FAILED"
+            checkpoint_status = "RUNNING"
             checkpoint_progress = {**progress, "status": checkpoint_status}
             with conn.cursor() as progress_cur:
                 progress_cur.execute(
@@ -258,7 +288,9 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             conn,
             log=print,
             document_limit=document_limit,
-            patient_limit=batch_size,
+            patient_limit=batch_size if mode == "patient" else None,
+            client_limit=batch_size if mode == "client" else None,
+            client_start=client_start,
             patient_start=patient_start,
             max_seconds=document_max_seconds,
             progress_callback=checkpoint,
@@ -270,11 +302,16 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     # stops with forward progress are continuation candidates, not completion.
     time_budget_reached = documents_summary.stop_reason == "time_budget"
     complete = int(processed_patients) == 0 or (int(processed_patients) < batch_size and not time_budget_reached) or limit_reached
+    # Full process_all exhaustion is COMPLETE; other successful bounded runs
+    # are FINISHED. Keep the durable status and emitted terminal event aligned.
+    # Update this documentation if changed.
+    full_run_complete = bool(process_all and complete)
+    terminal_status = "COMPLETE" if full_run_complete else ("FINISHED" if complete else "RUNNING")
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
         with state_conn.cursor() as cur:
             cur.execute("""UPDATE public.rag_import_run
                 SET next_patient=GREATEST(next_patient, %s),
-                    patients_scanned=GREATEST(patients_scanned, %s),
+                    patients_scanned=patients_scanned + %s,
                     documents_found=documents_found + %s,
                     documents_ingested=documents_ingested + %s,
                     documents_failed=documents_failed + %s,
@@ -283,11 +320,11 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                 WHERE run_id=%s
                 RETURNING patients_scanned, documents_found, documents_ingested, documents_failed""", (
                 next_patient,
-                next_patient,
+                next_patient - patient_start,
                 documents_summary.documents_discovered,
                 documents_summary.documents_ingested,
                 documents_summary.documents_failed,
-                'COMPLETE' if complete else 'FAILED',
+                terminal_status,
                 run_id,
             ))
             cumulative = cur.fetchone() or {}
@@ -329,7 +366,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         work_unit_mean_seconds=round(work_unit_mean_seconds, 3),
     )
     print(json.dumps({
-        "event": "COMPLETE" if complete else "CONTINUE",
+        "event": terminal_status if complete else "CONTINUE",
         "message": "linear ingestion completed normally",
         "stop_reason": "exhausted" if complete else "continuation_scheduled",
         "patient_limit": patient_limit,
@@ -368,6 +405,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             Payload=json.dumps({
                 "start_patient": next_patient,
                 "patient_batch": batch_size,
+                **({"client_limit": client_limit, "client_batch": batch_size} if mode == "client" else {}),
                 "run_id": run_id,
                 **({"process_all": True} if process_all else {}),
                 **({"patient_limit": patient_limit} if patient_limit is not None else {}),

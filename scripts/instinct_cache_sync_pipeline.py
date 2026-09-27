@@ -186,6 +186,8 @@ def sync_documents(
     candidate_scan_limit: int | None = None,
     stop_after_first_ingestion: bool = False,
     patient_start: int = 0,
+    client_limit: int | None = None,
+    client_start: int = 0,
     max_seconds: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> SyncSummary:
@@ -267,29 +269,40 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     started = time.perf_counter()
     os.environ["TOKEN"] = os.environ.get("TOKEN", "").strip() or client._auth()
     with conn.cursor() as cur:
-        cur.execute("select patient_id from public.instinct_patient_lookup_cache order by patient_id")
-        patient_ids = [str(row["patient_id"]) for row in cur.fetchall()]
+        if client_limit is not None:
+            cur.execute("""select patient_id from public.instinct_patient_lookup_cache
+                where account_id is not null order by account_id, patient_id""")
+            client_rows = cur.fetchall()
+            client_ids: list[str] = []
+            for row in client_rows:
+                account_id = str(row.get("account_id") or "")
+                if account_id and account_id not in client_ids:
+                    client_ids.append(account_id)
+            selected_clients = set(client_ids[client_start:client_start + client_limit])
+            patient_ids = [str(row["patient_id"]) for row in client_rows
+                           if str(row.get("account_id") or "") in selected_clients]
+        else:
+            cur.execute("select patient_id from public.instinct_patient_lookup_cache order by patient_id")
+            patient_ids = [str(row["patient_id"]) for row in cur.fetchall()]
     patient_start = max(0, int(patient_start or 0))
-    if patient_limit is not None:
+    if client_limit is None and patient_limit is not None:
         patient_ids = patient_ids[patient_start:patient_start + patient_limit]
     else:
         patient_ids = patient_ids[patient_start:]
     emit(log, "documents_patient_list_ready", patients=len(patient_ids))
 
-    existing_by_doc_id: dict[str, tuple[str | None, str | None]] = {}
+    existing_by_doc_id: set[str] = set()
     existing_query_started = time.perf_counter()
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT document_pdf_id, status, metadata
+            SELECT document_pdf_id
             FROM public.rag_source_document
             WHERE ingestion_complete = true
             """
         )
         for row in cur.fetchall():
-            metadata = row.get("metadata") if isinstance(row, dict) else {}
-            chart_hash = metadata.get("chart_hash") if isinstance(metadata, dict) else None
-            existing_by_doc_id[str(row["document_pdf_id"])] = (str(row.get("status") or ""), str(chart_hash) if chart_hash else None)
+            existing_by_doc_id.add(str(row["document_pdf_id"]))
     existing_query_seconds = time.perf_counter() - existing_query_started
     emit(log, "db_query_complete", query="existing_source_documents", rows=len(existing_by_doc_id), seconds=round(existing_query_seconds, 4))
 
@@ -350,11 +363,11 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             doc_id = normalize_text(chart.get("id"))
             if not doc_id.isdigit():
                 continue
-            chart_hash = sha256(json.dumps(chart, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-            existing_status, existing_hash = existing_by_doc_id.get(doc_id, (None, None))
-            if existing_status == "complete" and existing_hash == chart_hash:
+            # Completed documents are skipped before PDF retrieval.
+            if doc_id in existing_by_doc_id:
                 skipped_count += 1
                 continue
+            chart_hash = sha256(json.dumps(chart, sort_keys=True, default=str).encode("utf-8")).hexdigest()
             if document_limit is not None and len(rows) >= document_limit:
                 break
             upsert_candidate_count += 1
