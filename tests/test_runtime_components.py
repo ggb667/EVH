@@ -1,8 +1,10 @@
 """Explicit runtime dependency coverage for every deployed extraction path."""
+import json
 import re
 import shutil
 import stat
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -26,6 +28,7 @@ def test_package_contains_python_and_ocr_runtime_contract(tmp_path):
         names = set(package.namelist())
         required_python = {
             "scripts/instinct_pdf_chunker.py",
+            "scripts/ocr_worker.py",
             "scripts/rag_import_delta_lambda.py",
             "pymupdf/__init__.py",
         }
@@ -68,3 +71,20 @@ def test_package_contains_python_and_ocr_runtime_contract(tmp_path):
             assert not versions or max(versions) <= (2, 35), (
                 f"{name} requires GLIBC_{'.'.join(map(str, max(versions)))}"
             )
+
+
+def test_ocr_worker_bootstraps_package_root_from_unrelated_cwd(tmp_path):
+    missing_pdf = tmp_path / "missing.pdf"
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/ocr_worker.py"), "extract", str(missing_pdf)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        env={"PATH": str(Path(sys.executable).parent)},
+    )
+    assert proc.returncode == 1
+    assert "ModuleNotFoundError" not in proc.stderr
+    status, detail = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert status == "err"
+    assert detail["error_type"] == "FileNotFoundError"
