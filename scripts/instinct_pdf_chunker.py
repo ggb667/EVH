@@ -41,6 +41,17 @@ if Path("/var/task/bin").is_dir():
     os.environ["PATH"] = "/var/task/bin:" + os.environ.get("PATH", "")
     os.environ["LD_LIBRARY_PATH"] = "/var/task/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["TESSDATA_PREFIX"] = "/var/task/share/tessdata"
+
+def _runtime_tool(name: str) -> str | None:
+    """Resolve packaged Lambda tools even when PATH is restricted."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for root in (Path("/var/task/bin"), Path(__file__).resolve().parents[1] / "bin"):
+        candidate = root / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 from pprint import pformat
 from multiprocessing import get_context
 from time import perf_counter
@@ -747,7 +758,7 @@ def _extract_pdf_text_pages_worker(pdf_path: str, queue) -> None:
 
 
 def safe_extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 45) -> tuple[list[str], int]:
-    fallback_command = shutil.which("pdftotext")
+    fallback_command = _runtime_tool("pdftotext")
     pdftotext_result: tuple[list[str], int, int] | None = None
     if fallback_command:
         out_path = pdf_path.parent / f"{pdf_path.stem}.pdftotext.txt"
@@ -788,7 +799,7 @@ def safe_extract_pdf_text_pages(pdf_path: Path, *, timeout_s: int = 45) -> tuple
 
 
 def _pdftotext_extract_worker(pdf_path: str, timeout_s: int, queue) -> None:
-    fallback_command = shutil.which("pdftotext")
+    fallback_command = _runtime_tool("pdftotext")
     if not fallback_command:
         queue.put(("err", {"error_type": "RuntimeError", "error": "pdftotext unavailable"}))
         return
@@ -819,7 +830,7 @@ def _pdftotext_extract_worker(pdf_path: str, timeout_s: int, queue) -> None:
 
 
 def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_renderer: str | None = None) -> tuple[list[str], int, str]:
-    tesseract_command = shutil.which("tesseract")
+    tesseract_command = _runtime_tool("tesseract")
     if not tesseract_command:
         raise NoTextLayerError(page_count=0)
 
@@ -865,7 +876,7 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_render
         render_pdf_path = temp_path / pdf_path_obj.name
         shutil.copy2(pdf_path_obj, render_pdf_path)
         renderers: list[list[str]] = []
-        pdftoppm_command = shutil.which("pdftoppm")
+        pdftoppm_command = _runtime_tool("pdftoppm")
         if pdftoppm_command:
             renderers.append(
                 [
@@ -877,7 +888,7 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_render
                     str(temp_path / "ppm"),
                 ]
             )
-        pdftocairo_command = shutil.which("pdftocairo")
+        pdftocairo_command = _runtime_tool("pdftocairo")
         if pdftocairo_command:
             renderers.append(
                 [
@@ -889,7 +900,7 @@ def _ocr_pdf_text_pages_impl(pdf_path: str, *, timeout_s: int = 240, only_render
                     str(temp_path / "cairo"),
                 ]
             )
-        gs_command = shutil.which("gs") or shutil.which("ghostscript")
+        gs_command = _runtime_tool("gs") or _runtime_tool("ghostscript")
         if gs_command:
             renderers.append(
                 [
