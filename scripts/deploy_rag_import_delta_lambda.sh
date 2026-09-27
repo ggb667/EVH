@@ -103,7 +103,11 @@ for tool in ("tesseract", "pdftoppm", "pdftocairo", "gs", "pdftotext"):
     for line in ldd.splitlines():
         match = re.search(r"=>\s*(/[^ ]+)|^\s*(/lib[^ ]+)", line)
         dep = next((value for value in match.groups() if value), None) if match else None
-        if dep and os.path.isfile(dep):
+        # Never bundle the host glibc/loader into Lambda.  Its Amazon Linux
+        # runtime supplies the compatible libc; shipping a newer host libc
+        # causes GLIBC_PRIVATE symbol failures before tools can start.
+        forbidden = {"libc.so.6", "ld-linux-x86-64.so.2", "libpthread.so.0", "libm.so.6", "libdl.so.2", "librt.so.1"}
+        if dep and Path(dep).name not in forbidden and os.path.isfile(dep):
             lib_dest = staging / "lib" / Path(dep).name
             lib_dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(dep, lib_dest)
