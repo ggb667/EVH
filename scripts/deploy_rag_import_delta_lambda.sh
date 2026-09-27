@@ -85,6 +85,17 @@ for arc, src in [
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
 
+# OCR is a production dependency, not an optional host utility.  Package the
+# Lambda-compatible command paths when the build image provides them and fail
+# closed otherwise; never deploy a ZIP that can only handle text-layer PDFs.
+for tool in ("tesseract", "pdftoppm", "pdftocairo", "gs"):
+    tool_path = shutil.which(tool)
+    if not tool_path:
+        raise SystemExit(f"package validation failed: missing OCR executable {tool}")
+    dest = staging / "bin" / tool
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(tool_path, dest)
+
 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
     for path in sorted(staging.rglob("*")):
         if path.is_file():
@@ -99,6 +110,10 @@ required = {
     "pymupdf/__init__.py",
     "scripts/rd_validation_harness.py",
     "rd-first.pdf",
+    "bin/tesseract",
+    "bin/pdftoppm",
+    "bin/pdftocairo",
+    "bin/gs",
 }
 with zipfile.ZipFile(zip_path) as z:
     names = set(z.namelist())
