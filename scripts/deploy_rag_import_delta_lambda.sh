@@ -96,6 +96,7 @@ for tool in ("tesseract", "pdftoppm", "pdftocairo", "gs", "pdftotext"):
     dest = staging / "bin" / tool
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(tool_path, dest)
+    dest.chmod(0o755)
     # Carry the ELF dependencies into the same Lambda payload so the runtime
     # does not depend on the build host's loader/library set.
     ldd = subprocess.check_output(["ldd", tool_path], text=True, stderr=subprocess.STDOUT)
