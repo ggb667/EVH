@@ -58,7 +58,6 @@ def _runtime_tool(name: str) -> str | None:
             return str(candidate)
     return None
 from pprint import pformat
-from multiprocessing import get_context
 from time import perf_counter
 from collections.abc import Mapping, Sequence
 from typing import Any, Iterable
@@ -510,44 +509,37 @@ def _use_in_process_pdf_extractors() -> bool:
 
 
 def _run_child_process(kind: str, pdf_input: str, *, timeout_s: int) -> dict[str, Any]:
-    ctx = get_context("fork")
-    queue = ctx.Queue()
-
-    def _child() -> None:
-        try:
-            if kind == "extract":
-                pages, page_count = _extract_pdf_text_pages_impl(pdf_input)
-                queue.put(("ok", {"pages": pages, "page_count": page_count}))
-                return
-            if kind == "ocr":
-                pages, page_count, tool = _ocr_pdf_text_pages_impl(pdf_input)
-                queue.put(("ok", {"pages": pages, "page_count": page_count, "tool": tool}))
-                return
-            raise RuntimeError(f"unknown child kind: {kind}")
-        except NoTextLayerError as exc:
-            queue.put(("no_text", {"page_count": exc.page_count}))
-        except Exception as exc:  # pragma: no cover - child process
-            queue.put(("err", {"error_type": type(exc).__name__, "error": str(exc)}))
-
-    proc = ctx.Process(target=_child, daemon=True)
-    proc.start()
-    proc.join(timeout_s)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(5)
+    # Use an ordinary subprocess and stdout pipe rather than multiprocessing
+    # Queue/SemLock. Lambda has no /dev/shm, while Popen preserves crash and
+    # timeout isolation for native PDF/OCR tools without shared memory.
+    worker = Path(__file__).with_name("ocr_worker.py")
+    proc = subprocess.Popen(
+        [sys.executable, str(worker), kind, pdf_input],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ.copy(),
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
         raise TimeoutError(f"{kind} child process timed out after {timeout_s} seconds")
-    if not queue.empty():
-        status, data = queue.get_nowait()
-        if status == "ok":
-            return data
-        if status == "no_text":
-            _child_status_line("extract_no_text", detail=f"page_count={data.get('page_count', 0)}")
-            raise NoTextLayerError(int(data.get("page_count") or 0))
-        _child_status_line("extract_error", detail=f"{data.get('error_type', 'RuntimeError')}: {data.get('error', 'child process failed')}")
-        raise RuntimeError(f"{data.get('error_type', 'RuntimeError')}: {data.get('error', 'child process failed')}")
-    if proc.exitcode is not None and proc.exitcode < 0:
-        raise RuntimeError(f"{kind} child terminated by signal {-proc.exitcode}")
-    raise RuntimeError(f"{kind} child produced no result")
+    if proc.returncode != 0:
+        detail = (stderr or stdout or f"exit code {proc.returncode}").strip()
+        _child_status_line("extract_error", detail=detail)
+        raise RuntimeError(detail)
+    try:
+        status, data = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError) as exc:
+        raise RuntimeError(f"{kind} child produced invalid result: {stdout[-500:]}") from exc
+    if status == "ok":
+        return data
+    if status == "no_text":
+        _child_status_line("extract_no_text", detail=f"page_count={data.get('page_count', 0)}")
+        raise NoTextLayerError(int(data.get("page_count") or 0))
+    raise RuntimeError(f"{data.get('error_type', 'RuntimeError')}: {data.get('error', 'child process failed')}")
 
 
 def _child_status_line(stage: str, *, fallback_used: bool | None = None, child_signal: int | None = None, ocr_path: str | None = None, detail: str | None = None) -> None:
