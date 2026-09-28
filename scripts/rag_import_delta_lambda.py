@@ -338,7 +338,21 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     # Update this documentation if changed.
     full_run_complete = bool(process_all and complete)
     terminal_status = "COMPLETE" if full_run_complete else ("FINISHED" if complete else "RUNNING")
+    print(json.dumps({
+        "event": "sync_documents_returned",
+        "run_id": run_id,
+        "next_patient": next_patient,
+        "processed_patients": processed_patients,
+        "stop_reason": documents_summary.stop_reason,
+        "terminal_status": terminal_status,
+    }, sort_keys=True), flush=True)
+    print(json.dumps({
+        "event": "terminal_state_update_start",
+        "run_id": run_id,
+        "terminal_status": terminal_status,
+    }, sort_keys=True), flush=True)
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
+        print(json.dumps({"event": "terminal_state_connection_open", "run_id": run_id}, sort_keys=True), flush=True)
         with state_conn.cursor() as cur:
             cur.execute("""UPDATE public.rag_import_run
                 SET next_patient=GREATEST(next_patient, %s),
@@ -359,7 +373,14 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                 run_id,
             ))
             cumulative = cur.fetchone() or {}
+        print(json.dumps({
+            "event": "terminal_state_update_executed",
+            "run_id": run_id,
+            "terminal_status": terminal_status,
+            "cumulative": cumulative,
+        }, sort_keys=True, default=str), flush=True)
         state_conn.commit()
+    print(json.dumps({"event": "terminal_state_update_committed", "run_id": run_id}, sort_keys=True), flush=True)
     cumulative_patients_scanned = int(cumulative.get("patients_scanned") or 0)
     cumulative_documents_discovered = int(cumulative.get("documents_found") or 0)
     cumulative_documents_ingested = int(cumulative.get("documents_ingested") or 0)
@@ -454,6 +475,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         "summary": asdict(payload),
         "note": "step 1.1-1.3 cache sync lambda rewrite",
     }
+    print(json.dumps({"event": "lambda_response_return", "run_id": run_id}, sort_keys=True), flush=True)
     return {
         "statusCode": 200,
         "headers": {"content-type": "application/json; charset=utf-8"},
@@ -521,8 +543,11 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
     finally:
         if lock_conn is not None:
             try:
+                print(json.dumps({"event": "lease_release_start", "run_id": event.get("run_id")}, sort_keys=True), flush=True)
                 with lock_conn.cursor() as cur:
                     cur.execute("DELETE FROM public.rag_import_lease WHERE lease_key='import' AND token=%s", (token,))
                 lock_conn.commit()
+                print(json.dumps({"event": "lease_release_committed", "run_id": event.get("run_id")}, sort_keys=True), flush=True)
             finally:
                 lock_conn.close()
+                print(json.dumps({"event": "lease_connection_closed", "run_id": event.get("run_id")}, sort_keys=True), flush=True)
