@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import tempfile
 import time
@@ -19,7 +20,112 @@ from scripts.instinct_pdf_chunker import (
     _ocr_pdf_text_pages_impl,
     _pdftotext_extract_worker,
     _record_unexpected_document_format,
+    ocr_pdf_text_pages,
+    split_text,
 )
+
+
+_OCR_PROCESS_MARKERS = (
+    "scripts/ocr_worker.py",
+    "/bin/tesseract",
+    "/bin/pdftoppm",
+    "/bin/pdftocairo",
+    "/bin/gs",
+)
+
+
+def _ocr_process_snapshot() -> dict[int, str]:
+    snapshot: dict[int, str] = {}
+    proc_root = Path("/proc")
+    if not proc_root.exists():
+        return snapshot
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace")
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        if any(marker in command for marker in _OCR_PROCESS_MARKERS):
+            snapshot[int(entry.name)] = command
+    return snapshot
+
+
+def _write_image_only_pdf(path: Path) -> None:
+    text_layer = path.with_name("fixture-source-text-layer.pdf")
+    source = pymupdf.open()
+    page = source.new_page(width=612, height=792)
+    page.insert_text((72, 160), "ISOLATED OCR LIFECYCLE VALIDATION 12345", fontsize=28)
+    source.save(str(text_layer))
+    source.close()
+
+    source = pymupdf.open(str(text_layer))
+    output = pymupdf.open()
+    for page in source:
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0), alpha=False)
+        target = output.new_page(width=pix.width, height=pix.height)
+        target.insert_image(target.rect, stream=pix.tobytes("png"))
+    output.save(str(path))
+    output.close()
+    source.close()
+
+
+def run_ocr_lifecycle(event: dict) -> dict:
+    """Exercise the production OCR subprocess boundary without DB mutation."""
+    if event.get("rd_validation_harness") != "ocr-lifecycle-v1":
+        raise PermissionError("explicit rd_validation_harness=ocr-lifecycle-v1 required")
+    started = time.perf_counter()
+    before = _ocr_process_snapshot()
+    result: dict = {
+        "harness": "ocr-lifecycle-v1",
+        "fixture": "generated-image-only-pdf",
+        "database_status": "isolated_no_db_mutation",
+        "duplicate_count": 0,
+        "ocr_entered": True,
+    }
+    with tempfile.TemporaryDirectory(prefix="rd-ocr-lifecycle-") as temp:
+        image_pdf = Path(temp) / "image-only.pdf"
+        _write_image_only_pdf(image_pdf)
+        try:
+            pages, page_count, method = ocr_pdf_text_pages(image_pdf, timeout_s=120)
+            chunks = [chunk for page in pages for chunk in split_text(page, chunk_size=1000, chunk_overlap=100)]
+            result.update(
+                status="ok",
+                ocr_exit_status="success",
+                ocr_method=method,
+                page_count=page_count,
+                text_chars=sum(map(len, pages)),
+                chunk_count=len(chunks),
+            )
+        except TimeoutError as exc:
+            result.update(
+                status="ok",
+                ocr_exit_status="timeout",
+                error_type=type(exc).__name__,
+                error=str(exc),
+                page_count=0,
+                text_chars=0,
+                chunk_count=0,
+            )
+        except Exception as exc:
+            result.update(
+                status="failed",
+                ocr_exit_status="failure",
+                error_type=type(exc).__name__,
+                error=str(exc),
+                page_count=0,
+                text_chars=0,
+                chunk_count=0,
+            )
+    time.sleep(0.05)
+    after = _ocr_process_snapshot()
+    survivors = {pid: command for pid, command in after.items() if pid not in before}
+    result["surviving_child_processes"] = survivors
+    result["no_child_survived"] = not survivors
+    result["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+    if survivors:
+        result["status"] = "failed"
+    return result
 
 
 def _extract_with_pdftotext(pdf_path: Path, *, timeout_s: int = 120) -> tuple[list[str], int]:
@@ -52,12 +158,7 @@ def run(event: dict) -> dict:
         page.insert_text((72, 120), "Real eight path extraction harness text.", fontsize=24)
         src.save(str(fixture))
         src.close()
-        src = pymupdf.open(str(fixture)); out = pymupdf.open()
-        for page in src:
-            pix = page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0), alpha=False)
-            target = out.new_page(width=pix.width, height=pix.height)
-            target.insert_image(target.rect, stream=pix.tobytes("png"))
-        out.save(str(image_pdf)); out.close(); src.close()
+        _write_image_only_pdf(image_pdf)
         doc_source = PatientPdfSource(pdf_id=0, patient_id=0, patient_name="harness", pdf_path=docx)
         html_source = PatientPdfSource(pdf_id=0, patient_id=0, patient_name="harness", pdf_path=html)
 

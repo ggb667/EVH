@@ -463,10 +463,12 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
 
 def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict[str, Any]:
     """Run at most one importer invocation while preserving authenticated self-handoff."""
-    if event.get("rd_validation_harness") == "8-path-v1":
-        from scripts.rd_validation_harness import run
+    validation_harness = event.get("rd_validation_harness")
+    if validation_harness in {"8-path-v1", "ocr-lifecycle-v1"}:
+        from scripts.rd_validation_harness import run, run_ocr_lifecycle
 
-        return {"statusCode": 200, "body": json.dumps(run(event), sort_keys=True)}
+        validation_result = run(event) if validation_harness == "8-path-v1" else run_ocr_lifecycle(event)
+        return {"statusCode": 200, "body": json.dumps(validation_result, sort_keys=True)}
     lock_conn = None
     token = str(event.get("continuation_token") or "").strip()
     if not token:
