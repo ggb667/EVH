@@ -191,8 +191,15 @@ def sync_documents(
     max_seconds: float | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     run_id: str | None = None,
+    target_patient_id: str | None = None,
+    target_document_pdf_id: str | None = None,
 ) -> SyncSummary:
     import requests
+
+    target_patient_id = str(target_patient_id or "").strip() or None
+    target_document_pdf_id = str(target_document_pdf_id or "").strip() or None
+    if bool(target_patient_id) != bool(target_document_pdf_id):
+        raise ValueError("target_patient_id and target_document_pdf_id must be supplied together")
 
     def fetch_medical_history_visits(patient_id: str, *, timeout: int = 30, retries: int = 3) -> dict[str, Any]:
         token = os.environ.get("TOKEN", "").strip()
@@ -270,7 +277,9 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     started = time.perf_counter()
     os.environ["TOKEN"] = os.environ.get("TOKEN", "").strip() or client._auth()
     with conn.cursor() as cur:
-        if client_limit is not None:
+        if target_patient_id is not None:
+            patient_ids = [target_patient_id]
+        elif client_limit is not None:
             cur.execute("""select patient_id from public.instinct_patient_lookup_cache
                 where account_id is not null order by account_id, patient_id""")
             client_rows = cur.fetchall()
@@ -286,7 +295,15 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             cur.execute("select patient_id from public.instinct_patient_lookup_cache order by patient_id")
             patient_ids = [str(row["patient_id"]) for row in cur.fetchall()]
     patient_start = max(0, int(patient_start or 0))
-    if client_limit is None and patient_limit is not None:
+    if target_patient_id is not None:
+        emit(
+            log,
+            "documents_exact_target_selected",
+            patient_id=target_patient_id,
+            document_pdf_id=target_document_pdf_id,
+            bypass_completed_document_skip=False,
+        )
+    elif client_limit is None and patient_limit is not None:
         patient_ids = patient_ids[patient_start:patient_start + patient_limit]
     else:
         patient_ids = patient_ids[patient_start:]
@@ -306,6 +323,16 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             existing_by_doc_id.add(str(row["document_pdf_id"]))
     existing_query_seconds = time.perf_counter() - existing_query_started
     emit(log, "db_query_complete", query="existing_source_documents", rows=len(existing_by_doc_id), seconds=round(existing_query_seconds, 4))
+    if target_document_pdf_id is not None:
+        target_is_complete = target_document_pdf_id in existing_by_doc_id
+        emit(
+            log,
+            "document_exact_target_eligibility",
+            patient_id=target_patient_id,
+            document_pdf_id=target_document_pdf_id,
+            eligible=not target_is_complete,
+            reason="pending_or_incomplete" if not target_is_complete else "ingestion_complete",
+        )
 
     upsert_sql = """
         INSERT INTO public.rag_source_document (
@@ -363,6 +390,8 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 continue
             doc_id = normalize_text(chart.get("id"))
             if not doc_id.isdigit():
+                continue
+            if target_document_pdf_id is not None and doc_id != target_document_pdf_id:
                 continue
             # Completed documents are skipped before PDF retrieval.
             if doc_id in existing_by_doc_id:
@@ -526,6 +555,21 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                 "status": "RUNNING",
                 "stop_reason": stop_reason,
             })
+
+    if target_document_pdf_id is not None and not rows:
+        emit(
+            log,
+            "document_exact_target_not_found",
+            patient_id=target_patient_id,
+            document_pdf_id=target_document_pdf_id,
+            terminal=True,
+            run_id=run_id or "unscoped",
+            reason=(
+                "ingestion_complete"
+                if target_document_pdf_id in existing_by_doc_id
+                else "not_present_in_live_patient_charts"
+            ),
+        )
 
     upsert_started = time.perf_counter()
     inserted = _upsert_many(conn, upsert_sql, rows)

@@ -105,6 +105,30 @@ def _parse_document_limit(event: dict[str, Any]) -> int | None:
     return 1000
 
 
+def _parse_exact_document_target(event: dict[str, Any]) -> tuple[str | None, str | None]:
+    patient_id = str(event.get("target_patient_id") or "").strip() or None
+    document_pdf_id = str(event.get("target_document_pdf_id") or "").strip() or None
+    if bool(patient_id) != bool(document_pdf_id):
+        raise ValueError("target_patient_id and target_document_pdf_id must be supplied together")
+    if patient_id is None:
+        return None, None
+    if not patient_id.isdigit() or not document_pdf_id.isdigit():
+        raise ValueError("exact target ids must be numeric")
+    incompatible = (
+        "process_all",
+        "patient_limit",
+        "client_limit",
+        "start_patient",
+        "next_patient",
+        "patient_start",
+        "start_client",
+        "next_client",
+    )
+    if any(event.get(key) not in (None, "", 0, "0", False) for key in incompatible):
+        raise ValueError("exact document targeting cannot be combined with positional or bulk selectors")
+    return patient_id, document_pdf_id
+
+
 def _table_total(conn, stage: str) -> int:
     table = {
         "clients": "public.instinct_owner_lookup_cache",
@@ -185,11 +209,15 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     base_url = os.environ.get("INSTINCT_API_BASE_URL", "https://partner.instinctvet.com").strip()
     client_id = os.environ.get("INSTINCT_CLIENT_ID", "").strip()
     client_secret = os.environ.get("INSTINCT_CLIENT_SECRET", "").strip()
-    mode, target_limit, batch_size = _parse_target_mode(event)
+    target_patient_id, target_document_pdf_id = _parse_exact_document_target(event)
+    if target_patient_id is not None:
+        mode, target_limit, batch_size = "patient", 1, 1
+    else:
+        mode, target_limit, batch_size = _parse_target_mode(event)
     process_all = mode == "full"
     patient_limit = target_limit if mode == "patient" else None
     client_limit = target_limit if mode == "client" else None
-    document_limit = None if process_all else _parse_document_limit(event)
+    document_limit = 1 if target_document_pdf_id is not None else (None if process_all else _parse_document_limit(event))
     patient_start = max(0, int(event.get("start_patient", event.get("next_patient", event.get("patient_start", 0))) or 0))
     client_start = max(0, int(event.get("start_client", event.get("next_client", 0)) or 0))
     has_cursor = any(key in event for key in ("start_patient", "next_patient", "patient_start"))
@@ -295,6 +323,8 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
             max_seconds=document_max_seconds,
             progress_callback=checkpoint,
             run_id=run_id,
+            target_patient_id=target_patient_id,
+            target_document_pdf_id=target_document_pdf_id,
         )
     processed_patients = documents_summary.patients_scanned
     next_patient = patient_start + int(processed_patients)
@@ -389,6 +419,8 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         "seconds": payload.seconds,
         "next_patient": next_patient,
         "stop_reason": documents_summary.stop_reason,
+        "target_patient_id": target_patient_id,
+        "target_document_pdf_id": target_document_pdf_id,
     }, sort_keys=True), flush=True)
     # Never self-invoke without forward progress.  A cursor at/after the
     # available patient set can otherwise create an unbounded Lambda
