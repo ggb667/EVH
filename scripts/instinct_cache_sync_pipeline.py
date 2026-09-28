@@ -73,6 +73,7 @@ class SyncSummary:
     documents_ingested: int = 0
     documents_failed: int = 0
     stop_reason: str = "exhausted"
+    final_method_counts: dict[str, int] | None = None
 
 
 def _upsert_many(conn, sql: str, rows: Iterable[dict[str, Any]]) -> int:
@@ -360,6 +361,7 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
     upsert_candidate_count = 0
     documents_ingested = 0
     documents_failed = 0
+    final_method_counts: dict[str, int] = {}
     patient_api_seconds = 0.0
     candidate_processing_seconds = 0.0
     document_limit = document_limit if document_limit and document_limit > 0 else None
@@ -490,6 +492,9 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                         row.update({"source_uri": source_uri, "status": "complete", "ingestion_complete": True, "page_count": page_count, "chunk_count": len(documents), "processed_at": now_utc()})
                         break
                 ingestion_succeeded = True
+                winner_method = str(timing.get("winner_method") or "").strip()
+                if winner_method:
+                    final_method_counts[winner_method] = final_method_counts.get(winner_method, 0) + 1
                 emit(log, "new_document_processed", document_pdf_id=doc_id, page_count=page_count, chunk_count=len(documents), embed_seconds=round(embed_seconds, 3), postgres_seconds=round(postgres_seconds, 3), **{k: round(float(v), 3) for k, v in timing.items() if isinstance(v, (int, float))})
             except Exception as exc:
                 documents_failed += 1
@@ -618,4 +623,5 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         documents_ingested=documents_ingested,
         documents_failed=documents_failed,
         stop_reason=stop_reason,
+        final_method_counts=final_method_counts,
     )

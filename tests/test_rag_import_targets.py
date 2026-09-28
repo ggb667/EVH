@@ -1,6 +1,18 @@
 import pytest
 
-from scripts.rag_import_delta_lambda import _parse_exact_document_target, _parse_target_mode
+from scripts.rag_import_delta_lambda import (
+    _merge_final_method_counts,
+    _parse_exact_document_target,
+    _parse_target_mode,
+)
+
+
+def test_final_method_counts_merge_across_continuation_segments():
+    assert _merge_final_method_counts(
+        {"pypdf": 2, "gs": 1},
+        {"pypdf": 3, "pdftotext": 4},
+    ) == {"gs": 1, "pdftotext": 4, "pypdf": 5}
+    assert _merge_final_method_counts(None, {}, {"": 9, "gs": 0, "pypdf": "2"}) == {"pypdf": 2}
 
 
 def test_patient_target_defaults_batch():

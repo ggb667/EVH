@@ -42,6 +42,27 @@ class LambdaRunSummary:
     work_unit_elapsed_seconds: float
     work_units_completed: int
     work_unit_mean_seconds: float
+    final_method_counts: dict[str, int]
+
+
+def _merge_final_method_counts(*count_sets: object) -> dict[str, int]:
+    """Add per-method winner counts across durable continuation segments."""
+    merged: dict[str, int] = {}
+    for count_set in count_sets:
+        if not isinstance(count_set, dict):
+            continue
+        for raw_method, raw_count in count_set.items():
+            method = str(raw_method or "").strip()
+            if not method:
+                continue
+            try:
+                count = int(raw_count)
+            except (TypeError, ValueError):
+                continue
+            if count <= 0:
+                continue
+            merged[method] = merged.get(method, 0) + count
+    return dict(sorted(merged.items()))
 
 
 def _build_db_url() -> str:
@@ -243,6 +264,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                 status text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())""")
             cur.execute("ALTER TABLE public.rag_import_run ADD COLUMN IF NOT EXISTS next_client integer NOT NULL DEFAULT 0")
             cur.execute("ALTER TABLE public.rag_import_run ADD COLUMN IF NOT EXISTS clients_scanned integer NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE public.rag_import_run ADD COLUMN IF NOT EXISTS final_method_counts jsonb NOT NULL DEFAULT '{}'::jsonb")
             recover_requested = bool(event.get("recover") or event.get("resume"))
             if not run_id and recover_requested and not has_cursor:
                 cur.execute("""SELECT run_id, next_patient FROM public.rag_import_run
@@ -354,21 +376,32 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     with psycopg.connect(_build_db_url(), row_factory=dict_row) as state_conn:
         print(json.dumps({"event": "terminal_state_connection_open", "run_id": run_id}, sort_keys=True), flush=True)
         with state_conn.cursor() as cur:
+            cur.execute(
+                "SELECT final_method_counts FROM public.rag_import_run WHERE run_id=%s FOR UPDATE",
+                (run_id,),
+            )
+            persisted_run = cur.fetchone() or {}
+            cumulative_final_method_counts = _merge_final_method_counts(
+                persisted_run.get("final_method_counts"),
+                documents_summary.final_method_counts,
+            )
             cur.execute("""UPDATE public.rag_import_run
                 SET next_patient=GREATEST(next_patient, %s),
                     patients_scanned=patients_scanned + %s,
                     documents_found=documents_found + %s,
                     documents_ingested=documents_ingested + %s,
                     documents_failed=documents_failed + %s,
+                    final_method_counts = %s::jsonb,
                     status=%s,
                     updated_at=now()
                 WHERE run_id=%s
-                RETURNING patients_scanned, documents_found, documents_ingested, documents_failed""", (
+                RETURNING patients_scanned, documents_found, documents_ingested, documents_failed, final_method_counts""", (
                 next_patient,
                 next_patient - patient_start,
                 documents_summary.documents_discovered,
                 documents_summary.documents_ingested,
                 documents_summary.documents_failed,
+                json.dumps(cumulative_final_method_counts, sort_keys=True),
                 terminal_status,
                 run_id,
             ))
@@ -416,6 +449,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         work_unit_elapsed_seconds=round(work_unit_elapsed_seconds, 3),
         work_units_completed=work_units_completed,
         work_unit_mean_seconds=round(work_unit_mean_seconds, 3),
+        final_method_counts=_merge_final_method_counts(cumulative.get("final_method_counts")),
     )
     print(json.dumps({
         "event": terminal_status if complete else "CONTINUE",
@@ -443,6 +477,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         "stop_reason": documents_summary.stop_reason,
         "target_patient_id": target_patient_id,
         "target_document_pdf_id": target_document_pdf_id,
+        "final_method_counts": payload.final_method_counts,
     }, sort_keys=True), flush=True)
     # Never self-invoke without forward progress.  A cursor at/after the
     # available patient set can otherwise create an unbounded Lambda
@@ -454,7 +489,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     )
     if should_continue:
         import boto3
-        boto3.client("lambda").invoke(
+        handoff_response = boto3.client("lambda").invoke(
             FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "evh_instinct_rag_import_delta"),
             InvocationType="Event",
             Payload=json.dumps({
@@ -471,12 +506,18 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                 "work_unit_mean_seconds": work_unit_mean_seconds,
             }).encode(),
         )
+        print(json.dumps({"event": "lambda_handoff", "run_id": run_id,
+                          "next_patient": next_patient,
+                          "handoff_status_code": handoff_response.get("StatusCode"),
+                          "final_method_counts": payload.final_method_counts},
+                         sort_keys=True, default=str), flush=True)
     body = {
         "status": "ok",
         "summary": asdict(payload),
         "note": "step 1.1-1.3 cache sync lambda rewrite",
     }
-    print(json.dumps({"event": "lambda_response_return", "run_id": run_id}, sort_keys=True), flush=True)
+    print(json.dumps({"event": "lambda_response_return", "run_id": run_id,
+                      "response": body}, sort_keys=True, default=str), flush=True)
     return {
         "statusCode": 200,
         "headers": {"content-type": "application/json; charset=utf-8"},

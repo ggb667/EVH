@@ -143,7 +143,7 @@ def test_sync_documents_records_timeout_and_continues(monkeypatch):
         calls.append(source.pdf_id)
         if source.pdf_id == "101":
             raise TimeoutError("OCR PDF size-scaled deadline exceeded")
-        return [object()], 1, {}
+        return [object()], 1, {"winner_method": "pypdf"}
 
     monkeypatch.setenv("TOKEN", "token")
     monkeypatch.setattr("requests.post", post)
@@ -162,6 +162,7 @@ def test_sync_documents_records_timeout_and_continues(monkeypatch):
     assert calls == ["101", "102"]
     assert summary.documents_failed == 1
     assert summary.documents_ingested == 1
+    assert summary.final_method_counts == {"pypdf": 1}
     events = [json.loads(line) for line in lines]
     failure = next(event for event in events if event.get("event") == "document_ingestion_failed")
     assert failure["document_pdf_id"] == "101"
