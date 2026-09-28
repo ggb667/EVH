@@ -43,6 +43,7 @@ class LambdaRunSummary:
     work_units_completed: int
     work_unit_mean_seconds: float
     final_method_counts: dict[str, int]
+    total_elapsed_seconds: float
 
 
 def _merge_final_method_counts(*count_sets: object) -> dict[str, int]:
@@ -417,7 +418,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
                     status=%s,
                     updated_at=now()
                 WHERE run_id=%s
-                RETURNING patients_scanned, documents_found, documents_ingested, documents_failed, final_method_counts""", (
+                RETURNING patients_scanned, documents_found, documents_ingested, documents_failed, final_method_counts, started_at""", (
                 next_patient,
                 next_patient - patient_start,
                 documents_summary.documents_discovered,
@@ -440,6 +441,8 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     cumulative_documents_discovered = int(cumulative.get("documents_found") or 0)
     cumulative_documents_ingested = int(cumulative.get("documents_ingested") or 0)
     cumulative_documents_failed = int(cumulative.get("documents_failed") or 0)
+    started_at = cumulative.get("started_at")
+    total_elapsed_seconds = round(max(0.0, time.time() - started_at.timestamp()) if started_at else 0.0, 3)
     work_unit_elapsed_seconds = time.perf_counter() - work_unit_started
     work_units_completed = prior_work_units + 1
     work_unit_mean_seconds = ((prior_work_unit_mean * prior_work_units) + work_unit_elapsed_seconds) / work_units_completed
@@ -472,6 +475,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         work_units_completed=work_units_completed,
         work_unit_mean_seconds=round(work_unit_mean_seconds, 3),
         final_method_counts=_merge_final_method_counts(cumulative.get("final_method_counts")),
+        total_elapsed_seconds=total_elapsed_seconds,
     )
     print(json.dumps({
         "event": terminal_status if complete else "CONTINUE",
@@ -494,6 +498,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         "work_unit_elapsed_seconds": round(work_unit_elapsed_seconds, 3),
         "work_units_completed": work_units_completed,
         "work_unit_mean_seconds": round(work_unit_mean_seconds, 3),
+        "total_elapsed_seconds": total_elapsed_seconds,
         "seconds": payload.seconds,
         "next_patient": next_patient,
         "stop_reason": documents_summary.stop_reason,
@@ -531,6 +536,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
         print(json.dumps({"event": "lambda_handoff", "run_id": run_id,
                           "next_patient": next_patient,
                           "handoff_status_code": handoff_response.get("StatusCode"),
+                          "total_elapsed_seconds": total_elapsed_seconds,
                           "final_method_counts": payload.final_method_counts},
                          sort_keys=True, default=str), flush=True)
     body = {
