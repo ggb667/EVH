@@ -191,9 +191,9 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
     server_version = "EVHGmailOAuth/1.0"
 
     def do_GET(self):  # noqa: N802
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-        self.server.oauth_result = params  # type: ignore[attr-defined]
+        params = parse_oauth_callback(self.path)
+        if params is not None and self.server.oauth_result is None:  # type: ignore[attr-defined]
+            self.server.oauth_result = params  # type: ignore[attr-defined]
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -203,6 +203,15 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *_args):  # quiet
         return
+
+
+def parse_oauth_callback(path: str) -> Optional[Dict[str, list[str]]]:
+    """Return only an OAuth response, ignoring favicon and browser follow-up requests."""
+    parsed = urllib.parse.urlparse(path)
+    params = urllib.parse.parse_qs(parsed.query)
+    if "code" not in params and "error" not in params:
+        return None
+    return params
 
 
 def load_client_config(path: Path) -> Dict[str, Any]:
