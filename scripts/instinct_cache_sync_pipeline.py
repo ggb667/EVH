@@ -381,6 +381,8 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
         patient_api_seconds += time.perf_counter() - api_started
         patient = data.get("patient") if isinstance(data, dict) else {}
         charts = data.get("charts") if isinstance(data, dict) else []
+        chart_count = len(charts) if isinstance(charts, list) else 0
+        emit(log, "documents_patient_charts_seen", patient_id=patient_id, charts=chart_count)
         client_id = normalize_text((patient or {}).get("account", {}).get("id")) if isinstance(patient, dict) else ""
         if not client_id:
             raise RuntimeError(f"Instinct patient {patient_id} has no real client/account id; refusing document upsert")
@@ -396,11 +398,13 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
             # Completed documents are skipped before PDF retrieval.
             if doc_id in existing_by_doc_id:
                 skipped_count += 1
+                emit(log, "document_completed_skipped", document_pdf_id=doc_id, patient_id=patient_id, skipped_documents=skipped_count)
                 continue
             chart_hash = sha256(json.dumps(chart, sort_keys=True, default=str).encode("utf-8")).hexdigest()
             if document_limit is not None and len(rows) >= document_limit:
                 break
             upsert_candidate_count += 1
+            emit(log, "document_eligible_candidate", document_pdf_id=doc_id, patient_id=patient_id, reason="pending_or_incomplete", eligible_candidates=upsert_candidate_count)
             rows.append(
                 {
                     "document_pdf_id": int(doc_id),

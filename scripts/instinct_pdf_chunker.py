@@ -1096,8 +1096,11 @@ def extract_pdf_text_pages(pdf_path: Path | bytes, *, timeout_s: int = 120) -> t
 def ocr_pdf_text_pages(pdf_path: Path, *, timeout_s: int | None = None) -> tuple[list[str], int, str]:
     try:
         timeout_s = timeout_s or _size_scaled_timeout(pdf_path, base_seconds=120, seconds_per_mb=60, maximum_seconds=1800)
+        print(json.dumps({"status": "ocr_stage_start", "path": str(pdf_path), "timeout_seconds": timeout_s}, sort_keys=True), flush=True)
+        ocr_started = perf_counter()
         result = _run_child_process("ocr", str(pdf_path), timeout_s=timeout_s)
         _child_status_line("ocr", ocr_path="child_process")
+        print(json.dumps({"status": "ocr_stage_done", "path": str(pdf_path), "elapsed_seconds": round(perf_counter() - ocr_started, 4), "page_count": int(result["page_count"])}, sort_keys=True), flush=True)
         return result["pages"], int(result["page_count"]), str(result.get("tool") or "ocr")
     except Exception as exc:
         _child_status_line("ocr", child_signal=1 if "signal" in str(exc).lower() else None, detail=str(exc))
