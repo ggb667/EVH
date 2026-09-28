@@ -65,6 +65,28 @@ def _merge_final_method_counts(*count_sets: object) -> dict[str, int]:
     return dict(sorted(merged.items()))
 
 
+def _run_is_cancelled(cur: Any, run_id: object) -> bool:
+    """Return whether a durable cancellation tombstone exists for this run."""
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return False
+    cur.execute(
+        "SELECT 1 FROM public.rag_import_cancelled_run WHERE run_id=%s",
+        (normalized_run_id,),
+    )
+    return cur.fetchone() is not None
+
+
+def _cancelled_run_response(run_id: str) -> dict[str, Any]:
+    body = {"error": "RUN_CANCELLED", "run_id": run_id}
+    print(json.dumps({"event": "RUN_CANCELLED", "run_id": run_id}, sort_keys=True), flush=True)
+    return {
+        "statusCode": 410,
+        "headers": {"content-type": "application/json; charset=utf-8"},
+        "body": json.dumps(body, sort_keys=True),
+    }
+
+
 def _build_db_url() -> str:
     db_url = os.environ.get("EVH_PGDATABASE_URL", "").strip()
     if db_url:
@@ -534,6 +556,7 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
         validation_result = run(event) if validation_harness == "8-path-v1" else run_ocr_lifecycle(event)
         return {"statusCode": 200, "body": json.dumps(validation_result, sort_keys=True)}
     lock_conn = None
+    lease_acquired = False
     token = str(event.get("continuation_token") or "").strip()
     if not token:
         token = f"{time.time_ns()}-{os.urandom(12).hex()}"
@@ -542,6 +565,18 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
     try:
         lock_conn = psycopg.connect(_build_db_url(), connect_timeout=15)
         with lock_conn.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS public.rag_import_cancelled_run "
+                "(run_id text PRIMARY KEY, cancelled_at timestamptz NOT NULL DEFAULT now())"
+            )
+            run_id = str(event.get("run_id") or "").strip()
+            if _run_is_cancelled(cur, run_id):
+                cur.execute(
+                    "UPDATE public.rag_import_run SET status='CANCELLED', updated_at=now() WHERE run_id=%s",
+                    (run_id,),
+                )
+                lock_conn.commit()
+                return _cancelled_run_response(run_id)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS public.rag_import_lease "
                 "(lease_key text PRIMARY KEY, token text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())"
@@ -554,6 +589,7 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
                 (token, token),
             )
             acquired = cur.fetchone() is not None
+            lease_acquired = acquired
             competing_lease = None
             if not acquired:
                 cur.execute("SELECT token, updated_at FROM public.rag_import_lease WHERE lease_key='import'")
@@ -583,7 +619,7 @@ def lambda_handler(event: dict[str, Any], context: object | None = None) -> dict
             return {"statusCode": 409, "body": json.dumps({"error": "RUN_ALREADY_RUNNING"})}
         return _lambda_handler_unlocked(event, context)
     finally:
-        if lock_conn is not None:
+        if lock_conn is not None and lease_acquired:
             try:
                 print(json.dumps({"event": "lease_release_start", "run_id": event.get("run_id")}, sort_keys=True), flush=True)
                 with lock_conn.cursor() as cur:
