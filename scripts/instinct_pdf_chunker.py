@@ -1093,14 +1093,20 @@ def extract_pdf_text_pages(pdf_path: Path | bytes, *, timeout_s: int = 120) -> t
     return result["pages"], int(result.get("page_count") or len(result.get("pages") or []))
 
 
-def ocr_pdf_text_pages(pdf_path: Path, *, timeout_s: int | None = None) -> tuple[list[str], int, str]:
+def ocr_pdf_text_pages(
+    pdf_path: Path,
+    *,
+    timeout_s: int | None = None,
+    run_id: str | None = None,
+    document_pdf_id: str | None = None,
+) -> tuple[list[str], int, str]:
     try:
         timeout_s = timeout_s or _size_scaled_timeout(pdf_path, base_seconds=120, seconds_per_mb=60, maximum_seconds=1800)
-        print(json.dumps({"status": "ocr_stage_start", "path": str(pdf_path), "timeout_seconds": timeout_s}, sort_keys=True), flush=True)
+        print(json.dumps({"status": "ocr_stage_start", "path": str(pdf_path), "timeout_seconds": timeout_s, "run_id": run_id, "document_pdf_id": document_pdf_id}, sort_keys=True), flush=True)
         ocr_started = perf_counter()
         result = _run_child_process("ocr", str(pdf_path), timeout_s=timeout_s)
         _child_status_line("ocr", ocr_path="child_process")
-        print(json.dumps({"status": "ocr_stage_done", "path": str(pdf_path), "elapsed_seconds": round(perf_counter() - ocr_started, 4), "page_count": int(result["page_count"])}, sort_keys=True), flush=True)
+        print(json.dumps({"status": "ocr_stage_done", "path": str(pdf_path), "elapsed_seconds": round(perf_counter() - ocr_started, 4), "page_count": int(result["page_count"]), "run_id": run_id, "document_pdf_id": document_pdf_id}, sort_keys=True), flush=True)
         return result["pages"], int(result["page_count"]), str(result.get("tool") or "ocr")
     except Exception as exc:
         _child_status_line("ocr", child_signal=1 if "signal" in str(exc).lower() else None, detail=str(exc))
@@ -1868,6 +1874,7 @@ def chunk_patient_pdf_timed(
     extraction_timeout_s: int = 45,
     page_workers: int | None = None,
     progress_state: dict[str, Any] | None = None,
+    run_id: str | None = None,
 ) -> tuple[list[Document], int, dict[str, float]]:
     download_start = perf_counter()
     timing: dict[str, float] = {}
@@ -2175,7 +2182,7 @@ def chunk_patient_pdf_timed(
         if progress_state is not None:
             progress_state["current_ocr_stage"] = "a"
         print(json.dumps({"status": "pdf_phase_begin", "phase": "ocr_pdf_text_pages", "pdf_id": source.pdf_id, "filename": source.pdf_path.name if source.pdf_path is not None else None}, sort_keys=True), flush=True)
-        pages, page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path)
+        pages, page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path, run_id=run_id, document_pdf_id=source.pdf_id)
         if progress_state is not None:
             progress_state["current_ocr_stage"] = "b"
         timing["ocr_used"] = True
@@ -2267,7 +2274,7 @@ def chunk_patient_pdf_timed(
         ocr_start = perf_counter()
         if progress_state is not None:
             progress_state["current_ocr_stage"] = "c"
-        ocr_pages, ocr_page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path)
+        ocr_pages, ocr_page_count, ocr_method = ocr_pdf_text_pages(source.pdf_path, run_id=run_id, document_pdf_id=source.pdf_id)
         timing["ocr_retry_seconds"] = perf_counter() - ocr_start
         timing["ocr_used"] = True
         timing["ocr_method"] = ocr_method

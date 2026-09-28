@@ -104,6 +104,29 @@ def test_ocr_timeout_is_reported_and_propagated(tmp_path, monkeypatch, capsys):
     assert '"stage": "ocr"' in capsys.readouterr().out
 
 
+def test_ocr_stage_events_include_run_and_document_ids(tmp_path, monkeypatch, capsys):
+    pdf_path = tmp_path / "image.pdf"
+    pdf_path.write_bytes(b"pdf")
+    monkeypatch.setattr(
+        "scripts.instinct_pdf_chunker._run_child_process",
+        lambda *_args, **_kwargs: {"pages": ["recognized text"], "page_count": 1, "tool": "gs"},
+    )
+
+    pages, page_count, method = ocr_pdf_text_pages(
+        pdf_path,
+        timeout_s=1,
+        run_id="run-correlation-test",
+        document_pdf_id="document-42",
+    )
+
+    assert (pages, page_count, method) == (["recognized text"], 1, "gs")
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    for status in ("ocr_stage_start", "ocr_stage_done"):
+        event = next(item for item in events if item.get("status") == status)
+        assert event["run_id"] == "run-correlation-test"
+        assert event["document_pdf_id"] == "document-42"
+
+
 def test_ocr_deadline_is_absolute_and_size_scaled(monkeypatch):
     monkeypatch.setenv("EVH_OCR_DEADLINE_MONOTONIC", "100.0")
     monkeypatch.setattr("scripts.instinct_pdf_chunker.time.monotonic", lambda: 97.5)

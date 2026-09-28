@@ -222,7 +222,7 @@ def test_sync_documents_exact_target_selects_only_named_eligible_document(monkey
     calls = []
 
     def chunk_patient_pdf_timed(source, *_args, **_kwargs):
-        calls.append((source.patient_id, source.pdf_id))
+        calls.append((source.patient_id, source.pdf_id, _kwargs.get("run_id")))
         return [object()], 1, {}
 
     monkeypatch.setenv("TOKEN", "token")
@@ -241,7 +241,7 @@ def test_sync_documents_exact_target_selects_only_named_eligible_document(monkey
         target_document_pdf_id="134819",
     )
 
-    assert calls == [("183", "134819")]
+    assert calls == [("183", "134819", "run-exact-target")]
     assert summary.documents_discovered == 1
     assert summary.documents_ingested == 1
     events = [json.loads(line) for line in lines]

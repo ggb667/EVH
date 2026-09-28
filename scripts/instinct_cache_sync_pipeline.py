@@ -451,7 +451,12 @@ query medicalHistoryVisits($patientId: ID!, $chartTypes: [ChartType]) {
                     pdf_id=doc_id,
                     pdf_url=source_uri,
                 )
-                documents, page_count, timing = chunk_patient_pdf_timed(source, ChunkingConfig(), defer_no_text_page_threshold=8)
+                documents, page_count, timing = chunk_patient_pdf_timed(
+                    source,
+                    ChunkingConfig(),
+                    defer_no_text_page_threshold=8,
+                    run_id=run_id,
+                )
                 if not documents:
                     raise RuntimeError("ingestion produced no text chunks")
                 # pms_page_chunk is protected by a document identity FK.
