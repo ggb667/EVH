@@ -419,6 +419,7 @@ def _lambda_handler_unlocked(event: dict[str, Any], context: object | None = Non
     )
     print(json.dumps({
         "event": terminal_status if complete else "CONTINUE",
+        "run_id": run_id,
         "message": "linear ingestion completed normally",
         "stop_reason": "exhausted" if complete else "continuation_scheduled",
         "patient_limit": patient_limit,
