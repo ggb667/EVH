@@ -30,16 +30,10 @@ def test_deploy_static_site_fails_when_live_build_hash_does_not_match(tmp_path):
     _make_executable(
         fake_bin / "curl",
         "#!/usr/bin/env bash\n"
-        "if [ \"$1\" = \"-fsS\" ] && [ \"$2\" = \"$3\" ]; then\n"
-        "  if [ $# -eq 3 ]; then\n"
-        "    cat <<'EOF'\n"
+        "cat <<'EOF'\n"
         "<!doctype html><div>Build: 2026-08-29 00:00 EDT · 4e2bdf44c (4e2bdf44c) · Ready</div>\n"
         "EOF\n"
-        "    exit 0\n"
-        "  fi\n"
-        "fi\n"
-        "echo \"unexpected curl call: $@\" >&2\n"
-        "exit 1\n",
+        "exit 0\n",
     )
     _make_executable(
         fake_bin / "git",
@@ -84,6 +78,7 @@ def test_deploy_static_site_fails_when_live_build_hash_does_not_match(tmp_path):
     package_script.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        ": \"${ROOT_DIR:?ROOT_DIR must be set by caller}\"\n"
         "cp \"$SITE_DIR/EVHInstinctPDFRAG/index.html\" \"$ROOT_DIR/evh_site.zip\"\n",
         encoding="utf-8",
     )
@@ -94,6 +89,7 @@ def test_deploy_static_site_fails_when_live_build_hash_does_not_match(tmp_path):
     env["SITE_DIR"] = str(site_dir)
     env["PACKAGE_SCRIPT"] = str(package_script)
     env["OUTPUT_ZIP"] = str(tmp_path / "evh_site.zip")
+    env["ROOT_DIR"] = str(root)
     env["STATIC_SITE_BUCKET"] = "evh-instinct-pdf-rag-shell"
     env["AWS_REGION"] = "us-east-1"
     env["EXPECTED_SHORT_HASH"] = "f621b029a"

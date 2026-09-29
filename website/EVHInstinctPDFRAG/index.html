@@ -49,6 +49,8 @@ body > *{
 h1{margin:0;font-size:28px;line-height:1.08}
 .sub{color:var(--muted);margin:0;max-width:900px;line-height:1.45}
 .meta{font-size:12px;line-height:1.35;color:#7a8490;text-align:right}
+.selection-meta{display:flex;flex-direction:column;gap:2px;align-items:flex-end}
+.selection-meta .item{white-space:nowrap}
 .build-line{white-space:nowrap;font-size:11px;line-height:1.25;margin-left:auto;text-align:right}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
 .selector-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
@@ -72,6 +74,13 @@ input:disabled::placeholder{
   color:#a8adb4;
 }
 textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
+textarea:disabled{
+  background:#f1f2f4;
+  color:#69727b;
+  border-color:#d8dce0;
+  box-shadow:none;
+  cursor:wait;
+}
 .menu{
   position:absolute;
   z-index:30;
@@ -94,6 +103,9 @@ textarea{min-height:110px;resize:vertical;line-height:1.45;padding-right:72px}
 .status{font-size:12px;color:#68737e;margin-top:6px;min-height:18px;line-height:1.35}
 .ask-area{display:grid;gap:10px}
 .composer-box{position:relative}
+.composer-tools{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.composer-tools .tool-btn{padding:8px 12px;border-radius:999px;background:#eef3f7;color:#203040;border:1px solid #cdd7e0}
+.composer-tools .tool-btn:disabled{opacity:.45;cursor:not-allowed}
 .question-label-row{display:flex;align-items:baseline;gap:12px}
 .question-label-row .question-label{flex:0 0 auto}
 .question-label-row .question-helper{flex:1 1 auto;font-size:12px;line-height:1.35;color:var(--muted);text-align:left}
@@ -122,7 +134,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .source-nav-btn[disabled]{opacity:.28}
 .source-chip{position:relative;flex:0 0 auto;width:40px;height:40px;border-radius:10px;border:1px solid #d6dde4;background:#fafbfc;overflow:hidden;display:grid;place-items:center;cursor:pointer;padding:0}
 .source-chip:hover,.source-chip:focus-visible{border-color:#b8c8d8;box-shadow:0 0 0 3px rgba(40,95,143,.08);outline:none}
-.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:576px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
+.source-chip i{display:block;width:64px;height:64px;background-image:url('./PDFIcons.png');background-repeat:no-repeat;background-size:640px 64px;transform:scale(.44);transform-origin:0 0;pointer-events:none}
 .source-chip .count{position:absolute;right:-4px;bottom:-4px;min-width:18px;height:18px;line-height:18px;border-radius:999px;background:#263746;color:#fff;font-size:10px;display:grid;place-items:center;border:2px solid #fff;padding:0 4px}
 .source-popover{position:fixed;z-index:80;max-width:min(460px,calc(100vw - 24px));max-height:min(380px,calc(100vh - 24px));background:#fff;border:1px solid #cfd6dc;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.16);padding:12px 12px 10px;display:none;overflow:auto}
 .source-popover.open{display:block}
@@ -148,11 +160,12 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <div class="header-left">
       <div class="header-title">
         <h1>Patient Record Assistant</h1>
-        <div class="build-line">Build: 2026-08-29 00:00 EDT · 4e2bdf44c (4e2bdf44c) · Ready</div>
+        <div class="build-line">Build: __EVH_BUILD_STAMP__</div>
       </div>
       <p class="sub">Select a client and patient, then ask questions in a quiet transcript — meaning the conversation stays in one place and just grows downward instead of reshuffling the page. Each answer keeps its own citations.</p>
-    </div>
-    <div class="meta">
+  </div>
+  <div class="meta">
+      <div id="selection-meta" class="selection-meta" aria-live="polite"></div>
     </div>
   </div>
 
@@ -186,6 +199,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
       <textarea id="question" placeholder="When was the last dental cleaning?"></textarea>
       <button id="ask" disabled>Ask</button>
     </div>
+    <div class="composer-tools">
+      <button id="dictate" class="tool-btn" type="button" disabled>Dictate</button>
+      <button id="sound-test" class="tool-btn" type="button" disabled>Play Sound</button>
+    </div>
     <div id="ask-status" class="status ask-status-row" style="margin-top:0;min-height:0">
       <span id="ask-status-text" class="ask-status-text"></span>
       <span id="ask-status-foot" class="ask-status-foot">EVH Patient Record Assistant © 2026 Gregory Garrett Bishop</span>
@@ -202,11 +219,43 @@ const SEARCH_DEBOUNCE_MS=250;
 
 const citationUrl=(documentId,pageNumber)=>
   `${API_BASE}/api/rag/documents/${encodeURIComponent(documentId)}/pages/${encodeURIComponent(pageNumber)}`;
+const ASK_SOUND_URL="./2-14_computer_working.wav";
 
-const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other"];
+function isInstinctUrl(url){
+  return String(url||"").startsWith("https://app.instinctvet.cloud/");
+}
+
+function isDeferredDiskUrl(url){
+  return String(url||"").startsWith("deferred-disk:");
+}
+
+function isSyntheticInstinctDocument(documentId){
+  const value=String(documentId||"");
+  return value.startsWith("instinct-client-info-")||value.startsWith("instinct-patient-info-");
+}
+
+function evidenceLinkTarget(documentId,pageNumber,sourceUri){
+  // Synthetic records link to stable Instinct application pages. Every real
+  // chart document goes through Lambda so Instinct creates a fresh temporary
+  // file URL at click time; never expose stored deferred-disk locators.
+  if(isSyntheticInstinctDocument(documentId)&&isInstinctUrl(sourceUri))return sourceUri;
+  return documentId?citationUrl(documentId,pageNumber):"#";
+}
+
+const familyOrder=["medical_notes","lab","prescriptions","vaccine_history","communications","transaction_history","diagnoses","wellness","other","instinct_emr_data"];
 const familyIndex=Object.fromEntries(familyOrder.map((name,idx)=>[name,idx]));
-const normalizeFamily=family=>familyOrder.includes(family)?family:"other";
+const normalizeFamily=family=>{
+  const value=String(family||"").trim().toLowerCase().replace(/[\s-]+/g,"_");
+  if(["instinct","synthetic","synthetic_document","instinct_synthetic"].includes(value))return "instinct_emr_data";
+  return familyOrder.includes(value)?value:"other";
+};
 const familySpritePos=family=>`-${(familyIndex[normalizeFamily(family)]||0)*64}px 0px`;
+const evidenceFamily=ref=>{
+  const explicit=ref?.source_type||ref?.sourceType||ref?.family||ref?.document_family||ref?.documentFamily||ref?.type||"";
+  if(explicit)return explicit;
+  const label=`${ref?.document_title||ref?.documentTitle||""} ${ref?.source_name||ref?.sourceName||""}`;
+  return /\binstinct\b/i.test(label)?"instinct_emr_data":"other";
+};
 
 const state={
   client:null,
@@ -218,6 +267,24 @@ const state={
   conversationByScope:new Map(),
   footerIndex:0
 };
+
+function updateSelectionMeta(){
+  const meta=$("selection-meta");
+  if(!meta)return;
+  meta.replaceChildren();
+  if(state.client){
+    const clientLine=document.createElement("div");
+    clientLine.className="item";
+    clientLine.textContent=`Client ID: ${state.client.id || "—"}`;
+    meta.appendChild(clientLine);
+  }
+  if(state.pet){
+    const patientLine=document.createElement("div");
+    patientLine.className="item";
+    patientLine.textContent=`Patient ID: ${state.pet.id || "—"}`;
+    meta.appendChild(patientLine);
+  }
+}
 
 const footerMessages=[
   "EVH Patient Record Assistant © 2026 Gregory Garrett Bishop",
@@ -242,6 +309,7 @@ let initialClientSearchStarted=false;
 let sourcePopoverHideTimer=0;
 let backendVersionText="";
 let catalogNoticeText="";
+let speechRecognitionInstance=null;
 const $=id=>document.getElementById(id);
 
 function escapeHtml(value){
@@ -624,7 +692,12 @@ function scheduleOptionSearch({
 
 function updateAsk(){
   const ask=$("ask");
-  const enabled=state.client&&state.pet&&$("question").value.trim();
+  const question=$("question");
+  const hasPatient=Boolean(state.client&&state.pet);
+  const enabled=hasPatient&&question.value.trim();
+  question.disabled=Boolean(state.loading)||!hasPatient;
+  $("dictate").disabled=Boolean(state.loading)||!hasPatient||!supportsSpeechRecognition();
+  $("sound-test").disabled=Boolean(state.loading)||!hasPatient;
   ask.disabled=!enabled||state.loading;
   ask.classList.toggle("ready",Boolean(enabled)&&!state.loading);
   ask.classList.toggle("running",Boolean(state.loading));
@@ -644,7 +717,9 @@ function setCatalogNotice(message){
     notice.className="status";
     notice.style.marginTop="0";
     const headerLeft=$(".header-left");
-    headerLeft.appendChild(notice);
+    if(headerLeft){
+      headerLeft.appendChild(notice);
+    }
   }
   notice.textContent=catalogNoticeText;
   notice.style.display=catalogNoticeText?"block":"none";
@@ -691,6 +766,7 @@ function restoreConversationFor(clientId,patientId){
 
 function renderTranscript(){
   const transcript=$("transcript");
+  if(!transcript)return;
   transcript.replaceChildren();
   for(const turn of state.turns){
     transcript.appendChild(renderTurn(turn));
@@ -700,6 +776,7 @@ function renderTranscript(){
 function ensureComposerPlacement(){
   const composer=$("composer");
   const transcript=$("transcript");
+  if(!composer || !transcript || !composer.parentElement || !transcript.parentElement)return;
   if(composer && transcript && composer.previousElementSibling !== transcript){
     transcript.parentElement.insertBefore(composer, transcript.nextSibling);
   }
@@ -712,15 +789,22 @@ function clearTranscript(){
 }
 
 function updateQuestionPrompt(){
-  $("question").placeholder=state.firstAnswerSubmitted
-    ?"Ask another question…"
-    :"When was the last dental cleaning?";
+  $("question").placeholder=state.firstAnswerSubmitted ? "" : "When was the last dental cleaning?";
   const helper=$("question-helper");
   if(helper){
     helper.textContent=state.firstAnswerSubmitted
       ?"Ask a question to continue this patient-specific conversation."
       :"Ask a question to begin a patient-specific conversation.";
   }
+}
+
+function clearQuestionComposer(){
+  const question=$("question");
+  if(!question)return;
+  question.value="";
+  question.defaultValue="";
+  autoResize(question);
+  updateAsk();
 }
 
 function clearPatientSelection(){
@@ -734,6 +818,8 @@ function clearPatientSelection(){
   $("pet-input").disabled=!state.client;
   $("pet-input").placeholder=state.client?"Type a patient name":"Select a client first";
   $("composer").style.display=state.client ? "" : "none";
+  clearQuestionComposer();
+  updateSelectionMeta();
   updateAsk();
 }
 
@@ -753,6 +839,8 @@ function clearClientSelection(){
   $("pet-input").disabled=true;
   $("pet-input").placeholder="Select a client first";
   $("composer").style.display="none";
+  clearQuestionComposer();
+  updateSelectionMeta();
   clearTranscript();
   updateAsk();
 }
@@ -769,6 +857,7 @@ function chooseClient(item){
   clearPatientSelection();
   $("pet-input").disabled=false;
   $("pet-input").placeholder="Type a patient name";
+  clearQuestionComposer();
 
   if(!hasConversationForSelection(item.id, state.pet?.id || "")){
     clearTranscript();
@@ -799,7 +888,9 @@ function choosePet(item){
   state.pet=item;
   $("pet-input").value=item.label||"";
   $("pet-status").textContent=patientDisplayText(item);
+  updateSelectionMeta();
   restoreConversationFor(state.client.id,item.id);
+  clearQuestionComposer();
   if(!hasConversationForSelection(state.client.id,item.id)){
     clearTranscript();
   }
@@ -812,6 +903,69 @@ function showCachedPatients(){
   clearPetMenu();
   renderMenu($("pet-menu"),items,choosePet,"No matches");
   $("pet-status").textContent=items.length?`${items.length} matches`:"No matches";
+}
+
+function supportsSpeechRecognition(){
+  return Boolean(window.SpeechRecognition||window.webkitSpeechRecognition);
+}
+
+function beginDictation(){
+  if(!state.client||!state.pet)return;
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition){
+    setAskStatus("Chrome dictation is not available in this browser.");
+    return;
+  }
+  if(speechRecognitionInstance){
+    try{ speechRecognitionInstance.abort(); }catch{}
+  }
+  const recognition=new SpeechRecognition();
+  speechRecognitionInstance=recognition;
+  recognition.lang="en-US";
+  recognition.interimResults=true;
+  recognition.continuous=false;
+  const question=$("question");
+  let transcript=question.value.trim();
+  recognition.onresult=event=>{
+    let finalText="";
+    let interimText="";
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const part=String(event.results[i][0]?.transcript||"");
+      if(event.results[i].isFinal) finalText+=part;
+      else interimText+=part;
+    }
+    const combined=[transcript, finalText, interimText].filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+    question.value=combined;
+    autoResize(question);
+    updateAsk();
+  };
+  recognition.onerror=event=>{
+    setAskStatus(`Dictation error: ${event.error || "unknown"}`);
+    speechRecognitionInstance=null;
+  };
+  recognition.onend=()=>{
+    speechRecognitionInstance=null;
+    updateAsk();
+  };
+  try{
+    question.focus();
+    recognition.start();
+    setAskStatus("Listening…");
+  }catch(error){
+    speechRecognitionInstance=null;
+    setAskStatus(`Dictation unavailable: ${error.message || error}`);
+  }
+}
+
+function playAskSound(){
+  if(!state.client||!state.pet)return;
+  const audio=new Audio(ASK_SOUND_URL);
+  audio.preload="auto";
+  audio.play().then(()=>{
+    setAskStatus("Played ask sound.");
+  }).catch(error=>{
+    setAskStatus(`Browser audio playback is not available here: ${error?.message || error}`);
+  });
 }
 
 function buildSelectedContext(){
@@ -854,8 +1008,16 @@ function citationLink(ref){
   const label=ref.document_title||ref.documentTitle||ref.page_label||`Page ${page}`;
   const link=document.createElement("a");
   link.textContent=`${label} — Page ${page}`;
-  if(docId){
+  const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
+  if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
+    link.href=sourceUri;
+    link.target="_self";
+  }else if(docId && !isDeferredDiskUrl(sourceUri)){
     link.href=citationUrl(docId,page);
+    link.target="_blank";
+    link.rel="noopener";
+  }else if(sourceUri){
+    link.href=sourceUri;
     link.target="_blank";
     link.rel="noopener";
   }
@@ -870,9 +1032,15 @@ function citationMarkerLink(match,citationMap){
   const link=document.createElement("a");
   link.textContent=`${docId} p.${page}`;
   if(ref.document_title)link.title=ref.document_title;
-  link.href=docId?citationUrl(docId,page):"#";
-  link.target="_blank";
-  link.rel="noopener";
+  const sourceUri=ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"";
+  if(isSyntheticInstinctDocument(docId)&&isInstinctUrl(sourceUri)){
+    link.href=sourceUri;
+    link.target="_self";
+  }else{
+    link.href=(docId && !isDeferredDiskUrl(sourceUri))?citationUrl(docId,page):(sourceUri||"#");
+    link.target="_blank";
+    link.rel="noopener";
+  }
   return link;
 }
 
@@ -895,10 +1063,16 @@ function renderAnswerWithCitations(answer,citationMap){
 }
 
 function groupedRefs(turn){
-  const refs=(turn.citations||turn.references||[]).map(ref=>({
+  const sourceRefs=[
+    ...(Array.isArray(turn.citations)?turn.citations:[]),
+    ...(Array.isArray(turn.references)?turn.references:[])
+  ];
+  const refs=sourceRefs.map(ref=>({
     document_id:ref.document_id||ref.documentId||"",
     page_number:ref.page_number||ref.pageNumber||1,
     document_title:ref.document_title||ref.documentTitle||ref.page_label||"Source PDF",
+    source_uri:ref.source_uri||ref.sourcePageUrl||ref.source_page_url||"",
+    family:evidenceFamily(ref),
     snippet:ref.snippet||"",
     terms:Array.isArray(ref.terms)?ref.terms:[]
   }));
@@ -909,10 +1083,14 @@ function groupedRefs(turn){
     const existing=byId.get(id)||{
       document_id:ref.document_id,
       document_title:ref.document_title,
+      source_uri:ref.source_uri||"",
+      family:ref.family,
       pages:[],
       snippets:[],
       terms:[]
     };
+    if(!existing.source_uri && ref.source_uri)existing.source_uri=ref.source_uri;
+    if(existing.family==="other"&&ref.family!=="other")existing.family=ref.family;
     existing.pages.push(ref.page_number);
     if(ref.snippet)existing.snippets.push(ref.snippet);
     if(ref.terms.length)existing.terms.push(...ref.terms);
@@ -1032,11 +1210,18 @@ function sourceChip(doc,terms){
   button.setAttribute("aria-label",doc.document_title||"Source PDF");
   button.dataset.docId=doc.document_id||"";
   button.dataset.page=doc.pages[0]||1;
-  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos("other")}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
+  button.innerHTML=`<i aria-hidden="true" style="background-position:${familySpritePos(doc.family)}"></i>${doc.pages.length>1?`<span class="count">${doc.pages.length}</span>`:""}`;
 
   button.addEventListener("click",()=>{
-    if(doc.document_id){
-      window.open(citationUrl(doc.document_id,doc.pages[0]||1),"_blank","noopener");
+    const target=isSyntheticInstinctDocument(doc.document_id)
+      ? evidenceLinkTarget(doc.document_id,doc.pages[0]||1,doc.source_uri)
+      : (doc.document_id && !isDeferredDiskUrl(doc.source_uri) ? citationUrl(doc.document_id,doc.pages[0]||1) : "");
+    if(target){
+      if(isSyntheticInstinctDocument(doc.document_id)&&isInstinctUrl(target)){
+        window.location.href=target;
+      }else{
+        window.open(target,"_blank","noopener");
+      }
     }
   });
   button.addEventListener("mouseenter",()=>showSourcePopover(button,doc,terms));
@@ -1126,6 +1311,7 @@ function appendTurn(turn){
   state.turns.push(turn);
   persistCurrentConversation();
   const transcript=$("transcript");
+  if(!transcript)return;
   if(transcript.querySelector(".empty"))transcript.replaceChildren();
 
   transcript.appendChild(renderTurn(turn));
@@ -1190,9 +1376,6 @@ async function submitQuestion(){
     }else{
       setCatalogNotice("");
     }
-
-    $("question").value="";
-    autoResize($("question"));
     state.firstAnswerSubmitted=true;
     updateQuestionPrompt();
     const elapsedSeconds=Number(data.elapsed_seconds);
@@ -1203,6 +1386,9 @@ async function submitQuestion(){
   }catch(error){
     setAskStatus(`Unable to answer: ${error.message}`);
   }finally{
+    $("question").value="";
+    $("question").defaultValue="";
+    autoResize($("question"));
     state.loading=false;
     updateAsk();
   }
@@ -1299,6 +1485,10 @@ $("pet-input").addEventListener("focus",()=>{
 });
 
 $("question").addEventListener("input",event=>{
+  if(!state.client||!state.pet){
+    event.target.value="";
+    return;
+  }
   autoResize(event.target);
   updateAsk();
 });
@@ -1315,11 +1505,17 @@ $("question").addEventListener("keydown",event=>{
     updateAsk();
   }else if(event.key==="Enter"&&!event.shiftKey&&!event.ctrlKey){
     event.preventDefault();
+    playAskSound();
     submitQuestion();
   }
 });
 
-$("ask").addEventListener("click",submitQuestion);
+$("ask").addEventListener("click",()=>{
+  playAskSound();
+  submitQuestion();
+});
+$("dictate").addEventListener("click",beginDictation);
+$("sound-test").addEventListener("click",playAskSound);
 
 document.addEventListener("keydown",event=>{
   if(event.key==="Escape"){
