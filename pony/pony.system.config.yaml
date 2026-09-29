@@ -1,7 +1,7 @@
-project_name: agenic-pony-system
-project_root: /home/ggb66/dev/agenic-pony-system
-branch: main
-launcher_prefix: agenic-pony-system Pony
-agenic_system_root: /home/ggb66/.local/share/agenic-pony-system/sources/https-github.com-ggb667-agenic-pony-system.git-main
+project_name: rd
+project_root: /home/ggb66/dev/EVH/pony/worktrees/rd
+branch: pony/rd/main
+launcher_prefix: rd Pony
+agenic_system_root: /home/ggb66/dev/agenic-pony-system
 agenic_system_repo: https://github.com/ggb667/agenic-pony-system.git
 agenic_system_ref: main
